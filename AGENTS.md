@@ -20,6 +20,8 @@ It is intentionally not yet connected to Pixelview accounts or remote control se
 
 Update this file in every commit that changes Pixelview Desktop’s delivered features, verification status, or known limitations. Keep the **Current first draft** section accurate: state what has been added, what has been verified, and what remains intentionally out of scope. Do not present planned Pixelview backend, authentication, or remote-control work as implemented.
 
+This is a separate Pixelview fork. Never open a pull request, push a branch, or target work against the original OBS Studio repository (`obsproject/obs-studio`). Pull requests, if used, must remain within the Pixelview repository and use Pixelview-owned branches.
+
 ## Upstream and licensing
 
 This is a fork of OBS Studio and remains an OBS-derived GPL project. Preserve upstream notices, licensing information, and the source/build materials required for corresponding-source distribution. Product-specific changes should remain clearly documented and should not remove upstream attribution.
