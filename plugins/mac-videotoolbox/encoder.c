@@ -11,6 +11,7 @@
 #include <util/apple/cfstring-utils.h>
 
 #include <assert.h>
+#include "vt-compat.h"
 
 #define VT_LOG(level, format, ...) blog(level, "[VideoToolbox encoder]: " format, ##__VA_ARGS__)
 #define VT_LOG_ENCODER(encoder, codec_type, level, format, ...)                        \
@@ -577,11 +578,12 @@ static OSStatus create_encoder(struct vt_encoder *enc)
 			return code;
 		}
 
-		if (__builtin_available(macOS 15.0, *)) {
+		CFStringRef spatial_aq_key = vt_spatial_aq_key();
+		if (spatial_aq_key) {
 			int spatial_aq = enc->spatial_aq ? kVTQPModulationLevel_Default : kVTQPModulationLevel_Disable;
 			CFNumberRef spatialAQ = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &spatial_aq);
 
-			code = VTSessionSetProperty(s, kVTCompressionPropertyKey_SpatialAdaptiveQPLevel, spatialAQ);
+			code = VTSessionSetProperty(s, spatial_aq_key, spatialAQ);
 
 			if (code != noErr) {
 				log_osstatus(LOG_WARNING, enc,
@@ -1293,7 +1295,7 @@ static obs_properties_t *vt_properties_h26x(void *data __unused, void *type_data
 
 	obs_properties_add_bool(props, "bframes", obs_module_text("UseBFrames"));
 
-	if (__builtin_available(macOS 15.0, *)) {
+	if (vt_spatial_aq_key()) {
 		p = obs_properties_add_list(props, "spatial_aq_mode", obs_module_text("SpatialAQ"), OBS_COMBO_TYPE_LIST,
 					    OBS_COMBO_FORMAT_INT);
 		obs_property_list_add_int(p, obs_module_text("SpatialAQ.Auto"), AQ_AUTO);

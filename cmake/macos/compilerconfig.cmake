@@ -23,6 +23,12 @@ endif()
 function(check_sdk_requirements)
   set(obs_macos_minimum_sdk 26.5) # Keep in sync with Xcode
   set(obs_macos_minimum_xcode 26.5) # Keep in sync with SDK
+  option(PIXELVIEW_LEGACY_TOOLCHAIN "Experimental local Pixelview build using Xcode 15.3 / SDK 14.4" OFF)
+  if(PIXELVIEW_LEGACY_TOOLCHAIN)
+    set(obs_macos_minimum_sdk 14.4)
+    set(obs_macos_minimum_xcode 15.3)
+    message(WARNING "Pixelview experimental legacy toolchain: Metal renderer disabled; not an upstream supported build.")
+  endif()
   execute_process(
     COMMAND xcrun --sdk macosx --show-sdk-platform-version
     OUTPUT_VARIABLE obs_macos_current_sdk

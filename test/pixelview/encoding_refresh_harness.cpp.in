@@ -1,0 +1,59 @@
+// Execute the production profile synchronization block without a window system.
+#include <cassert>
+#include <string>
+#include <vector>
+struct QString : std::string {
+ using std::string::string;
+ static QString fromUtf8(const char *s) { return QString(s); }
+ QString toString() const { return *this; }
+};
+struct View { bool visible = false; bool isVisible() const { return visible; } };
+struct Combo {
+ std::vector<std::pair<QString,QString>> entries;
+ View popup;
+ bool focus = false;
+ int current = -1, mutations = 0;
+ View *view() { return &popup; }
+ bool hasFocus() const { return focus; }
+ int count() const { return (int)entries.size(); }
+ void clear() { ++mutations; entries.clear(); current = -1; }
+ void addItem(const QString &name, const QString &value) { ++mutations; entries.emplace_back(name,value); }
+ QString itemText(int i) const { return entries.at(i).first; }
+ QString itemData(int i) const { return entries.at(i).second; }
+ int findData(const QString &s) const { for (int i=0; i<count(); ++i) if (entries[i].second == s) return i; return -1; }
+ int currentIndex() const { return current; }
+ void setCurrentIndex(int i) { ++mutations; current = i; }
+ void setEnabled(bool) {}
+};
+constexpr int OBS_PROPERTY_LIST = 1, OBS_COMBO_FORMAT_STRING = 1;
+struct Property { std::vector<std::pair<QString,QString>> entries; };
+Property *obs_properties_get(Property *p, const char *) { return p; }
+int obs_property_get_type(Property *) { return OBS_PROPERTY_LIST; }
+int obs_property_list_format(Property *) { return OBS_COMBO_FORMAT_STRING; }
+size_t obs_property_list_item_count(Property *p) { return p->entries.size(); }
+bool obs_property_list_item_disabled(Property *, size_t) { return false; }
+const char *obs_property_list_item_name(Property *p, size_t i) { return p->entries[i].first.c_str(); }
+const char *obs_property_list_item_string(Property *p, size_t i) { return p->entries[i].second.c_str(); }
+const char *obs_data_get_string(const char *d, const char *) { return d; }
+void refresh(Combo *pixelviewProfile, Property *props, const char *data, bool idle) {
+/* PRODUCTION_REFRESH */
+}
+int main() {
+ Combo combo; combo.entries = {{"Main","main"},{"Main 10","main10"}}; combo.current = 1;
+ Property props{{{"Main","main"},{"Main 10","main10"},{"Main 422 10","main42210"}}};
+ combo.popup.visible = true;
+ for (int i=0; i<3; ++i) refresh(&combo,&props,"main",true);
+ assert(combo.mutations == 0 && combo.current == 1 && combo.count() == 2);
+ combo.popup.visible = false; combo.focus = true;
+ refresh(&combo,&props,"main",true);
+ assert(combo.mutations == 0 && combo.current == 1);
+ combo.focus = false;
+ refresh(&combo,&props,"main",true);
+ assert(combo.current == 0 && combo.count() == 3);
+ combo.mutations = 0;
+ for (int i=0; i<3; ++i) refresh(&combo,&props,"main",true);
+ assert(combo.mutations == 0);
+ props.entries[1].first = "Updated name";
+ refresh(&combo,&props,"main10",true);
+ assert(combo.itemText(1) == "Updated name" && combo.current == 1);
+}

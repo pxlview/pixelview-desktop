@@ -643,20 +643,8 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 			}
 		});
 
-#ifdef __APPLE__
-		MacPermissionStatus audio_permission = CheckPermission(kAudioDeviceAccess);
-		MacPermissionStatus video_permission = CheckPermission(kVideoDeviceAccess);
-		MacPermissionStatus input_monitoring_permission = CheckPermission(kInputMonitoring);
-		MacPermissionStatus screen_permission = CheckPermission(kScreenCapture);
-
-		int permissionsDialogLastShown =
-			config_get_int(App()->GetAppConfig(), "General", "MacOSPermissionsDialogLastShown");
-		if (permissionsDialogLastShown < MACOS_PERMISSIONS_DIALOG_VERSION) {
-			OBSPermissions check(nullptr, screen_permission, video_permission, audio_permission,
-					     input_monitoring_permission);
-			check.exec();
-		}
-#endif
+		// Pixelview only captures via DeckLink. Do not request unrelated screen,
+		// webcam, microphone or global input-monitoring permissions at launch.
 
 #ifdef _WIN32
 		if (IsRunningOnWine()) {

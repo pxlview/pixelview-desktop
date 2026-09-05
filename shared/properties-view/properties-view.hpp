@@ -141,6 +141,8 @@ signals:
 	void PropertiesResized();
 	void Changed();
 	void PropertiesRefreshed();
+	// Instance-local presentation policy, after native callbacks and before rendering.
+	void PropertiesAboutToRefresh(obs_properties_t *properties);
 
 public:
 	OBSPropertiesView(OBSData settings, obs_object_t *obj, PropertiesReloadCallback reloadCallback,

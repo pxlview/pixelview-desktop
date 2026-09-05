@@ -1,0 +1,157 @@
+// The production SavePixelviewEncoding body is inserted below. OBS/Qt I/O is fault-injected.
+#include "frontend/utility/PixelviewEncoding.hpp"
+#include <cassert>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+using QString = std::string;
+#define QStringLiteral(x) std::string(x)
+#define emit
+constexpr int OBS_VIDEO_SUCCESS = 0, CONFIG_SUCCESS = 0, OBS_SCALE_DISABLE = 0;
+using obs_scale_type = int;
+unsigned scaledX = 999, scaledY = 999;
+int scaleType = -1;
+void obs_encoder_set_scaled_size(int, unsigned x, unsigned y) { scaledX = x; scaledY = y; }
+void obs_encoder_set_gpu_scale_type(int, obs_scale_type t) { scaleType = t; }
+std::string warning;
+struct QMessageBox { static void warning(void *, const QString &, const QString &s) { ::warning = s; } };
+using Config = std::map<std::string, std::string>;
+Config config, disk;
+std::string key(const char *s, const char *k) { return std::string(s) + "/" + k; }
+const char *config_get_string(Config *c, const char *s, const char *k) { static const std::string empty; auto it = c->find(key(s,k)); return it == c->end() ? empty.c_str() : it->second.c_str(); }
+bool config_has_user_value(Config *c, const char *s, const char *k) { return c->count(key(s,k)); }
+int config_get_int(Config *c, const char *s, const char *k) { return std::stoi(config_get_string(c,s,k)); }
+void config_set_string(Config *c, const char *s, const char *k, const char *v) { (*c)[key(s,k)] = v; }
+void config_remove_value(Config *c, const char *s, const char *k) { c->erase(key(s,k)); }
+bool videoActive = false, jsonFail = false, configFail = false, constructFail = false, priorJson = true;
+bool rollbackJsonFail = false;
+bool partialJsonFail = false;
+int jsonWrites = 0, videoResets = 0, configWrites = 0, constructions = 0, resetOutputs = 0;
+std::string liveFormat = "NV12";
+std::vector<int> resetResults;
+int config_save_safe(Config *c, const char *, const char *) {
+ ++configWrites; if (configFail) return -1; disk = *c; return CONFIG_SUCCESS;
+}
+bool obs_video_active() { return videoActive; }
+struct obs_data_t { std::string profile; std::map<std::string, std::string> values{}; };
+void obs_data_set_bool(obs_data_t *d, const char *k, bool v) { d->values[k] = v ? "true" : "false"; }
+void obs_data_set_int(obs_data_t *d, const char *k, int v) { d->values[k] = std::to_string(v); }
+void obs_data_set_string(obs_data_t *d, const char *k, const char *v) { d->values[k] = v; }
+obs_data_t previousData{"previous"};
+using OBSDataAutoRelease = obs_data_t *;
+using OBSProperties = int *;
+int props;
+OBSProperties obs_get_encoder_properties(const char *) { return &props; }
+void obs_properties_apply_settings(OBSProperties, obs_data_t *) {}
+const char *obs_data_get_string(obs_data_t *d, const char *k) { return std::string(k) == "profile" ? d->profile.c_str() : d->values[k].c_str(); }
+/* BFRAME_POLICY */
+const char *obs_get_encoder_codec(const char *) { return "hevc"; }
+bool PixelviewListValue(OBSProperties, const char *, const char *) { return true; }
+std::string PixelviewOpusEncoder() { return "ffmpeg_opus"; }
+obs_data_t *obs_data_create_from_json_file_safe(const char *, const char *) { return priorJson ? &previousData : nullptr; }
+bool obs_data_save_json_safe(obs_data_t *d, const char *path, const char *, const char *) {
+ ++jsonWrites;
+ if (partialJsonFail) {
+  if (d != &previousData) {
+   std::filesystem::rename(path, std::string(path) + ".bak");
+   assert(!std::filesystem::exists(path));
+   return false; // Native writer moved the old file, but failed to install the new one.
+  }
+  if (rollbackJsonFail) return false;
+  std::ofstream restored(path); restored << d->profile;
+  return restored.good();
+ }
+ return d == &previousData ? !rollbackJsonFail : !jsonFail;
+}
+struct Handler { bool active = false; bool replayBuffer = false; bool Active() const { return active; } };
+using BasicOutputHandler = Handler;
+struct Tray { void setEnabled(bool) {} };
+struct OBSBasic {
+ Config *activeConfiguration = &config;
+ std::unique_ptr<Handler> outputHandler = std::make_unique<Handler>();
+ std::shared_future<void> setupStreamingGuard;
+ bool pixelviewStreamingBusy = false;
+ /* PRODUCTION_BUSY */
+ Tray *sysTrayReplayBuffer = nullptr;
+ struct Profile { std::filesystem::path path; } profile;
+ Profile &GetCurrentProfile() { return profile; }
+ ::Config *Config() { return activeConfiguration; }
+ void CheckNativeRescale() {
+  OBSBasic *main = this; int videoStreaming = 0;
+  /* PRODUCTION_RESCALE */
+ }
+ int ResetVideo() {
+  int result = videoResets < (int)resetResults.size() ? resetResults[videoResets] : OBS_VIDEO_SUCCESS;
+  ++videoResets; if (result == OBS_VIDEO_SUCCESS) liveFormat = config["Video/ColorFormat"]; return result;
+ }
+ void ResetOutputs() {
+  ++resetOutputs; outputHandler.reset();
+  if (constructFail) throw "injected factory failure";
+  outputHandler = std::make_unique<Handler>();
+ }
+ void ReplayBufEnabled(bool) {}
+ void UpdateIsRecordingPausable() {}
+ bool SavePixelviewEncoding(const char *, obs_data_t *);
+};
+Handler *CreateAdvancedOutputHandler(OBSBasic *) {
+ ++constructions; if (constructFail) throw "injected factory failure"; return new Handler;
+}
+/* PRODUCTION_SAVE */
+int main(int argc, char **argv) {
+ assert(argc == 3);
+ std::string test = argv[1];
+ config = {{"Video/ColorFormat","NV12"}, {"Video/ColorRange","Partial"},
+           {"AdvOut/Encoder","obs_x264"}, {"AdvOut/RescaleFilter","2"}, {"AdvOut/RescaleRes","640x360"}};
+ disk = config; const auto original = config;
+ OBSBasic app; app.profile.path = argv[2];
+ auto *oldHandler = app.outputHandler.get();
+ obs_data_t settings{"main10"};
+ if (test == "rescale-main") settings.profile = "main";
+ if (test == "rescale-main42210") settings.profile = "main42210";
+ std::promise<void> pending;
+ if (test == "pending") app.setupStreamingGuard = pending.get_future().share();
+ if (test == "lifecycle") app.pixelviewStreamingBusy = true;
+ if (test == "json-video-rollback") { jsonFail = true; resetResults = {0,-1}; }
+ if (test == "config-delete-rollback") { configFail = true; priorJson = false; }
+ if (test == "construct") constructFail = true;
+ if (test == "construct-rollback") { constructFail = true; rollbackJsonFail = true; resetResults = {0,-1}; }
+ if (test == "config") configFail = true;
+ if (test == "json-partial" || test == "json-partial-rollback") {
+  partialJsonFail = true;
+  rollbackJsonFail = test == "json-partial-rollback";
+  std::ofstream(app.profile.path / "streamEncoder.json") << previousData.profile;
+ }
+ bool success = app.SavePixelviewEncoding("com.apple.videotoolbox.videoencoder.ave.hevc", &settings);
+ if (test.find("rescale") == 0) {
+  assert(success); assert(config["AdvOut/RescaleFilter"] == std::to_string(OBS_SCALE_DISABLE));
+  app.CheckNativeRescale(); assert(scaledX == 0 && scaledY == 0 && scaleType == OBS_SCALE_DISABLE);
+  assert(disk == config); assert(app.outputHandler && app.outputHandler.get() != oldHandler);
+ } else {
+  assert(!success); assert(app.outputHandler.get() == oldHandler);
+  for (const auto &entry : original) assert(config.at(entry.first) == entry.second);
+  assert(disk == original);
+  if (partialJsonFail) {
+   assert(config == original && liveFormat == "NV12");
+   assert(configWrites == 0 && constructions == 0 && resetOutputs == 0);
+   if (rollbackJsonFail) {
+    assert(!std::filesystem::exists(app.profile.path / "streamEncoder.json"));
+    assert(warning.find("rollback failed") != std::string::npos);
+   } else {
+    std::ifstream restored(app.profile.path / "streamEncoder.json");
+    std::string value; restored >> value;
+    assert(value == previousData.profile);
+    assert(warning.find("preferences were not applied") != std::string::npos);
+   }
+   assert(jsonWrites == 2);
+  }
+  if (test == "pending" || test == "lifecycle") assert(jsonWrites == 0 && videoResets == 0 && configWrites == 0 && constructions == 0);
+  if (test == "json-video-rollback" || test == "config-delete-rollback" || test == "construct-rollback")
+   assert(warning.find("rollback failed") != std::string::npos);
+  if (test == "construct" || test == "config") { assert(liveFormat == "NV12"); assert(jsonWrites == 2); }
+ }
+}

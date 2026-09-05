@@ -57,6 +57,19 @@
 #include <qt-wrappers.hpp>
 
 #include <QActionGroup>
+#include <QToolBar>
+#include <QSpinBox>
+#include <QDialogButtonBox>
+#include <QDialog>
+#include <QFrame>
+#include <QFile>
+#include <QPlainTextEdit>
+#include <QVBoxLayout>
+#include <properties-view.hpp>
+#include <utility/PixelviewEncoding.hpp>
+#include <QLabel>
+#include <QPushButton>
+#include <QMenuBar>
 #include <QThread>
 #include <QWidgetAction>
 
@@ -75,6 +88,9 @@
 #include "moc_OBSBasic.cpp"
 
 using namespace std;
+
+#include "OBSBasic_PixelviewEncoding.inc"
+#include "OBSBasic_PixelviewAudio.inc"
 
 extern bool portable_mode;
 extern bool disable_3p_plugins;
@@ -1283,7 +1299,6 @@ void OBSBasic::OBSInit()
 	disableColorSpaceConversion(this);
 #endif
 
-	bool has_last_version = config_has_user_value(App()->GetAppConfig(), "General", "LastVersion");
 	bool first_run = config_get_bool(App()->GetUserConfig(), "General", "FirstRun");
 
 	if (!first_run) {
@@ -1291,9 +1306,7 @@ void OBSBasic::OBSInit()
 		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	}
 
-	if (!first_run && !has_last_version && !Active()) {
-		QMetaObject::invokeMethod(this, &OBSBasic::on_autoConfigure_triggered, Qt::QueuedConnection);
-	}
+	// Pixelview does not configure streaming or recording on first launch.
 
 #if (defined(_WIN32) || defined(__APPLE__)) && (OBS_RELEASE_CANDIDATE > 0 || OBS_BETA > 0)
 	/* Automatically set branch to "beta" the first time a pre-release build is run. */
@@ -1303,7 +1316,7 @@ void OBSBasic::OBSInit()
 		config_save_safe(App()->GetAppConfig(), "tmp", nullptr);
 	}
 #endif
-	TimedCheckForUpdates();
+	// A fork must not offer upstream OBS replacement updates.
 
 	emit userSettingChanged("BasicWindow", "VerticalVolumeControl");
 
@@ -1367,6 +1380,7 @@ void OBSBasic::OBSInit()
 	}
 
 	UpdatePreviewProgramIndicators();
+	InitPixelview();
 	OnFirstLoad();
 
 	if (!hideWindowOnStart) {
@@ -1391,34 +1405,526 @@ void OBSBasic::OBSInit()
 	}
 }
 
+// Pixelview modification: dedicated offline license viewer, 2026-09-05.
+void OBSBasic::ShowPixelviewLicense()
+{
+	auto *dialog = new QDialog(this);
+	dialog->setAttribute(Qt::WA_DeleteOnClose);
+	dialog->setWindowTitle(QStringLiteral("Pixelview — License information"));
+	dialog->resize(720, 640);
+	auto *layout = new QVBoxLayout(dialog);
+	auto *notice = new QLabel(QStringLiteral(
+		"Pixelview is a modified distribution based on OBS Studio. "
+		"OBS Studio is copyright its respective OBS Project contributors; "
+		"Pixelview modifications are by the Pixelview contributors.\n\n"
+		"This program is free software under GNU GPL version 2 or, at your option, "
+		"any later version (GPL-2.0-or-later), subject to the included component licenses. "
+		"It is provided WITHOUT ANY WARRANTY, including implied warranties of "
+		"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE, to the extent permitted by law.\n\n"
+		"Corresponding source must be made available under the GPL when this program is distributed. "
+		"See the included COPYING and AUTHORS. Third-party components retain their applicable licenses. "
+		"Pixelview is not an official OBS Project release."), dialog);
+	notice->setTextFormat(Qt::PlainText);
+	notice->setWordWrap(true);
+	notice->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+	layout->addWidget(notice);
+
+	auto *text = new QPlainTextEdit(dialog);
+	text->setAccessibleName(QStringLiteral("GNU General Public License"));
+	text->setReadOnly(true);
+	QString licenseText = QStringLiteral(
+		"The bundled license/COPYING could not be loaded. "
+		"Please consult COPYING supplied with this distribution.");
+	std::string path;
+	if (GetDataFilePath("license/COPYING", path)) {
+		QFile licenseFile(QString::fromStdString(path));
+		if (licenseFile.open(QIODevice::ReadOnly)) {
+			const QByteArray contents = licenseFile.readAll();
+			if (licenseFile.error() == QFile::NoError && !contents.isEmpty())
+				licenseText = QString::fromUtf8(contents);
+		}
+	}
+	text->setPlainText(licenseText);
+	layout->addWidget(text, 1);
+
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+	layout->addWidget(buttons);
+	dialog->show();
+}
+
+void OBSBasic::InitPixelview()
+{
+	SetPreviewProgramMode(false);
+	EnablePreviewDisplay(true);
+	ui->preview->SetLocked(false);
+	ui->preview->SetFixedScaling(false);
+	ui->preview->setContextMenuPolicy(Qt::PreventContextMenu);
+	setContextMenuPolicy(Qt::PreventContextMenu);
+	setAcceptDrops(false);
+	config_set_bool(App()->GetUserConfig(), "BasicWindow", "ShowContextToolbars", false);
+	ui->contextContainer->hide();
+	ui->statusbar->hide();
+	for (auto *dock : findChildren<QDockWidget *>()) {
+		dock->hide();
+		dock->toggleViewAction()->setEnabled(false);
+	}
+	for (auto *action : menuBar()->actions()) {
+		action->setVisible(false);
+		action->setEnabled(false);
+	}
+	menuBar()->clear();
+	// macOS already supplies the native application menu; avoid a duplicate.
+#ifdef __APPLE__
+	auto *appMenu = menuBar()->addMenu(QStringLiteral("Help"));
+#else
+	auto *appMenu = menuBar()->addMenu(QStringLiteral("Pixelview Desktop"));
+#endif
+	auto *license = appMenu->addAction(QStringLiteral("License information…"));
+	license->setMenuRole(QAction::NoRole);
+	connect(license, &QAction::triggered, this, &OBSBasic::ShowPixelviewLicense);
+	appMenu->addSeparator();
+	auto *quit = appMenu->addAction(QStringLiteral("Quit Pixelview Desktop"));
+	quit->setMenuRole(QAction::QuitRole);
+	quit->setShortcut(QKeySequence::Quit);
+	connect(quit, &QAction::triggered, this, &OBSBasic::close);
+	SystemTray(false);
+
+	auto *bar = new QToolBar(QStringLiteral("Capture"), this);
+	bar->setObjectName(QStringLiteral("pixelviewCaptureBar"));
+	bar->setMovable(false);
+	bar->setFloatable(false);
+	bar->setContextMenuPolicy(Qt::PreventContextMenu);
+	bar->setContentsMargins(0, 0, 0, 0);
+	bar->setOrientation(Qt::Vertical);
+	bar->setFixedWidth(340);
+	addToolBar(Qt::LeftToolBarArea, bar);
+	// One expanding widget: QToolBar must not distribute height between actions.
+	auto *sidebar = new QWidget(bar);
+	sidebar->setObjectName(QStringLiteral("pixelviewSidebar"));
+	sidebar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	auto *sidebarLayout = new QVBoxLayout(sidebar);
+	sidebarLayout->setContentsMargins(16, 16, 16, 16);
+	sidebarLayout->setSpacing(12);
+	sidebar->setStyleSheet(QStringLiteral(
+		"QPushButton { text-align: left; padding-left: 12px; padding-right: 12px; }"
+		"QComboBox, QSpinBox { padding-left: 10px; }"));
+	bar->addWidget(sidebar);
+	auto *brandRow = new QHBoxLayout;
+	brandRow->setSpacing(8);
+	auto *brand = new QLabel(sidebar);
+	brand->setAccessibleName(QStringLiteral("Pixelview"));
+	brand->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	const QPixmap wordmark(QStringLiteral(":/res/images/pixelview-wordmark.png"));
+	if (!wordmark.isNull()) {
+		const auto ratio = devicePixelRatioF();
+		auto scaled = wordmark.scaled(qRound(200 * ratio), qRound(25 * ratio), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		scaled.setDevicePixelRatio(ratio);
+		brand->setPixmap(scaled);
+	} else {
+		brand->setText(QStringLiteral("Pixelview"));
+		brand->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: 600;"));
+	}
+	brandRow->addWidget(brand, 0, Qt::AlignLeft | Qt::AlignVCenter);
+	auto *desktop = new QLabel(QStringLiteral("Desktop"), sidebar);
+	desktop->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	brandRow->addWidget(desktop, 0, Qt::AlignLeft | Qt::AlignVCenter);
+	brandRow->addStretch();
+	sidebarLayout->addLayout(brandRow);
+	sidebarLayout->addSpacing(8);
+	pixelviewDevices = new QComboBox(sidebar);
+	pixelviewDevices->setObjectName(QStringLiteral("pixelviewDevices"));
+	pixelviewDevices->setAccessibleName(QStringLiteral("Blackmagic device"));
+	pixelviewDevices->setToolTip(QStringLiteral("Blackmagic capture device. Devices are detected automatically."));
+	pixelviewDevices->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	pixelviewDevices->setMinimumContentsLength(12);
+	sidebarLayout->addWidget(pixelviewDevices);
+	auto *deviceActions = new QHBoxLayout;
+	deviceActions->setSpacing(8);
+	pixelviewSettings = new QPushButton(QStringLiteral("Settings…"), sidebar);
+	pixelviewSettings->setAccessibleName(QStringLiteral("Device settings…"));
+	pixelviewSettings->setToolTip(QStringLiteral("Native Blackmagic device settings"));
+	deviceActions->addWidget(pixelviewSettings);
+	pixelviewFit = new QPushButton(QStringLiteral("Fit"), sidebar);
+	pixelviewFit->setToolTip(QStringLiteral("Reset position, scale, rotation and crop; fit inside 1920 × 1080"));
+	deviceActions->addWidget(pixelviewFit);
+	deviceActions->addStretch();
+	sidebarLayout->addLayout(deviceActions);
+	pixelviewFPS = new QComboBox(sidebar);
+	pixelviewFPS->setObjectName(QStringLiteral("pixelviewFPS"));
+	pixelviewFPS->setAccessibleName(QStringLiteral("FPS"));
+	pixelviewFPS->setToolTip(QStringLiteral("Preview/output frame rate; applies immediately. Unavailable while outputs are active. Does not change the device input mode."));
+	for (const auto &rate : pixelview::FrameRates)
+		pixelviewFPS->addItem(QString::fromLatin1(rate.label) + QStringLiteral(" fps"));
+	RefreshPixelviewFPS();
+	connect(pixelviewFPS, &QComboBox::activated, this, &OBSBasic::SelectPixelviewFPS);
+	// ResetVideo established HD at startup; persist that geometry without replacing the saved FPS.
+	if (config_save_safe(activeConfiguration, "tmp", nullptr) != CONFIG_SUCCESS)
+		QMessageBox::warning(this, QStringLiteral("Pixelview"),
+			QStringLiteral("Could not save the 1920 × 1080 video configuration. Check profile folder permissions."));
+
+	auto *footer = new QToolBar(QStringLiteral("Capture status"), this);
+	footer->setObjectName(QStringLiteral("pixelviewStatusBar"));
+	footer->setMovable(false);
+	footer->setFloatable(false);
+	footer->setContextMenuPolicy(Qt::PreventContextMenu);
+	addToolBar(Qt::BottomToolBarArea, footer);
+	pixelviewStatus = new QLabel(QStringLiteral("Choose a Blackmagic device"), footer);
+	pixelviewStatus->setObjectName(QStringLiteral("pixelviewStatus"));
+	pixelviewStatus->setWordWrap(true);
+	pixelviewStatus->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	pixelviewStatus->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	pixelviewStatus->setContentsMargins(16, 6, 16, 6);
+	footer->addWidget(pixelviewStatus);
+	setMinimumSize(900, 600);
+	UpdateTitleBar();
+
+	connect(pixelviewDevices, &QComboBox::activated, this, &OBSBasic::SelectPixelviewDevice);
+	connect(pixelviewFit, &QPushButton::clicked, this, [this] {
+		if (PixelviewSettingsBusy()) return;
+		pixelviewFitPolicy.requestReset();
+		FitPixelviewCapture();
+	});
+	connect(pixelviewSettings, &QPushButton::clicked, this, [this] {
+		if (PixelviewSettingsBusy()) return;
+		OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+		if (source) {
+			// Upstream dialog exposes every native property and runs all modified callbacks.
+			CreatePropertiesWindow(source);
+			if (properties) {
+				properties->setStyleSheet(QStringLiteral("QPushButton { text-align: left; }"));
+				for (auto *view : properties->findChildren<OBSPropertiesView *>())
+					PixelviewAlignProperties(view);
+			}
+		}
+	});
+	InitPixelviewAudio(ui->previewContainer);
+	InitPixelviewEncoding(sidebar);
+	sidebarLayout->addStretch(1);
+	InitPixelviewStreaming(sidebar);
+	for (auto *control : sidebar->findChildren<QWidget *>()) {
+		if (qobject_cast<QComboBox *>(control) || qobject_cast<QSpinBox *>(control) || qobject_cast<QPushButton *>(control)) {
+			control->ensurePolished();
+			control->setFixedHeight(36);
+		}
+	}
+	pixelviewRefreshTimer = new QTimer(this);
+	connect(pixelviewRefreshTimer, &QTimer::timeout, this, &OBSBasic::RefreshPixelviewDevices);
+	pixelviewRefreshTimer->start(2000);
+	if (auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture")) {
+		obs_sceneitem_select(item, true);
+		obs_sceneitem_set_locked(item, false);
+	}
+	RefreshPixelviewDevices();
+}
+
+bool OBSBasic::PixelviewSettingsBusy() const
+{
+	// The signal closes the gap before SetupStreaming assigns its future and
+	// keeps configuration locked through native connecting/stopping transitions.
+	return pixelviewStreamingBusy ||
+	       pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard);
+}
+
+void OBSBasic::InitPixelviewStreaming(QWidget *sidebar)
+{
+	// Configuration lock only: the native transport owns its enabled state.
+	auto lockSettings = [this] {
+		pixelviewStreamingBusy = true;
+		RefreshPixelviewDevices();
+	};
+	connect(this, &OBSBasic::StreamingPreparing, this, lockSettings);
+	connect(this, &OBSBasic::StreamingStarting, this, lockSettings);
+	connect(this, &OBSBasic::StreamingStarted, this, lockSettings);
+	connect(this, &OBSBasic::StreamingStopping, this, lockSettings);
+	connect(this, &OBSBasic::StreamingStopped, this, [this](bool withDelay) {
+		pixelviewStreamingBusy = withDelay;
+		RefreshPixelviewDevices();
+		// Native completion can emit before its future/output state settles.
+		QTimer::singleShot(0, this, &OBSBasic::RefreshPixelviewDevices);
+	});
+	// Move the actual button, not a copy: OBSBasicControls retains its Ui pointer,
+	// native signal connections, preparing/connecting/stopping state and delay menu.
+	// The hidden controls dock stays alive until main-window destruction.
+	auto *separator = new QFrame(sidebar);
+	separator->setObjectName(QStringLiteral("pixelviewTransportSeparator"));
+	separator->setFrameShape(QFrame::HLine);
+	sidebar->layout()->addWidget(separator);
+	if (auto *streamButton = controlsDock->findChild<QPushButton *>(QStringLiteral("streamButton"))) {
+		sidebar->layout()->addWidget(streamButton);
+		streamButton->show();
+	}
+
+	// Keep OBSBasicStatusBar parented to OBSBasic: its telemetry and reconnect
+	// handlers cast parent() to OBSBasic. Reuse its timers/counters and messages.
+	ui->statusbar->setSizeGripEnabled(false);
+	if (auto *recordFrame = ui->statusbar->findChild<QWidget *>(QStringLiteral("recordFrame")))
+		recordFrame->hide();
+	auto *showStats = new QPushButton(QStringLiteral("Show stats"), ui->statusbar);
+	showStats->setObjectName(QStringLiteral("pixelviewShowStats"));
+	showStats->setToolTip(QStringLiteral("Native OBS statistics: network-dropped frames, rendering-missed frames and encoding-skipped frames"));
+	connect(showStats, &QPushButton::clicked, this, &OBSBasic::on_stats_triggered);
+	ui->statusbar->addPermanentWidget(showStats);
+	ui->statusbar->show();
+}
+
+void OBSBasic::RefreshPixelviewFPS()
+{
+	if (isClosing() || !pixelviewFPS)
+		return;
+	const QSignalBlocker blocker(pixelviewFPS);
+	uint32_t num, den;
+	GetConfigFPS(num, den);
+	int index = pixelview::frameRateIndex(num, den);
+	// Preserve valid pre-existing custom rates without rounding or silently selecting 30.
+	if (index < 0) {
+		const QString label = QStringLiteral("%1/%2 fps").arg(num).arg(den);
+		if (pixelviewFPS->count() == static_cast<int>(pixelview::FrameRates.size()))
+			pixelviewFPS->addItem(label);
+		else
+			pixelviewFPS->setItemText(static_cast<int>(pixelview::FrameRates.size()), label);
+		index = static_cast<int>(pixelview::FrameRates.size());
+	} else if (pixelviewFPS->count() > static_cast<int>(pixelview::FrameRates.size())) {
+		pixelviewFPS->removeItem(static_cast<int>(pixelview::FrameRates.size()));
+	}
+	pixelviewFPS->setCurrentIndex(index);
+	pixelviewFPS->setEnabled(!pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard));
+	if (PixelviewSettingsBusy()) pixelviewFPS->setEnabled(false);
+}
+
+void OBSBasic::SelectPixelviewFPS(int index)
+{
+	if (PixelviewSettingsBusy()) { RefreshPixelviewFPS(); return; }
+	if (isClosing() || index < 0 || index >= static_cast<int>(pixelview::FrameRates.size()))
+		return;
+	const auto &rate = pixelview::FrameRates[index];
+	uint32_t num, den;
+	GetConfigFPS(num, den);
+	if (pixelview::frameRateIndex(num, den) == index)
+		return;
+	// Capture the exact previous config, including absence of user overrides.
+	const char *keys[] = {"FPSType", "FPSNum", "FPSDen"};
+	uint64_t oldValues[3];
+	bool hadValues[3];
+	for (size_t i = 0; i < 3; ++i) {
+		oldValues[i] = config_get_uint(activeConfiguration, "Video", keys[i]);
+		hadValues[i] = config_has_user_value(activeConfiguration, "Video", keys[i]);
+	}
+	const auto result = pixelview::changeFrameRate(
+		pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard),
+		[&] {
+			config_set_uint(activeConfiguration, "Video", "FPSType", 2);
+			config_set_uint(activeConfiguration, "Video", "FPSNum", rate.num);
+			config_set_uint(activeConfiguration, "Video", "FPSDen", rate.den);
+		},
+		[&] {
+			for (size_t i = 0; i < 3; ++i) {
+				if (hadValues[i])
+					config_set_uint(activeConfiguration, "Video", keys[i], oldValues[i]);
+				else
+					config_remove_value(activeConfiguration, "Video", keys[i]);
+			}
+		},
+		[this] { return ResetVideo() == OBS_VIDEO_SUCCESS; },
+		[this] { return config_save_safe(activeConfiguration, "tmp", nullptr) == CONFIG_SUCCESS; });
+	RefreshPixelviewFPS();
+	if (result == pixelview::FPSChangeResult::Success) {
+		blog(LOG_INFO, "Pixelview FPS changed to %u/%u (1920x1080 canvas and output)", rate.num, rate.den);
+		return;
+	}
+	QString message;
+	if (result == pixelview::FPSChangeResult::Active)
+		message = QStringLiteral("Stop all active outputs before changing FPS.");
+	else if (result == pixelview::FPSChangeResult::RollbackFailed)
+		message = QStringLiteral("FPS change failed and video could not be restored. The previous FPS configuration was restored. Restart Pixelview to recover the preview.");
+	else if (result == pixelview::FPSChangeResult::SaveFailed)
+		message = QStringLiteral("Could not save FPS. The previous frame rate was restored. Check profile folder permissions.");
+	else
+		message = QStringLiteral("Could not reset video to the selected FPS. The previous frame rate was restored.");
+	blog(LOG_WARNING, "Pixelview FPS: %s", QT_TO_UTF8(message));
+	QMessageBox::warning(this, QStringLiteral("Pixelview FPS"), message);
+}
+
+void OBSBasic::RefreshPixelviewDevices()
+{
+	RefreshPixelviewAudio();
+	RefreshPixelviewFPS();
+	RefreshPixelviewEncoding();
+	if (isClosing() || !pixelviewDevices)
+		return;
+
+	// Type properties contain the discovery list only. Applying saved settings
+	// here would insert a disabled, disconnected device into that native list.
+	OBSProperties props = obs_get_source_properties("decklink-input");
+	auto *list = props ? obs_properties_get(props, "device_hash") : nullptr;
+	std::vector<pixelview::Device> devices;
+	if (list) {
+		for (size_t i = 0; i < obs_property_list_item_count(list); ++i) {
+			const char *id = obs_property_list_item_string(list, i);
+			if (id && *id && !obs_property_list_item_disabled(list, i))
+				devices.push_back({id, obs_property_list_item_name(list, i)});
+		}
+	}
+	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : nullptr;
+	const std::string selected = settings ? obs_data_get_string(settings, "device_hash") : "";
+	const auto status = pixelview::captureStatus(list != nullptr, devices, selected);
+
+	// Do not tear down an open dropdown on every poll. Rebuild only on changes.
+	bool changed = pixelviewDevices->count() != int(devices.size()) + 1;
+	for (size_t i = 0; !changed && i < devices.size(); ++i) {
+		changed = pixelviewDevices->itemData(int(i) + 1).toString() != QString::fromStdString(devices[i].id) ||
+			  pixelviewDevices->itemText(int(i) + 1) != QString::fromStdString(devices[i].name);
+	}
+	{
+		QSignalBlocker blocker(pixelviewDevices);
+		if (changed) {
+			pixelviewDevices->clear();
+			pixelviewDevices->addItem(QStringLiteral("Choose a device…"), QString());
+			for (const auto &device : devices)
+				pixelviewDevices->addItem(QString::fromStdString(device.name), QString::fromStdString(device.id));
+		}
+		int index = pixelviewDevices->findData(QString::fromStdString(selected));
+		pixelviewDevices->setCurrentIndex(index < 0 ? 0 : index);
+	}
+	const bool busy = PixelviewSettingsBusy();
+	pixelviewDevices->setEnabled(!busy && !devices.empty() && !properties);
+	pixelviewSettings->setEnabled(!busy && source && list);
+	pixelviewFit->setEnabled(!busy && source != nullptr);
+	// Disable input, not the OBS display/render callback or saved item transforms.
+	ui->preview->setEnabled(!busy);
+	ui->previewXContainer->setEnabled(!busy);
+	ui->previewYScrollBar->setEnabled(!busy);
+	if (properties) properties->setEnabled(!busy);
+	using pixelview::CaptureStatus;
+	switch (status) {
+	case CaptureStatus::PluginUnavailable:
+		pixelviewStatus->setText(QStringLiteral("DeckLink unavailable — check the bundled plugin and Blackmagic Desktop Video, then restart Pixelview."));
+		break;
+	case CaptureStatus::NoDevices:
+		pixelviewStatus->setText(QStringLiteral("No Blackmagic input devices found. Connect a device; it will appear automatically."));
+		break;
+	case CaptureStatus::NotSelected:
+		pixelviewStatus->setText(QStringLiteral("Choose a Blackmagic input device to begin."));
+		break;
+	case CaptureStatus::Disconnected:
+		pixelviewStatus->setText(QStringLiteral("Selected device is disconnected. Reconnect it or choose another device. Preview may retain its last frame."));
+		break;
+	case CaptureStatus::AvailableUnverified:
+		pixelviewStatus->setText(QStringLiteral("Device selected • Local preview   |   1920 × 1080 • Drag handles to reframe"));
+		pixelviewStatus->setToolTip(QStringLiteral("Input signal is not verified independently. If the preview is blank or frozen, check input mode, cable and other capture apps."));
+		break;
+	}
+}
+
+void OBSBasic::SelectPixelviewDevice(int index)
+{
+	if (PixelviewSettingsBusy()) { RefreshPixelviewDevices(); return; }
+	if (index <= 0 || isClosing() || properties)
+		return;
+	const QByteArray id = pixelviewDevices->itemData(index).toString().toUtf8();
+	const QByteArray name = pixelviewDevices->itemText(index).toUtf8();
+	OBSProperties props = obs_get_source_properties("decklink-input");
+	auto *deviceList = props ? obs_properties_get(props, "device_hash") : nullptr;
+	if (!deviceList)
+		return;
+	bool found = false;
+	for (size_t i = 0; i < obs_property_list_item_count(deviceList); ++i)
+		found |= !obs_property_list_item_disabled(deviceList, i) &&
+			 id == obs_property_list_item_string(deviceList, i);
+	if (!found) {
+		RefreshPixelviewDevices(); // Device left between the refresh and the click.
+		return;
+	}
+
+	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : obs_get_source_defaults("decklink-input");
+	if (!settings)
+		settings = obs_data_create();
+	if (source && !pixelview::shouldChangeDevice(obs_data_get_string(settings, "device_hash"), id.constData()))
+		return;
+	obs_data_set_string(settings, "device_hash", id.constData());
+	obs_data_set_string(settings, "device_name", name.constData());
+	obs_properties_apply_settings(props, settings);
+	obs_property_modified(deviceList, settings);
+	// Dependent options come from the chosen hardware, not a hand-written mode table.
+	OBSDataAutoRelease defaults = obs_get_source_defaults("decklink-input");
+	for (const char *key : {"mode_id", "video_connection", "audio_connection", "channel_format"}) {
+		auto *option = obs_properties_get(props, key);
+		if (!option)
+			continue;
+		std::vector<int64_t> supported;
+		for (size_t i = 0; i < obs_property_list_item_count(option); ++i) {
+			if (!obs_property_list_item_disabled(option, i))
+				supported.push_back(obs_property_list_item_int(option, i));
+		}
+		// Prefer native stereo over the first channel entry (None) only for an unsupported layout.
+		std::optional<int64_t> preferred;
+		if (defaults && strcmp(key, "channel_format") == 0)
+			preferred = obs_data_get_int(defaults, key);
+		if (auto value = pixelview::chooseOption(obs_data_get_int(settings, key), supported, preferred)) {
+			obs_data_set_int(settings, key, *value);
+			obs_property_modified(option, settings);
+		}
+	}
+	obs_properties_apply_settings(props, settings);
+	if (!source) {
+		source = obs_source_create("decklink-input", "Pixelview Capture", settings, nullptr);
+		if (!source) {
+			pixelviewStatus->setText(QStringLiteral("Could not create the DeckLink input. Check the application log and Desktop Video installation."));
+			return;
+		}
+		auto *item = obs_scene_add(GetCurrentScene(), source);
+		if (!item)
+			return;
+		obs_sceneitem_select(item, true);
+		pixelviewFitPolicy.sourceCreated();
+	} else {
+		obs_source_update(source, settings);
+	}
+	FitPixelviewCapture();
+	SaveProject();
+	RefreshPixelviewDevices();
+}
+
+void OBSBasic::FitPixelviewCapture()
+{
+	if (PixelviewSettingsBusy()) return;
+	auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
+	if (!item || !pixelviewFitPolicy.takeRequest())
+		return;
+	// Native bounds retain aspect ratio even before the first frame arrives.
+	// Set once: manual preview transforms survive polls, mode changes and restarts.
+	obs_transform_info info = {};
+	info.alignment = OBS_ALIGN_LEFT | OBS_ALIGN_TOP;
+	info.bounds_type = OBS_BOUNDS_SCALE_INNER;
+	info.bounds_alignment = OBS_ALIGN_CENTER;
+	vec2_set(&info.scale, 1.0f, 1.0f);
+	vec2_set(&info.bounds, float(pixelview::CanvasWidth), float(pixelview::CanvasHeight));
+	obs_sceneitem_crop crop = {};
+	obs_sceneitem_defer_update_begin(item);
+	obs_sceneitem_set_crop(item, &crop);
+	obs_sceneitem_set_info2(item, &info);
+	obs_sceneitem_defer_update_end(item);
+	obs_sceneitem_set_locked(item, false);
+	obs_sceneitem_select(item, true);
+	SaveProject();
+}
+
 void OBSBasic::OnFirstLoad()
 {
 	OnEvent(OBS_FRONTEND_EVENT_FINISHED_LOADING);
-
-#ifdef WHATSNEW_ENABLED
-	/* Attempt to load init screen if available */
-	if (cef) {
-		WhatsNewInfoThread *wnit = new WhatsNewInfoThread();
-		connect(wnit, &WhatsNewInfoThread::Result, this, &OBSBasic::ReceivedIntroJson, Qt::QueuedConnection);
-
-		introCheckThread.reset(wnit);
-		introCheckThread->start();
-	}
-#endif
-
-	Auth::Load();
-
-	bool showLogViewerOnStartup = config_get_bool(App()->GetUserConfig(), "LogViewer", "ShowLogStartup");
-
-	if (showLogViewerOnStartup) {
-		on_actionViewCurrentLog_triggered();
-	}
+	// Pixelview has no upstream news, login, or streaming onboarding.
 }
 
 OBSBasic::~OBSBasic() {}
 
 void OBSBasic::applicationShutdown() noexcept
 {
+	pixelviewAudioShuttingDown = true;
+	ClearPixelviewAudio();
+	if (pixelviewRefreshTimer)
+		pixelviewRefreshTimer->stop();
 	/* clear out UI event queue */
 	QApplication::sendPostedEvents(nullptr);
 #ifndef __APPLE__
@@ -1599,10 +2105,14 @@ int OBSBasic::ResetVideo()
 	const char *colorRange = config_get_string(activeConfiguration, "Video", "ColorRange");
 
 	ovi.graphics_module = App()->GetRenderModule();
-	ovi.base_width = (uint32_t)config_get_uint(activeConfiguration, "Video", "BaseCX");
-	ovi.base_height = (uint32_t)config_get_uint(activeConfiguration, "Video", "BaseCY");
-	ovi.output_width = (uint32_t)config_get_uint(activeConfiguration, "Video", "OutputCX");
-	ovi.output_height = (uint32_t)config_get_uint(activeConfiguration, "Video", "OutputCY");
+	ovi.base_width = pixelview::CanvasWidth;
+	ovi.base_height = pixelview::CanvasHeight;
+	ovi.output_width = pixelview::CanvasWidth;
+	ovi.output_height = pixelview::CanvasHeight;
+	config_set_uint(activeConfiguration, "Video", "BaseCX", ovi.base_width);
+	config_set_uint(activeConfiguration, "Video", "BaseCY", ovi.base_height);
+	config_set_uint(activeConfiguration, "Video", "OutputCX", ovi.output_width);
+	config_set_uint(activeConfiguration, "Video", "OutputCY", ovi.output_height);
 	ovi.output_format = GetVideoFormatFromName(colorFormat);
 	ovi.colorspace = GetVideoColorSpaceFromName(colorSpace);
 	ovi.range = astrcmpi(colorRange, "Full") == 0 ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
@@ -1811,6 +2321,9 @@ void OBSBasic::GetFPSCommon(uint32_t &num, uint32_t &den) const
 		den = 1;
 	} else if (strcmp(val, "20") == 0) {
 		num = 20;
+		den = 1;
+	} else if (strcmp(val, "24") == 0) {
+		num = 24;
 		den = 1;
 	} else if (strcmp(val, "24 NTSC") == 0) {
 		num = 24000;
@@ -2036,6 +2549,9 @@ void OBSBasic::closeWindow()
 
 	/* Clear all scene data (dialogs, widgets, widget sub-items, scenes,
 	 * sources, etc) so that all references are released before shutdown */
+	// Scene cleanup pumps deferred deletes; stop refreshes and release the meter first.
+	pixelviewAudioShuttingDown = true;
+	ClearPixelviewAudio();
 	ClearSceneData();
 
 	OnEvent(OBS_FRONTEND_EVENT_EXIT);
@@ -2121,28 +2637,7 @@ void OBSBasic::UpdateEditMenu()
 
 void OBSBasic::UpdateTitleBar()
 {
-	stringstream name;
-
-	const char *profile = config_get_string(App()->GetUserConfig(), "Basic", "Profile");
-	const char *sceneCollection = config_get_string(App()->GetUserConfig(), "Basic", "SceneCollection");
-
-	name << "OBS ";
-	if (previewProgramMode) {
-		name << "Studio ";
-	}
-
-	name << App()->GetVersionString(false);
-	if (safe_mode) {
-		name << " (" << Str("TitleBar.SafeMode") << ")";
-	}
-	if (App()->IsPortableMode()) {
-		name << " - " << Str("TitleBar.PortableMode");
-	}
-
-	name << " - " << Str("TitleBar.Profile") << ": " << profile;
-	name << " - " << Str("TitleBar.Scenes") << ": " << sceneCollection;
-
-	setWindowTitle(QT_UTF8(name.str().c_str()));
+	setWindowTitle(QStringLiteral("Pixelview Desktop"));
 }
 
 OBSBasic *OBSBasic::Get()

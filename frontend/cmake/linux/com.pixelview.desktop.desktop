@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Pixelview Desktop
+GenericName=Video Capture Preview
+Comment=Local video capture preview, based on OBS Studio
+Exec=Pixelview
+Icon=com.pixelview.desktop
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;
+StartupNotify=true
+StartupWMClass=Pixelview

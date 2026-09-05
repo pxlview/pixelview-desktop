@@ -2360,6 +2360,9 @@ static obs_source_t *obs_load_source_type(obs_data_t *source_data, bool is_priva
 	obs_data_set_default_bool(source_data, "monitoring", false);
 	if (prev_ver < MAKE_SEMANTIC_VERSION(33, 0, 0)) {
 		obs_data_set_bool(source_data, "monitoring", monitoring_type != OBS_MONITORING_TYPE_NONE);
+	} else if (!obs_data_has_user_value(source_data, "monitoring")) {
+		/* Recover the integer key written before the canonical boolean was saved. */
+		obs_data_set_bool(source_data, "monitoring", obs_data_get_int(source_data, "monitoring_enabled") != 0);
 	}
 	obs_source_set_monitoring_enabled(source, obs_data_get_bool(source_data, "monitoring"));
 
@@ -2501,6 +2504,7 @@ obs_data_t *obs_save_source(obs_source_t *source)
 	obs_data_set_int(source_data, "deinterlace_field_order", di_order);
 	obs_data_set_int(source_data, "monitoring_type",
 			 monitoring ? (int)OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT : (int)OBS_MONITORING_TYPE_NONE);
+	obs_data_set_bool(source_data, "monitoring", monitoring);
 	obs_data_set_int(source_data, "monitoring_enabled", monitoring);
 
 	if (canvas) {

@@ -53,35 +53,16 @@ if(NOT DEFINED GIT_HASH)
   endif()
 endif()
 
-configure_file(cmake/linux/com.obsproject.Studio.metainfo.xml.in com.obsproject.Studio.metainfo.xml)
-
+# Pixelview launcher identity is separate from the upstream OBS installation.
 install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/com.obsproject.Studio.metainfo.xml"
+  FILES cmake/linux/com.pixelview.desktop.metainfo.xml
   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo"
 )
 
-install(FILES cmake/linux/com.obsproject.Studio.desktop DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
+install(FILES cmake/linux/com.pixelview.desktop.desktop DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
 
 install(
-  FILES cmake/linux/icons/obs-logo-128.png
-  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps"
-  RENAME com.obsproject.Studio.png
-)
-
-install(
-  FILES cmake/linux/icons/obs-logo-256.png
-  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps"
-  RENAME com.obsproject.Studio.png
-)
-
-install(
-  FILES cmake/linux/icons/obs-logo-512.png
-  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps"
-  RENAME com.obsproject.Studio.png
-)
-
-install(
-  FILES cmake/linux/icons/obs-logo-scalable.svg
-  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps"
-  RENAME com.obsproject.Studio.svg
+  FILES data/images/pixelview-app.png
+  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/1024x1024/apps"
+  RENAME com.pixelview.desktop.png
 )

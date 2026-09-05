@@ -1041,9 +1041,8 @@ void OBSBasic::CreateDefaultScene(bool firstStart)
 
 	OBSSceneAutoRelease scene = obs_scene_create(Str("Basic.Scene"));
 
-	if (firstStart) {
-		CreateFirstRunSources();
-	}
+	// DeckLink supplies its own audio. Do not open desktop/microphone devices.
+	UNUSED_PARAMETER(firstStart);
 
 	SetCurrentScene(scene, true);
 

@@ -1,4 +1,14 @@
 <RCC>
+    <qresource prefix="/res">
+        <file alias="images/pixelview-app.png">../data/images/pixelview-app.png</file>
+        <file alias="images/pixelview-tray.png">../data/images/pixelview-tray.png</file>
+        <file alias="images/pixelview-tray-active.png">../data/images/pixelview-tray-active.png</file>
+        <file alias="images/pixelview-tray-paused.png">../data/images/pixelview-tray-paused.png</file>
+        <file alias="images/pixelview-tray-macos.png">../data/images/pixelview-tray-macos.png</file>
+        <file alias="images/pixelview-tray-active-macos.png">../data/images/pixelview-tray-active-macos.png</file>
+        <file alias="images/pixelview-tray-paused-macos.png">../data/images/pixelview-tray-paused-macos.png</file>
+        <file alias="images/pixelview-wordmark.png">../data/images/pixelview-wordmark.png</file>
+    </qresource>
   <qresource prefix="/res">
     <file>images/layout-horizontal.svg</file>
     <file>images/layout-vertical.svg</file>

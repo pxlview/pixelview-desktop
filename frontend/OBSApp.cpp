@@ -953,10 +953,11 @@ OBSApp::OBSApp(int &argc, char **argv, profiler_name_store_t *store)
 	sleepInhibitor = os_inhibit_sleep_create("OBS Video/audio");
 
 #ifndef __APPLE__
-	setWindowIcon(QIcon::fromTheme("obs", QIcon(":/res/images/obs.png")));
+	setWindowIcon(QIcon(":/res/images/pixelview-app.png"));
 #endif
 
-	setDesktopFileName("com.obsproject.Studio");
+	setApplicationDisplayName(QStringLiteral("Pixelview Desktop"));
+	setDesktopFileName("com.pixelview.desktop");
 
 	pluginManager_ = std::make_unique<OBS::PluginManager>();
 }
@@ -1722,8 +1723,12 @@ vector<pair<string, string>> GetLocaleNames()
 #define ALLOW_PORTABLE_MODE 0
 #endif
 
+#include <utility/PixelviewConfig.hpp>
+
 int GetAppConfigPath(char *path, size_t size, const char *name)
 {
+	const std::string isolatedName = pixelview::configName(name);
+	name = isolatedName.c_str();
 #if ALLOW_PORTABLE_MODE
 	if (portable_mode) {
 		if (name && *name) {
@@ -1741,6 +1746,8 @@ int GetAppConfigPath(char *path, size_t size, const char *name)
 
 char *GetAppConfigPathPtr(const char *name)
 {
+	const std::string isolatedName = pixelview::configName(name);
+	name = isolatedName.c_str();
 #if ALLOW_PORTABLE_MODE
 	if (portable_mode) {
 		char path[512];

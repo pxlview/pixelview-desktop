@@ -1,0 +1,96 @@
+# Pixelview local macOS build
+
+Run from any directory:
+
+```sh
+bash /Users/max/src/pixelview-desktop/cmake/macos/pixelview-build.sh
+```
+
+Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview.app`.
+Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
+No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
+
+## Experimental compatibility
+
+Upstream requires Xcode/macOS SDK 26.5. `PIXELVIEW_LEGACY_TOOLCHAIN=ON` explicitly permits Xcode 15.3 / SDK 14.4 and excludes:
+
+- Metal renderer: requires Swift 6; use OpenGL.
+- mac-avcapture (including legacy): uses `AVCaptureDevice.backgroundReplacementActive`, absent in SDK 14.4.
+
+Native `decklink` remains enabled. Browser, websocket, scripting, virtual camera, AJA, WebRTC, VST, Syphon and VLC are disabled by the script. Sparkle is disabled by empty `SPARKLE_APPCAST_URL` and `SPARKLE_PUBLIC_KEY`, not an `ENABLE_SPARKLE_UPDATER` input option.
+
+Dependencies remain upstream's 2026-08-26 obs-deps and Qt6 archives with the SHA256 pins in CMakePresets.json; CMake downloaded and verified them successfully. No SDK or dependency headers were fabricated or replaced.
+
+The version override `32.1.0` supplies CMake's required version for the shallow/tagless checkout; it does not assert this fork is an official release.
+
+## Verification
+
+Initial native RelWithDebInfo build returned `BUILD SUCCEEDED`; `Pixelview --version` returned `OBS Studio - 32.1.0`. `codesign --verify --deep --strict` passed for the bundle including the native DeckLink plugin. GUI capture, isolated settings, and editable preview are separate acceptance checks owned by the UI/parent agent.
+
+## FPS selector build
+
+The native FPS selector was rebuilt with `bash cmake/macos/pixelview-build.sh`; full output is `/tmp/pixelview-fps-build.log`, ending `** BUILD SUCCEEDED **`. The rebuilt arm64 app and embedded arm64 DeckLink plugin passed `codesign --verify --deep --strict`; bundle ID remains `com.pixelview.desktop`, and the non-GUI `--version` check returned `OBS Studio - 32.1.0`.
+
+FPS verification: `python3 -m unittest discover -s test/pixelview -p 'test_*.py' -v` returned `Ran 10 tests` / `OK`; standalone capture policy returned `Pixelview fit policy passed`. The FPS tests execute the actual header-only rate/transaction policy with injected reset/save operations; native Qt/config wiring is a source contract. These are not real GPU failure injection or hardware tests. Parent-owned GUI acceptance must verify all eight choices, exact native FPS logs, immediate persisted HD dimensions, restart preservation, and unchanged scene transforms. No GUI launch/quit was performed during the FPS implementation build.
+
+When changing CMake options, rerun the configure script: Xcode's incremental ZERO_CHECK did not regenerate the plugin target list reliably during this build.
+
+## Native Apple hardware encoders
+
+`mac-videotoolbox` is enabled in the compatibility build. `vt-compat.h` bridges only the missing macOS 15 spatial AQ declarations: SDK <15 resolves the **actual exported CFString variable** `kVTCompressionPropertyKey_SpatialAdaptiveQPLevel` with `dlsym`, checking for NULL; SDK >=15 uses Apple's normal symbol. Both paths require runtime macOS >=15. Public enum values are default `-1` and disable `0`, also documented in [FFmpeg's compatibility implementation](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/videotoolboxenc.c). No invented SDK header or hardcoded substitute CFString is used. The native test confirms the resolved export is `SpatialAdaptiveQPLevel`. Only the SDK14.4 branch has been compiled locally; the modern-SDK branch remains untested.
+
+After explicit CMake regeneration, build only this plugin (safe while another worker edits frontend):
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+cmake --preset macos  # reuses existing cache; initial setup uses flags in pixelview-build.sh
+cmake --build build_macos --config RelWithDebInfo --target mac-videotoolbox -j 8
+```
+
+The plugin-only build does **not** embed the plugin into an existing app. Run the full build script after frontend changes are ready to package it. Verified standalone artifact:
+`build_macos/plugins/mac-videotoolbox/RelWithDebInfo/mac-videotoolbox.plugin` (arm64, strict signature verification passed).
+
+### Encoder settings and color pipeline
+
+Hardware encoders are discovered from `VTCopyVideoEncoderList`; on this Apple M1 Pro the HEVC ID is `com.apple.videotoolbox.videoencoder.ave.hevc`. Prefer codec/hardware capability discovery in frontend logic rather than assuming the ID on every Mac. The actual plugin exposes:
+
+| Setting | Requested value |
+|---|---|
+| `rate_control` | `"CBR"` |
+| `bitrate` | integer kbps |
+| `keyint_sec` | `1` |
+| `bframes` | `false` |
+| `spatial_aq_mode` | `1` (Auto; Disabled=2, Enabled=3) |
+| `profile` | `"main"`, `"main10"`, `"main42210"` |
+
+Auto deliberately enables AQ only for CRF; **Auto + CBR sets spatial AQ to disabled**, preserving upstream behavior. Plugin defaults are unchanged (`keyint_sec=2`, `bframes=true`); the frontend must supply the requested values explicitly. CBR is supported on Apple Silicon/macOS >=13.
+
+**Profile does not choose the input color format.** In `encoder.c`, `update_params()` obtains `voi->format` from `video_output_get_info()` and passes it to `set_video_format()` before reading the profile. `obs_module_post_load()` registers no `get_video_info` conversion callback. `obs_to_vt_profile()` selects only the codec profile; the single coercion is `main` + P010 → Main10, not the reverse.
+
+Use the OBS Advanced/global video color format (or the supplied video output pipeline) to select:
+
+| Intended encoding | OBS input | Native CoreVideo input |
+|---|---|---|
+| Main / 8-bit 4:2:0 | NV12 | `kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange` (full range also mapped) |
+| Main10 / 10-bit 4:2:0 | P010 | `kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange` (full range also mapped) |
+| Main42210 / 10-bit 4:2:2 | P216, limited range | `kCVPixelFormatType_422YpCbCr16BiPlanarVideoRange` |
+
+P216 full range is explicitly rejected by the plugin. Setting a 10-bit profile while retaining NV12 does not create 10-bit source precision or 4:2:2 chroma. The upstream properties list is OS-gated, not a per-device profile-support query; the native test below separately verified all three profiles on this Mac.
+
+### Repeatable checks
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcrun clang -std=c11 -Wall -Wextra -Werror plugins/mac-videotoolbox/tests/test-spatial-aq.c \
+  -framework VideoToolbox -framework CoreFoundation -o /tmp/test-spatial-aq
+/tmp/test-spatial-aq
+xcrun clang -std=c11 -Wall -Wextra -Werror plugins/mac-videotoolbox/tests/test-hardware-hevc.c \
+  -framework VideoToolbox -framework CoreFoundation -framework CoreVideo -framework CoreMedia \
+  -o /tmp/test-hardware-hevc
+/tmp/test-hardware-hevc
+python3 plugins/mac-videotoolbox/tests/test-plugin-properties.py build_macos
+```
+
+SDK14.4 regression test was run RED (undeclared spatial AQ symbols), then GREEN with the compatibility header. The hardware test discovers the real hardware HEVC encoder, creates each profile with matching pixel buffers, sets and reads back hardware=true, CBR=6,000,000 bps, 1-second GOP, no frame reordering, and AQ disabled. All three emitted 65 real compressed frames at 1280×720/60 fps, with keyframes at 0 and 60. It tests native VT encoding, not the complete libobs recording/muxing path. The separate libobs test loads the actual built plugin and asserts registration and real property lists. It emitted only an unrelated global-hotkey permission warning; no GUI was launched.
+
+Logs: `/tmp/pixelview-vt-configure.log`, `/tmp/pixelview-vt-build.log` (`BUILD SUCCEEDED`), `/tmp/pixelview-vt-hardware.log`, `/tmp/pixelview-vt-properties.log`. App packaging and end-to-end libobs recording remain parent-owned acceptance checks.

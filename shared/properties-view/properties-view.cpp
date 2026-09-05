@@ -114,6 +114,7 @@ void OBSPropertiesView::ReloadProperties()
 
 void OBSPropertiesView::RefreshProperties()
 {
+	emit PropertiesAboutToRefresh(properties);
 	int h, v, hend, vend;
 	GetScrollPos(h, v, hend, vend);
 

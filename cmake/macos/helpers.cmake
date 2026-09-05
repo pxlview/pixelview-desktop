@@ -43,7 +43,7 @@ function(set_target_properties_obs target)
       set_target_properties(
         ${target}
         PROPERTIES
-          OUTPUT_NAME OBS
+          OUTPUT_NAME Pixelview
           MACOSX_BUNDLE TRUE
           MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Info.plist.in"
           XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
@@ -54,21 +54,23 @@ function(set_target_properties_obs target)
 
       set_target_xcode_properties(
         ${target}
-        PROPERTIES PRODUCT_BUNDLE_IDENTIFIER com.obsproject.obs-studio
-                   PRODUCT_NAME OBS
-                   ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+        PROPERTIES PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop
+                   PRODUCT_NAME Pixelview
                    CURRENT_PROJECT_VERSION ${OBS_BUILD_NUMBER}
                    MARKETING_VERSION ${OBS_VERSION_CANONICAL}
-                   GENERATE_INFOPLIST_FILE YES
+                   # Xcode's generated defaults overwrite CFBundleName with PRODUCT_NAME.
+                   # Use the complete explicit plist and expand its build-setting references.
+                   GENERATE_INFOPLIST_FILE NO
                    COPY_PHASE_STRIP NO
                    CLANG_ENABLE_OBJC_ARC YES
                    SKIP_INSTALL NO
                    INSTALL_PATH "$(LOCAL_APPS_DIR)"
-                   INFOPLIST_KEY_CFBundleDisplayName "OBS Studio"
+                   INFOPLIST_KEY_CFBundleDisplayName "Pixelview Desktop"
+                   INFOPLIST_KEY_CFBundleName "Pixelview Desktop"
                    INFOPLIST_KEY_NSHumanReadableCopyright "(c) 2012-${CURRENT_YEAR} Lain Bailey"
-                   INFOPLIST_KEY_NSCameraUsageDescription "OBS needs to access the camera to enable camera sources to work."
-                   INFOPLIST_KEY_NSMicrophoneUsageDescription "OBS needs to access the microphone to enable audio input."
-                   INFOPLIST_KEY_NSAppleEventsUsageDescription "OBS needs to access background events to enable hotkeys while not in focus."
+                   INFOPLIST_KEY_NSCameraUsageDescription "Pixelview needs camera access to show live video capture sources."
+                   INFOPLIST_KEY_NSMicrophoneUsageDescription "Pixelview needs microphone access to capture audio input."
+                   INFOPLIST_KEY_NSAppleEventsUsageDescription "Pixelview needs access to background events for hotkeys while not in focus."
       )
 
       get_property(obs_dependencies GLOBAL PROPERTY _OBS_DEPENDENCIES)
@@ -146,7 +148,7 @@ function(set_target_properties_obs target)
         target_add_resource(${target} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/qt.conf")
       endif()
 
-      target_add_resource(${target} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Assets.xcassets")
+      target_add_resource(${target} "${CMAKE_CURRENT_SOURCE_DIR}/data/images/pixelview-app.icns")
       target_add_resource(${target} "${CMAKE_CURRENT_SOURCE_DIR}/../AUTHORS")
 
       if(TARGET obs-dal-plugin)
@@ -356,6 +358,10 @@ function(target_install_resources target)
     file(GLOB_RECURSE data_files "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
     list(FILTER data_files EXCLUDE REGEX "\\.DS_Store$")
     foreach(data_file IN LISTS data_files)
+      # The application icon is explicitly installed at Resources, not Resources/images.
+      if(target STREQUAL obs-studio AND data_file STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/data/images/pixelview-app.icns")
+        continue()
+      endif()
       cmake_path(
         RELATIVE_PATH data_file
         BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"

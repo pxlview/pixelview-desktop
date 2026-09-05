@@ -25,6 +25,8 @@
 #include <oauth/Auth.hpp>
 #include <utility/BasicOutputHandler.hpp>
 #include <utility/OBSCanvas.hpp>
+#include <utility/PixelviewCapturePolicy.hpp>
+#include <utility/PixelviewFPS.hpp>
 #include <utility/PreviewProgramSizeObserver.hpp>
 #include <utility/VCamConfig.hpp>
 #include <utility/platform.hpp>
@@ -40,6 +42,7 @@
 #include <util/util.hpp>
 
 #include <QAccessible>
+#include <QPointer>
 #include <QSystemTrayIcon>
 
 #include <deque>
@@ -58,10 +61,15 @@ class OBSLogViewer;
 class OBSMissingFiles;
 class OBSProjector;
 class VolumeControl;
+class VolumeMeter;
+class QCheckBox;
+class QHBoxLayout;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
 #endif
 class QMessageBox;
+class QToolBar;
+class QSpinBox;
 class QWidgetAction;
 struct QuickTransition;
 
@@ -272,6 +280,52 @@ private:
 	void InitOBSCallbacks();
 
 	void OnFirstLoad();
+	void InitPixelview();
+	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
+	void InitPixelviewStreaming(QWidget *sidebar);
+	bool PixelviewSettingsBusy() const;
+	bool pixelviewStreamingBusy = false;
+	void RefreshPixelviewDevices();
+	void SelectPixelviewDevice(int index);
+	void FitPixelviewCapture();
+	void RefreshPixelviewFPS();
+	void SelectPixelviewFPS(int index);
+	void InitPixelviewAudio(QWidget *previewContainer);
+	void RefreshPixelviewAudio();
+	void ClearPixelviewAudio();
+	void ChangePixelviewAudio(bool monitoring, bool checked);
+	bool SavePixelviewAudioSource(obs_source_t *source);
+	void SelectPixelviewMonitorDevice(int index);
+	static void PixelviewAudioChanged(void *data, calldata_t *);
+	OBSWeakSource pixelviewAudioSource;
+	bool pixelviewAudioShuttingDown = false;
+	bool pixelviewAudioRefreshing = false;
+	bool pixelviewAudioNormalizationPending = false;
+	bool pixelviewAudioNormalizationWarned = false;
+	std::vector<OBSSignal> pixelviewAudioSignals;
+	QPointer<VolumeMeter> pixelviewMeter;
+	QCheckBox *pixelviewStreamMute = nullptr;
+	QCheckBox *pixelviewListen = nullptr;
+	QHBoxLayout *pixelviewMeterRow = nullptr;
+	QWidget *pixelviewMeterHost = nullptr;
+	QLabel *pixelviewMeterMuted = nullptr;
+	QComboBox *pixelviewMonitorDevice = nullptr;
+	void InitPixelviewEncoding(QWidget *sidebar);
+	void RefreshPixelviewEncoding();
+	bool SavePixelviewEncoding(const char *id, obs_data_t *settings);
+	void AdvancedPixelviewEncoding();
+	QComboBox *pixelviewEncoder = nullptr;
+	QComboBox *pixelviewProfile = nullptr;
+	QSpinBox *pixelviewBitrate = nullptr;
+	QPushButton *pixelviewAdvanced = nullptr;
+	QLabel *pixelviewEncodingStatus = nullptr;
+	QComboBox *pixelviewFPS = nullptr;
+	QTimer *pixelviewRefreshTimer = nullptr;
+	QComboBox *pixelviewDevices = nullptr;
+	QLabel *pixelviewStatus = nullptr;
+	QPushButton *pixelviewSettings = nullptr;
+	QPushButton *pixelviewFit = nullptr;
+	pixelview::FitPolicy pixelviewFitPolicy;
 
 	void GetFPSCommon(uint32_t &num, uint32_t &den) const;
 	void GetFPSInteger(uint32_t &num, uint32_t &den) const;
@@ -688,6 +742,7 @@ private:
 
 	inline void OnActivate(bool force = false)
 	{
+		RefreshPixelviewFPS();
 		if (ui->profileMenu->isEnabled() || force) {
 			ui->profileMenu->setEnabled(false);
 			ui->autoConfigure->setEnabled(false);
@@ -701,12 +756,11 @@ private:
 			TaskbarOverlaySetStatus(TaskbarOverlayStatusActive);
 			if (trayIcon && trayIcon->isVisible()) {
 #ifdef __APPLE__
-				QIcon trayMask = QIcon(":/res/images/tray_active_macos.svg");
+				QIcon trayMask = QIcon(":/res/images/pixelview-tray-active-macos.png");
 				trayMask.setIsMask(true);
-				trayIcon->setIcon(QIcon::fromTheme("obs-tray", trayMask));
+				trayIcon->setIcon(trayMask);
 #else
-				trayIcon->setIcon(
-					QIcon::fromTheme("obs-tray-active", QIcon(":/res/images/tray_active.png")));
+				trayIcon->setIcon(QIcon(":/res/images/pixelview-tray-active.png"));
 #endif
 			}
 		}
@@ -714,6 +768,7 @@ private:
 
 	inline void OnDeactivate()
 	{
+		RefreshPixelviewFPS();
 		if (!outputHandler->Active() && !ui->profileMenu->isEnabled()) {
 			ui->profileMenu->setEnabled(true);
 			ui->autoConfigure->setEnabled(true);
@@ -723,31 +778,31 @@ private:
 			TaskbarOverlaySetStatus(TaskbarOverlayStatusInactive);
 			if (trayIcon && trayIcon->isVisible()) {
 #ifdef __APPLE__
-				QIcon trayIconFile = QIcon(":/res/images/obs_macos.svg");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray-macos.png");
 				trayIconFile.setIsMask(true);
 #else
-				QIcon trayIconFile = QIcon(":/res/images/obs.png");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray.png");
 #endif
-				trayIcon->setIcon(QIcon::fromTheme("obs-tray", trayIconFile));
+				trayIcon->setIcon(trayIconFile);
 			}
 		} else if (outputHandler->Active() && trayIcon && trayIcon->isVisible()) {
 			if (os_atomic_load_bool(&recording_paused)) {
 #ifdef __APPLE__
-				QIcon trayIconFile = QIcon(":/res/images/obs_paused_macos.svg");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray-paused-macos.png");
 				trayIconFile.setIsMask(true);
 #else
-				QIcon trayIconFile = QIcon(":/res/images/obs_paused.png");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray-paused.png");
 #endif
-				trayIcon->setIcon(QIcon::fromTheme("obs-tray-paused", trayIconFile));
+				trayIcon->setIcon(trayIconFile);
 				TaskbarOverlaySetStatus(TaskbarOverlayStatusPaused);
 			} else {
 #ifdef __APPLE__
-				QIcon trayIconFile = QIcon(":/res/images/tray_active_macos.svg");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray-active-macos.png");
 				trayIconFile.setIsMask(true);
 #else
-				QIcon trayIconFile = QIcon(":/res/images/tray_active.png");
+				QIcon trayIconFile = QIcon(":/res/images/pixelview-tray-active.png");
 #endif
-				trayIcon->setIcon(QIcon::fromTheme("obs-tray-active", trayIconFile));
+				trayIcon->setIcon(trayIconFile);
 				TaskbarOverlaySetStatus(TaskbarOverlayStatusActive);
 			}
 		}
