@@ -23,6 +23,8 @@ constexpr std::string_view OBSServiceFileName = "service.json";
 
 void OBSBasic::SaveService()
 {
+	// Leased ingest credentials are runtime-only. Preserve the existing profile.
+	if (pixelviewDesktop) return;
 	if (!service) {
 		return;
 	}

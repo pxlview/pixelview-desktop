@@ -90,6 +90,7 @@
 using namespace std;
 
 #include "OBSBasic_PixelviewEncoding.inc"
+#include "OBSBasic_PixelviewDesktop.inc"
 #include "OBSBasic_PixelviewAudio.inc"
 
 extern bool portable_mode;
@@ -1532,6 +1533,7 @@ void OBSBasic::InitPixelview()
 	brandRow->addStretch();
 	sidebarLayout->addLayout(brandRow);
 	sidebarLayout->addSpacing(8);
+	InitPixelviewDesktop(sidebar);
 	pixelviewDevices = new QComboBox(sidebar);
 	pixelviewDevices->setObjectName(QStringLiteral("pixelviewDevices"));
 	pixelviewDevices->setAccessibleName(QStringLiteral("Blackmagic device"));
@@ -1628,6 +1630,7 @@ bool OBSBasic::PixelviewSettingsBusy() const
 
 void OBSBasic::InitPixelviewStreaming(QWidget *sidebar)
 {
+
 	// Configuration lock only: the native transport owns its enabled state.
 	auto lockSettings = [this] {
 		pixelviewStreamingBusy = true;
@@ -2485,6 +2488,19 @@ void OBSBasic::closeWindow()
 {
 	if (isClosing()) {
 		return;
+	}
+	// Keep the control connection until actual output/setup completion, before
+	// scene teardown can pump timers and release the backend reservation.
+	if (pixelviewDesktop) {
+		if (pixelviewLease.pending || pixelviewLease.leased || pixelviewClosingSocket || pixelviewStreamingBusy ||
+		    (outputHandler && outputHandler->StreamingActive()) ||
+		    (setupStreamingGuard.valid() && setupStreamingGuard.wait_for(std::chrono::seconds(0)) != std::future_status::ready)) {
+			if (!pixelviewClosingSocket) pixelviewLease.fail("Stopping before shutdown.");
+			pixelviewReconnectAt=0;
+			QTimer::singleShot(100, this, &OBSBasic::closeWindow);
+			return;
+		}
+		pixelviewWatchdog->stop(); pixelviewHeartbeat->stop(); pixelviewDesktop->closeSocket();
 	}
 
 	blog(LOG_INFO, SHUTDOWN_SEPARATOR);

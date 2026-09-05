@@ -14,7 +14,11 @@ Pixelview Desktop is an OBS-derived desktop application built specifically for t
 
 This first draft includes the simplified interface, Blackmagic/DeckLink-oriented capture workflow, native preview framing, audio meters and monitoring controls, fixed HD/FPS and encoding preferences, and native OBS start/stop streaming, status, and detailed statistics.
 
-It is intentionally not yet connected to Pixelview accounts or remote control services. Pixelview destination provisioning, WebSocket/HTTP authentication, backend integration, and remote playout/control remain future work. No server endpoint, credential, or account flow should be invented in this repository.
+macOS now implements the node-scoped Desktop pairing/control protocol from backend PR207: native HTTP exchange, Keychain device storage, authenticated outbound WebSocket, OBS-settings heartbeats, and lease-gated WHIP using the existing Start/Stop control. HTTPS/WSS is required except explicitly enabled loopback development. Ingest settings stay in memory; existing service profiles are preserved. SRT fallback is intentionally unavailable. Disconnect, protocol errors and conservative monotonic acknowledgement deadlines stop output; reconnect never resumes streaming automatically.
+
+Build 29 compiled and passed deep/strict signing verification with native WHIP, DeckLink and VideoToolbox modules. All 67 local regression tests passed, including compiled Qt protocol, real loopback HTTP/WebSocket authentication/4401 closure, Keychain save/read/delete, concurrent-exchange rejection and libcurl resource-origin checks. A test-only native harness also exchanged an actual admin-browser-created token, authenticated and received a heartbeat acknowledgement against the isolated PR207 backend; admin independently showed its device registration. Native media/admin/engine end-to-end verification is tracked separately in `docs/pixelview-acceptance.md`; do not infer media delivery from control-plane status.
+
+The device protocol does not provision engines, change billing, implement remote playout, or provide engine-enforced fencing. Non-macOS credential/transport implementations and customer-release/notarization remain out of scope. Do not invent backend endpoints or reuse Uplink/node passwords; follow the authoritative `docs/desktop-protocol.md` in backend PR207.
 
 ## Repository status discipline
 

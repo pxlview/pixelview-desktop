@@ -1,4 +1,5 @@
 #include "whip-output.h"
+#include "pixelview-whip-security.h"
 #include "whip-utils.h"
 
 #include <obs.hpp>
@@ -50,7 +51,8 @@ WHIPOutput::WHIPOutput(obs_data_t *, obs_output_t *output)
 
 WHIPOutput::~WHIPOutput()
 {
-	Stop();
+	// Destruction joins cleanup but must not emit into a dying libobs output.
+	Stop(false);
 
 	std::lock_guard<std::mutex> l(start_stop_mutex);
 	if (start_stop_thread.joinable()) {
@@ -255,6 +257,8 @@ void WHIPOutput::ConfigureVideoTrack(std::string media_stream_id, std::string cn
  */
 bool WHIPOutput::Init()
 {
+	// Never associate a previous attempt's resource with a new node bearer.
+	resource_url.clear();
 	obs_service_t *service = obs_output_get_service(output);
 	if (!service) {
 		obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
@@ -390,7 +394,7 @@ void WHIPOutput::ParseLinkHeader(std::string val, std::vector<rtc::IceServer> &i
 		iceServer.password = password;
 		iceServers.push_back(iceServer);
 	} catch (const std::invalid_argument &err) {
-		do_log(LOG_WARNING, "Failed to construct ICE Server from %s: %s", val.c_str(), err.what());
+		do_log(LOG_WARNING, "Failed to construct ICE Server (details redacted)");
 	}
 }
 
@@ -408,9 +412,7 @@ bool WHIPOutput::Connect()
 
 	auto offer_sdp = std::string(peer_connection->localDescription().value());
 
-#ifdef DEBUG_SDP
-	do_log(LOG_DEBUG, "Offer SDP:\n%s", offer_sdp.c_str());
-#endif
+
 
 	// Add user-agent to our requests
 	headers = curl_slist_append(headers, user_agent.c_str());
@@ -427,8 +429,9 @@ bool WHIPOutput::Connect()
 	curl_easy_setopt(c, CURLOPT_POST, 1L);
 	curl_easy_setopt(c, CURLOPT_COPYPOSTFIELDS, offer_sdp.c_str());
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, 8L);
-	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(c, CURLOPT_UNRESTRICTED_AUTH, 1L);
+	// Never forward node credentials through an HTTP redirect.
+	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 0L);
+	curl_easy_setopt(c, CURLOPT_UNRESTRICTED_AUTH, 0L);
 	curl_easy_setopt(c, CURLOPT_ERRORBUFFER, error_buffer);
 
 	auto doCleanup = [&](bool connectFailed) {
@@ -449,7 +452,7 @@ bool WHIPOutput::Connect()
 
 	CURLcode res = curl_easy_perform(c);
 	if (res != CURLE_OK) {
-		do_log(LOG_ERROR, "Connect failed: %s", error_buffer[0] ? error_buffer : curl_easy_strerror(res));
+		do_log(LOG_ERROR, "Connect failed: %s", curl_easy_strerror(res));
 		doCleanup(true);
 		return false;
 	}
@@ -536,12 +539,17 @@ bool WHIPOutput::Connect()
 
 	resource_url = url;
 	curl_free(url);
-	do_log(LOG_DEBUG, "WHIP Resource URL is: %s", resource_url.c_str());
+	if (!pixelviewWhipSameOrigin(endpoint_url, resource_url)) {
+		do_log(LOG_ERROR, "WHIP resource origin rejected (credential boundary; URLs redacted)");
+		resource_url.clear();
+		curl_url_cleanup(url_builder);
+		doCleanup(true);
+		return false;
+	}
+
 	curl_url_cleanup(url_builder);
 
-#ifdef DEBUG_SDP
-	do_log(LOG_DEBUG, "Answer SDP:\n%s", read_buffer.c_str());
-#endif
+
 
 	auto response = std::string(read_buffer);
 	response.erase(0, response.find("v=0"));
@@ -561,20 +569,20 @@ bool WHIPOutput::Connect()
 	try {
 		peer_connection->setRemoteDescription(answer);
 	} catch (const std::invalid_argument &err) {
-		do_log(LOG_ERROR, "WHIP server responded with invalid SDP: %s", err.what());
+		do_log(LOG_ERROR, "WHIP server responded with invalid SDP: %s", "Details redacted");
 		doCleanup(true);
 		struct dstr error_message;
 		dstr_init_copy(&error_message, obs_module_text("Error.InvalidSDP"));
-		dstr_replace(&error_message, "%1", err.what());
+		dstr_replace(&error_message, "%1", "Details redacted");
 		obs_output_set_last_error(output, error_message.array);
 		dstr_free(&error_message);
 		return false;
 	} catch (const std::exception &err) {
-		do_log(LOG_ERROR, "Failed to set remote description: %s", err.what());
+		do_log(LOG_ERROR, "Failed to set remote description: %s", "Details redacted");
 		doCleanup(true);
 		struct dstr error_message;
 		dstr_init_copy(&error_message, obs_module_text("Error.NoRemoteDescription"));
-		dstr_replace(&error_message, "%1", err.what());
+		dstr_replace(&error_message, "%1", "Details redacted");
 		obs_output_set_last_error(output, error_message.array);
 		dstr_free(&error_message);
 		return false;
@@ -612,6 +620,10 @@ void WHIPOutput::StartThread()
 
 void WHIPOutput::SendDelete()
 {
+	if (!resource_url.empty() && !pixelviewWhipSameOrigin(endpoint_url, resource_url)) {
+		resource_url.clear();
+		return;
+	}
 	if (resource_url.empty()) {
 		do_log(LOG_DEBUG, "No resource URL available, not sending DELETE");
 		return;
@@ -631,6 +643,8 @@ void WHIPOutput::SendDelete()
 	CURL *c = curl_easy_init();
 	curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(c, CURLOPT_URL, resource_url.c_str());
+	// cURL copies this URL. Consume it even if DELETE fails; never reuse it.
+	resource_url.clear();
 	curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, "DELETE");
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, 8L);
 	curl_easy_setopt(c, CURLOPT_ERRORBUFFER, error_buffer);
@@ -643,7 +657,7 @@ void WHIPOutput::SendDelete()
 	CURLcode res = curl_easy_perform(c);
 	if (res != CURLE_OK) {
 		do_log(LOG_WARNING, "DELETE request for resource URL failed: %s",
-		       error_buffer[0] ? error_buffer : curl_easy_strerror(res));
+		       curl_easy_strerror(res));
 		doCleanup();
 		return;
 	}
@@ -680,7 +694,9 @@ void WHIPOutput::StopThread(bool signal)
 	 * "reconnecting", but the "stop" signal will have never been
 	 * emitted.
 	 */
-	if (running && signal) {
+	// Native force-stop resets libobs stopping_event even for an inactive or
+	// failed attempt. Always complete an explicit stop, or the next start hangs.
+	if (signal) {
 		obs_output_signal_stop(output, OBS_OUTPUT_SUCCESS);
 		running = false;
 	}
@@ -726,7 +742,7 @@ void WHIPOutput::Send(void *data, uintptr_t size, uint64_t duration, std::shared
 		track->send(sample);
 		total_bytes_sent += sample.size();
 	} catch (const std::exception &e) {
-		do_log(LOG_ERROR, "error: %s ", e.what());
+		do_log(LOG_ERROR, "WHIP packet processing failed (details redacted)");
 	}
 }
 

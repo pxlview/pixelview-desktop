@@ -51,6 +51,8 @@ extern volatile bool recording_paused;
 
 class ColorSelect;
 class OBSAbout;
+#include <utility/PixelviewDesktopConnection.hpp>
+#include <QElapsedTimer>
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
 class OBSBasicInteraction;
@@ -282,6 +284,29 @@ private:
 	void OnFirstLoad();
 	void InitPixelview();
 	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
+	void InitPixelviewDesktop(QWidget *sidebar);
+	void ConnectPixelviewDesktop();
+	void PairPixelviewDesktop();
+	bool RequestPixelviewStart();
+	bool PixelviewLeaseValid() const;
+	void PixelviewOutputStopped();
+	QJsonObject PixelviewReportedSettings();
+	std::unique_ptr<pixelview::DesktopConnection> pixelviewDesktop;
+	pixelview::Desktop pixelviewLease;
+	QElapsedTimer pixelviewClock;
+	QTimer *pixelviewHeartbeat=nullptr, *pixelviewWatchdog=nullptr;
+	QLabel *pixelviewConnectionStatus=nullptr;
+	QLabel *pixelviewIdentityStatus=nullptr;
+	pixelview::DesktopIdentity pixelviewIdentity;
+	bool pixelviewUnpairPending=false;
+	bool SavePixelviewIdentity();
+	void FinishPixelviewUnpair();
+	QUrl pixelviewOrigin;
+	bool pixelviewDev=false, pixelviewStartPermit=false, pixelviewActualStreaming=false;
+	bool pixelviewClosingSocket=false;
+	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
+	int pixelviewBackoff=1000;
+	OBSService pixelviewPreviousService;
 	void InitPixelviewStreaming(QWidget *sidebar);
 	bool PixelviewSettingsBusy() const;
 	bool pixelviewStreamingBusy = false;

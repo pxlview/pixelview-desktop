@@ -10,6 +10,24 @@ Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview.app`.
 Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
 No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
 
+## Desktop protocol build and harness (build 35)
+
+The current bundle includes the actual Objective-C++ Desktop transport, macOS Keychain support and native WHIP plugin. `bash cmake/macos/pixelview-build.sh` returned `BUILD SUCCEEDED`; `codesign --verify --deep --strict build_macos/frontend/RelWithDebInfo/Pixelview.app` passed and `Pixelview --version` returned `OBS Studio - 32.1.0`. Build log: `/tmp/pixelview-desktop-build35.log`. Regression command: `uv run --with pillow python -m unittest discover -s test/pixelview -p 'test_*.py' -v` (69 passed).
+
+Build the test-only control-plane harness, which does not start media:
+
+```sh
+clang++ -std=c++17 -fobjc-arc -fPIC -I. \
+  -F.deps/obs-deps-qt6-2026-08-26-universal/lib \
+  -framework QtCore -framework QtNetwork -framework Foundation -framework Security \
+  -Wl,-rpath,"$PWD/.deps/obs-deps-qt6-2026-08-26-universal/lib" \
+  frontend/utility/PixelviewDesktopMac.mm test/pixelview/desktop_backend_smoke.mm \
+  -o /tmp/pixelview-desktop-backend-smoke
+/tmp/pixelview-desktop-backend-smoke http://localhost:8000 < /private/path/to/one-time-code
+```
+
+Use a disposable node device and a private mode-0600 input file. The default harness removes the origin's Keychain credential afterward; do not use an origin holding a device you want to retain. Test-only `--keep-device` retains it for subsequent GUI/restart checks. There is no production CLI credential option or automatic streaming hook. The app reads only nonsecret `PixelviewDesktop/Origin`, `LocalDevelopment`, `NodeId`, `DesktopId`, `PairingDisabled`, and `CleanupComplete` from its isolated `user.ini`; tokens stay in Keychain. The exact origin, including localhost versus 127.0.0.1, identifies the Keychain account. Production uses HTTPS/WSS with normal trust validation. Local smoke is not a production TLS or media-delivery test.
+
 ## Experimental compatibility
 
 Upstream requires Xcode/macOS SDK 26.5. `PIXELVIEW_LEGACY_TOOLCHAIN=ON` explicitly permits Xcode 15.3 / SDK 14.4 and excludes:
@@ -17,7 +35,7 @@ Upstream requires Xcode/macOS SDK 26.5. `PIXELVIEW_LEGACY_TOOLCHAIN=ON` explicit
 - Metal renderer: requires Swift 6; use OpenGL.
 - mac-avcapture (including legacy): uses `AVCaptureDevice.backgroundReplacementActive`, absent in SDK 14.4.
 
-Native `decklink` remains enabled. Browser, websocket, scripting, virtual camera, AJA, WebRTC, VST, Syphon and VLC are disabled by the script. Sparkle is disabled by empty `SPARKLE_APPCAST_URL` and `SPARKLE_PUBLIC_KEY`, not an `ENABLE_SPARKLE_UPDATER` input option.
+Native `decklink`, VideoToolbox and `obs-webrtc` (WHIP) remain enabled. Browser, the unrelated inbound obs-websocket plugin, scripting, virtual camera, AJA, VST, Syphon and VLC are disabled by the script. Outbound Desktop WebSocket uses macOS NSURLSession with platform TLS verification, not the obs-websocket plugin. Sparkle is disabled by empty `SPARKLE_APPCAST_URL` and `SPARKLE_PUBLIC_KEY`, not an `ENABLE_SPARKLE_UPDATER` input option.
 
 Dependencies remain upstream's 2026-08-26 obs-deps and Qt6 archives with the SHA256 pins in CMakePresets.json; CMake downloaded and verified them successfully. No SDK or dependency headers were fabricated or replaced.
 

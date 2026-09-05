@@ -51,10 +51,12 @@ void OBSBasic::StartStreaming()
 		return;
 	}
 	if (disableOutputsRef) {
+		if (pixelviewLease.leased) PixelviewOutputStopped();
 		return;
 	}
+	if (!RequestPixelviewStart()) return;
 
-	if (auth && auth->broadcastFlow()) {
+	if (!pixelviewDesktop && auth && auth->broadcastFlow()) {
 		if (!broadcastActive && !broadcastReady) {
 			QMessageBox no_broadcast(this);
 			no_broadcast.setText(QTStr("Output.NoBroadcast.Text"));
@@ -81,6 +83,7 @@ void OBSBasic::StartStreaming()
 	}
 
 	auto finish_stream_setup = [&](bool setupStreamingResult) {
+		if (!PixelviewLeaseValid()) { DisplayStreamStartError(); return; }
 		if (!setupStreamingResult) {
 			DisplayStreamStartError();
 			return;
@@ -424,7 +427,7 @@ void OBSBasic::StreamActionTriggered()
 
 		Auth *auth = GetAuth();
 
-		auto action = (auth && auth->external()) ? StreamSettingsAction::ContinueStream
+		auto action = (pixelviewDesktop || (auth && auth->external())) ? StreamSettingsAction::ContinueStream
 							 : UIValidation::StreamSettingsConfirmation(this, service);
 		switch (action) {
 		case StreamSettingsAction::ContinueStream:

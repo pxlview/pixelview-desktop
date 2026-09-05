@@ -721,6 +721,8 @@ bool AdvancedOutput::StartStreaming(obs_service_t *service)
 	obs_output_set_service(streamOutput, service);
 
 	bool reconnect = config_get_bool(main->Config(), "Output", "Reconnect");
+	// A failed WHIP output requires a fresh explicit Desktop start/lease.
+	if (strcmp(obs_service_get_type(service), "whip_custom") == 0) reconnect = false;
 	int retryDelay = config_get_int(main->Config(), "Output", "RetryDelay");
 	int maxRetries = config_get_int(main->Config(), "Output", "MaxRetries");
 	bool useDelay = config_get_bool(main->Config(), "Output", "DelayEnable");

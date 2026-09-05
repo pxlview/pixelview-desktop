@@ -1,5 +1,26 @@
 # Pixelview capture and encoding prototype — local verification
 
+## Pairing-first controls (build 35)
+
+The **Pairing / Connection** category is above the DeckLink selector. Its plain-text identity label shows **Not paired** or **Paired · Node <node_id>**, independently of Disconnected, Connected, and Streaming state. HTTP exchange persists nonsecret node/device identity; an accepted authenticated ready message validates it. Identity survives offline/restart; the device token remains only in macOS Keychain.
+
+**Unpair this installation** waits for actual native output and asynchronous setup to stop before releasing the lease and disconnecting, clears local identity and the origin-specific Keychain credential, and disables reconnect. It does not revoke any backend registration or another device. A Keychain deletion failure is reported and must be retried; reconnect remains disabled. If saving the unpair state also fails, the app explicitly warns not to restart and to retry Unpair; durability cannot be guaranteed when storage fails. Changing backend origin requires unpairing first. Re-pairing refreshes identity. Backend 4401 revocation clears stale identity and requires pairing again.
+
+Build 35 passed the complete 69-test suite and deep/strict signature verification. Tests include compiled Qt identity/state, Objective-C++ HTTP/WebSocket/Keychain transport, and real bundled libobs/WHIP inactive-stop completion. Frontend ordering checks are source contracts, not a claim of complete GUI or live-media verification. Parent integration testing owns actual admin/engine/media and UI restart/unpair acceptance. No backend restart was performed by this desktop work.
+
+## Desktop pairing and WHIP integration (build 35)
+
+- Implements backend PR207's node-scoped protocol, not Uplink authentication. The native pairing dialog takes a configurable backend origin and password-masked one-time code. Only HTTPS/WSS is accepted outside explicitly enabled localhost/loopback development. No embedded shared secret, credential URL parameters, or credential profile persistence.
+- Qt Network performs the HTTP exchange without redirects. macOS NSURLSession uses ephemeral networking, normal platform TLS verification, bounded messages and no credential-bearing redirects. The nonexpiring device token is stored as a nonsynchronizing, device-only generic password under Keychain service `com.pixelview.desktop.device`, account equal to the exact backend origin. Re-pairing to an origin replaces that origin's local credential; remote obsolete identities should be revoked in admin.
+- The existing Start/Stop button requests a lease before creating the in-memory `whip_custom` service. Async native preparation checks the lease again before starting. Native WHIP retries are disabled; control reconnect backs off from one to thirty seconds and never resumes a stream. Actual native output stop is verified before sending stop or intentionally closing the held control connection. The watchdog uses a 30-second monotonic acknowledgement budget anchored to heartbeat-send time, with at most one outstanding heartbeat, below the server's 45-second lease.
+- Heartbeats report real OBS output dimensions/FPS, selected encoder classification, bitrate in bits/sec, profile and an allowlist of nonsecret native options. Arbitrary encoder option strings are not transmitted. Admin `streaming` remains a client output-state report, not independent media observation.
+- Missing WHIP/v2 config is an explicit error; SRT is never used. Busy, inactive project, paused node, subscription and other protocol failures fail closed. 4401 discards the local device credential and requires re-pairing.
+- Native WHIP no longer logs SDP, ICE credential fields, resource URLs or raw parser/cURL exception detail. HTTP redirects do not forward credentials; authenticated resource DELETE is restricted to the original origin with no userinfo/fragment or downgrade.
+- `uv run --with pillow python -m unittest discover -s test/pixelview -p 'test_*.py' -v`: **69 tests passed**. The six Desktop test methods compile/run real Qt protocol code, real HTTP exchange and macOS Keychain operations, native WebSocket auth/4401 close against loopback fixtures, concurrent-exchange rejection, and libcurl resource-origin policy. Source contracts verify OBS wiring; they do not substitute for native media tests.
+- Full native build succeeded; arm64 app and bundled WHIP/DeckLink/VideoToolbox pass deep/strict signature verification. The test-only `desktop_backend_smoke.mm` also completed actual browser-token exchange, Keychain readback, WS ready and heartbeat acknowledgement against the isolated backend; the parent verified registration independently in admin. The harness takes tokens from stdin, emits only redacted stage names, and supports `--keep-device` only for test-driven app restart verification. It never starts media.
+- At this checkpoint, native app media/start-stop and cross-system playback are parent-owned acceptance tests, not claimed by the control-plane harness. Production TLS/network impairment, distributed-clock conditions, Windows/Linux, full hardware matrix, engine-enforced fencing and notarized distribution remain unverified.
+
+
 ## Native streaming, statistics and licensing (build 23)
 
 - The sidebar now hosts the actual native OBS Start/Stop Streaming button, including its preparing/connecting/stopping states and existing validation/error dialogs. No stream starts automatically.
@@ -11,7 +32,7 @@
 - Authentication/backend integration, external-server publishing, network impairment/reconnect/delay scenarios and Windows/Linux runtime remain unverified. Release-wide third-party licensing/source-distribution review is still a release gate; see [distribution checklist](pixelview-distribution-license.md).
 
 
-Scope: local capture preview and native encoding preferences in an OBS fork. Authentication, backend WebSocket, WHIP publishing and receiver/DeckLink playout are deliberately not implemented.
+Current scope includes macOS Desktop pairing, authenticated backend WebSocket and lease-gated native WHIP. The historical checks below predate that integration; receiver/DeckLink playout is not implemented here.
 
 ## Initial capture/FPS verification on this Mac
 
