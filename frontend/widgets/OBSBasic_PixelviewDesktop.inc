@@ -45,7 +45,9 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   const bool alreadyStopping=pixelviewStopPending;
   pixelviewStopPending=true;
   if(!alreadyStopping) ++pixelviewStopGeneration;
-  pixelviewClosingSocket=true; pixelviewHeartbeat->stop(); pixelviewAuthDeadline=0;
+  if(!pixelviewLease.ready) {
+   pixelviewClosingSocket=true; pixelviewHeartbeat->stop(); pixelviewAuthDeadline=0;
+  }
   // Never force-stop an already completed/unused output: libobs resets its stop event.
   // Pending setup has not started media and is invalidated by the generation guard.
   if(!alreadyStopping && pixelviewNativeAttempt && outputHandler && outputHandler->streamOutput &&
@@ -90,8 +92,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    pixelviewConnectionStatus->setText(pixelviewLease.pending ? QStringLiteral("Requesting exclusive WHIP lease…") : QStringLiteral("Connected · WHIP ready to request"));
    pixelviewHeartbeat->start();
   }
-  if(doc.object()["type"]=="stopped" && pixelviewLease.ready)
-   pixelviewConnectionStatus->setText(QStringLiteral("Connected · Stream stopped"));
+  // Keep the media failure detail available after release (also in the node tooltip).
   RefreshPixelviewReconnect();
  };
  pixelviewDesktop->disconnected=[this](int code){
@@ -277,7 +278,7 @@ void OBSBasic::RefreshPixelviewReconnect()
   ui->statusbar->showMessage(message);
  }
  // Cancellation is terminal immediately, even while setup/native completion is outstanding.
- if(pixelviewShutdownPending || (!pixelviewLease.intent && pixelviewStopPending)) {
+ if(pixelviewShutdownPending || (!pixelviewLease.intent && (pixelviewStopPending || pixelviewLease.stopping))) {
   if(auto *button=findChild<QPushButton *>(QStringLiteral("streamButton"))) {
    button->setMenu(nullptr);button->setEnabled(false);button->setText(QTStr("Basic.Main.StoppingStreaming"));
   }

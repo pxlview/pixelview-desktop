@@ -24,6 +24,14 @@ public:
  std::function<void(QString,QString)> publish = [](QString,QString){};
  std::function<void()> halt = []{};
  bool ready=false, pending=false, leased=false, stopping=false;
+ bool mediaDraining=false;
+ qint64 stopDeadline=0;
+ // Media rejection is not a control failure. Invalidate setup immediately,
+ // retaining lease bookkeeping until native output/setup have safely drained.
+ void mediaStopped(QString message) {
+  ++generation;intent=false;retryAt=-1;transientFailure=false;mediaDraining=true;
+  halt();error(message);
+ }
  // Session-only intent: never persisted with pairing identity.
  bool intent=false;
  bool reconnect=true;
@@ -50,9 +58,9 @@ public:
  }
  qint64 deadline=0, heartbeatRequest=-1;
  bool heartbeatSent(qint64 now) { if(heartbeatRequest>=0) return false; heartbeatRequest=now; return true; }
- bool authorized(qint64 now) const { return ready && leased && now < deadline; }
+ bool authorized(qint64 now) const { return ready && leased && !mediaDraining && now < deadline; }
  bool requestStart(qint64 now) {
-  if (!ready || pending || leased || stopping || now >= deadline) return false;
+  if (!ready || pending || leased || stopping || mediaDraining || now >= deadline) return false;
   if(!intent) retries=0;
   ++generation;setupClaimed=false;intent=true; pending=true; send({{"type","start"}}); return true;
  }
@@ -63,14 +71,18 @@ public:
   if(!transient || !reconnect || retries>=maxRetries) intent=false;
   retryAt=-1;
   if(intent) {++retries;retryAt=monotonic()+qint64(std::max(0,retryDelay))*1000;}
-  ready=false; pending=false; leased=false; stopping=false; deadline=0;
+  ready=false; pending=false; leased=false; stopping=false; mediaDraining=false; deadline=0;
   halt(); error(message);
  }
  std::function<void(QString)> error=[](QString){};
  bool development=false;
- void tick(qint64 now) { if(ready && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true); }
+ void tick(qint64 now) {
+  if(ready && stopping && now>=stopDeadline) fail("Stream stop acknowledgement timed out. Reconnecting control; start manually.",true);
+  else if(ready && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true);
+ }
  void receive(const QJsonObject &o, qint64 now) {
   const auto type=o["type"].toString();
+  if(type=="started" && (mediaDraining || stopping)) return; // Cancelled attempt, not fresh authority.
   if (type=="ready" && !ready && o["heartbeat_interval"].toInt()==15 && o["lease_seconds"].toInt()==45) {
    ready=true; deadline=now+30000; heartbeatRequest=-1;
    if(intent && retryAt<0) requestStart(now);
@@ -98,9 +110,10 @@ public:
   }
  }
  void outputStopped() {
-  ++generation;intent=false;retryAt=-1;
-  if (ready && (leased || pending)) {stopping=true;send({{"type","stop"}});}
+  ++generation;intent=false;retryAt=-1;mediaDraining=false;
+  const bool release=ready && (leased || pending);
   leased=pending=false;
+  if (release) {stopping=true;stopDeadline=monotonic()+30000;send({{"type","stop"}});}
  }
  static bool validOrigin(const QUrl &u, bool dev) {
   const auto host = u.host();

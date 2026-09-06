@@ -34,7 +34,7 @@ void OBSBasic::DisplayStreamStartError()
 {
 	if (pixelviewDesktop) {
 		pixelviewNativeAttempt = false;
-		pixelviewLease.fail("Native stream setup failed. Check settings and start manually.");
+		pixelviewLease.mediaStopped("Streaming setup failed. Check the capture and encoding settings, then start again.");
 	}
 	QString message = !outputHandler->lastError.empty() ? QTStr(outputHandler->lastError.c_str())
 							    : QTStr("Output.StartFailedGeneric");
@@ -46,6 +46,7 @@ void OBSBasic::DisplayStreamStartError()
 		sysTrayStream->setEnabled(true);
 	}
 
+	if (pixelviewDesktop) RefreshPixelviewReconnect();
 	QMessageBox::critical(this, QTStr("Output.StartStreamFailed"), message);
 }
 
@@ -325,7 +326,8 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 		pixelviewNativeAttempt = false;
 		if (!pixelviewStopPending) {
 			const bool transient = code == OBS_OUTPUT_DISCONNECTED || code == OBS_OUTPUT_CONNECT_FAILED;
-			pixelviewLease.fail(transient ? "Media connection lost. Stream stopped." : "Native output stopped. Start manually.", transient);
+			if (transient) pixelviewLease.fail("Media connection lost. Stream stopped.", true);
+			else pixelviewLease.mediaStopped("Streaming stopped. Start again after the stream has finished stopping.");
 		}
 	}
 	const char *errorDescription = "";
@@ -352,7 +354,8 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 		break;
 
 	case OBS_OUTPUT_INVALID_STREAM:
-		errorDescription = Str("Output.ConnectFail.InvalidStream");
+		errorDescription = pixelviewDesktop ? "The streaming server is unavailable or rejected the connection. Check the node's engine and streaming endpoint in Pixelview admin, then start again."
+					      : Str("Output.ConnectFail.InvalidStream");
 		break;
 
 	case OBS_OUTPUT_ENCODE_ERROR:
