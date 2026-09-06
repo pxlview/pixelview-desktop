@@ -19,7 +19,7 @@ class MinimalShell(unittest.TestCase):
         for contract in ('obs_source_create("decklink-input"', 'obs_properties_apply_settings',
                          'obs_property_modified', 'obs_source_update', 'pixelviewFitPolicy.sourceCreated()'):
             self.assertTrue(contract in select, contract)
-        fit = main.split('void OBSBasic::FitPixelviewCapture()', 1)[1].split('\nvoid ', 1)[0]
+        fit = main.split('void OBSBasic::FitPixelviewCapture(', 1)[1].split('\nvoid ', 1)[0]
         for contract in ('pixelviewFitPolicy.takeRequest()', 'OBS_BOUNDS_SCALE_INNER', 'OBS_ALIGN_CENTER',
                          'obs_sceneitem_set_crop', 'obs_sceneitem_set_info2', 'SaveProject()'):
             self.assertTrue(contract in fit, contract)

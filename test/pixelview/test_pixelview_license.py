@@ -6,6 +6,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class PixelviewLicenseResources(unittest.TestCase):
+    def test_company_contact_is_separate_from_upstream_license(self):
+        source = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
+        notice = source.split('void OBSBasic::ShowPixelviewLicense()', 1)[1].split('notice->setTextFormat', 1)[0]
+        for text in ('Pixelview is a brand of Cinecode OÜ.', 'Ahtri 12',
+                     '10151 Tallinn', 'Estonia', 'pixelview.io'):
+            self.assertIn(text, notice)
+            self.assertIn(text, (ROOT / 'PIXELVIEW.md').read_text())
+        self.assertNotIn('©', notice)
+        self.assertIn('OBS Studio is copyright its respective OBS Project contributors', notice)
+
     def test_bundled_copying_is_the_complete_unmodified_root_license(self):
         bundled = ROOT / 'frontend/data/license/COPYING'
         self.assertTrue(bundled.is_file(), 'Bundle the full root COPYING, including its appendix')

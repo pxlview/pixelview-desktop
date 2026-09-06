@@ -40,7 +40,7 @@ inline int preferredEncoder(const std::vector<EncoderChoice> &encoders, bool app
 	for (size_t i = 0; i < encoders.size(); ++i) {
 		const auto &e = encoders[i];
 		int rank = e.id == "obs_x264" ? 0 : -1;
-		if (e.hardware) rank = e.codec == "hevc" ? 20 : 10;
+		if (e.hardware && e.codec == "hevc") rank = 20;
 		if (apple && e.hardware && e.codec == "hevc" && e.id.find("com.apple.videotoolbox.") == 0) rank = 30;
 		if (rank > score) { best = static_cast<int>(i); score = rank; }
 	}

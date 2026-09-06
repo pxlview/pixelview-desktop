@@ -1415,6 +1415,9 @@ void OBSBasic::ShowPixelviewLicense()
 	dialog->resize(720, 640);
 	auto *layout = new QVBoxLayout(dialog);
 	auto *notice = new QLabel(QStringLiteral(
+		"Pixelview is a brand of Cinecode OÜ.\n"
+		"Cinecode OÜ · Ahtri 12 · 10151 Tallinn · Estonia\n"
+		"pixelview.io\n\n"
 		"Pixelview is a modified distribution based on OBS Studio. "
 		"OBS Studio is copyright its respective OBS Project contributors; "
 		"Pixelview modifications are by the Pixelview contributors.\n\n"
@@ -1572,7 +1575,7 @@ void OBSBasic::InitPixelview()
 	setMinimumSize(900, 600);
 	UpdateTitleBar();
 
-	connect(pixelviewDevices, &QComboBox::activated, this, &OBSBasic::SelectPixelviewDevice);
+	connect(pixelviewDevices, &QComboBox::activated, this, [this](int index) { SelectPixelviewDevice(index); });
 	connect(pixelviewFit, &QPushButton::clicked, this, [this] {
 		if (PixelviewConfigurationLocked()) return;
 		pixelviewFitPolicy.requestReset();
@@ -1609,6 +1612,11 @@ void OBSBasic::InitPixelview()
 		obs_sceneitem_set_locked(item, false);
 	}
 	RefreshPixelviewDevices();
+	// Only seed an installation without a saved capture source. Discovery omits
+	// empty/disabled entries; selection revalidates against fresh type properties.
+	OBSSourceAutoRelease savedCapture = obs_get_source_by_name("Pixelview Capture");
+	if (!savedCapture && pixelviewDevices->count() > 1)
+		SelectPixelviewDevice(1, true);
 }
 
 bool OBSBasic::PixelviewSettingsBusy() const
@@ -1813,9 +1821,9 @@ void OBSBasic::RefreshPixelviewDevices()
 	pixelviewDevices->setToolTip(captureHelp);
 }
 
-void OBSBasic::SelectPixelviewDevice(int index)
+void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 {
-	if (PixelviewConfigurationLocked()) { RefreshPixelviewDevices(); return; }
+	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) { RefreshPixelviewDevices(); return; }
 	if (index <= 0 || isClosing() || properties)
 		return;
 	const QByteArray id = pixelviewDevices->itemData(index).toString().toUtf8();
@@ -1878,14 +1886,14 @@ void OBSBasic::SelectPixelviewDevice(int index)
 	} else {
 		obs_source_update(source, settings);
 	}
-	FitPixelviewCapture();
+	FitPixelviewCapture(initializing);
 	SaveProject();
 	RefreshPixelviewDevices();
 }
 
-void OBSBasic::FitPixelviewCapture()
+void OBSBasic::FitPixelviewCapture(bool initializing)
 {
-	if (PixelviewConfigurationLocked()) return;
+	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return;
 	auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
 	if (!item || !pixelviewFitPolicy.takeRequest())
 		return;

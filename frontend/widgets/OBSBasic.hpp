@@ -317,8 +317,8 @@ private:
 	bool PixelviewSettingsBusy() const;
 	bool pixelviewStreamingBusy = false;
 	void RefreshPixelviewDevices();
-	void SelectPixelviewDevice(int index);
-	void FitPixelviewCapture();
+	void SelectPixelviewDevice(int index, bool initializing = false);
+	void FitPixelviewCapture(bool initializing = false);
 	void RefreshPixelviewFPS();
 	void SelectPixelviewFPS(int index);
 	void InitPixelviewAudio(QWidget *previewContainer);

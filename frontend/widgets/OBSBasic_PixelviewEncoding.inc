@@ -193,7 +193,9 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	const bool initialized = config_get_bool(activeConfiguration, "Pixelview", "EncodingInitialized");
 	const QString saved = QString::fromUtf8(config_get_string(activeConfiguration, "AdvOut", "Encoder"));
 	int selected = initialized ? pixelviewEncoder->findData(saved) : -1;
-	if (selected < 0) {
+	// Missing explicit encoders remain unavailable, never silently overwrite
+	// their saved settings with a different backend's first-launch defaults.
+	if (!initialized) {
 #ifdef __APPLE__
 		selected = pixelview::preferredEncoder(encoders, true);
 #else
@@ -254,7 +256,8 @@ void OBSBasic::RefreshPixelviewEncoding()
 		pixelviewEncoder->setCurrentIndex(index);
 	const bool idle = !PixelviewConfigurationLocked();
 	const bool ready = index >= 0 && !PixelviewOpusEncoder().empty();
-	pixelviewEncoder->setEnabled(idle && ready);
+	// Allow explicit recovery from an unavailable saved encoder without changing its settings.
+	pixelviewEncoder->setEnabled(idle && pixelviewEncoder->count() > 0);
 	pixelviewAdvanced->setEnabled(idle && ready);
 	pixelviewBitrate->setEnabled(idle && ready);
 	pixelviewProfile->setEnabled(idle && ready);

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <AvailabilityMacros.h>
+#include <Availability.h>
+/* Use the SDK maximum, not AvailabilityMacros.h's deployment-derived maximum. */
 #include <VideoToolbox/VideoToolbox.h>
 
-#if MAC_OS_X_VERSION_MAX_ALLOWED < 150000
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 150000
 #include <dlfcn.h>
 
 /* Public macOS 15 VTQPModulationLevel values, also used by FFmpeg's
@@ -15,7 +16,7 @@ enum { kVTQPModulationLevel_Default = -1, kVTQPModulationLevel_Disable = 0 };
 static inline CFStringRef vt_spatial_aq_key(void)
 {
 	if (__builtin_available(macOS 15.0, *)) {
-#if MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
 		return kVTCompressionPropertyKey_SpatialAdaptiveQPLevel;
 #else
 		/* Resolve the actual public CFString variable, not a guessed key.

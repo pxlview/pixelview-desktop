@@ -9,6 +9,7 @@ int main(int argc,char **argv) {
  QCoreApplication app(argc,argv); if(argc<2 || argc>3) return 2;
  const bool keep=argc==3 && std::string(argv[2])=="--keep-device"; if(argc==3 && !keep) return 2;
  QUrl origin(QString::fromUtf8(argv[1])); if(!pixelview::Desktop::validOrigin(origin,true)) return 2;
+ origin.setPath(""); // Match the account saved by pair() for authentication and cleanup.
  std::string input;std::getline(std::cin,input); if(input.empty())return 2;
  pixelview::DesktopConnection client;
  bool ready=false;

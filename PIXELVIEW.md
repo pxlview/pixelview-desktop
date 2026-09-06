@@ -8,6 +8,20 @@ The native **Start/Stop Streaming** button is bottom-anchored in the sidebar; co
 
 See [distribution licensing requirements](docs/pixelview-distribution-license.md) before shipping binaries; public GitHub source alone is not a completed release compliance audit.
 
+## Company information
+
+Pixelview is a brand of Cinecode OÜ.
+
+```text
+Cinecode OÜ
+Ahtri 12
+10151 Tallinn
+Estonia
+https://pixelview.io
+```
+
+These company details identify the business behind Pixelview; they do not replace upstream copyright notices or change the applicable software licenses.
+
 ## Open
 
 ```sh
