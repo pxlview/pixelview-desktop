@@ -71,6 +71,12 @@ int main() {
 #include <cassert>
 int main(int argc,char **argv) {
  QApplication app(argc,argv);
+ // Yami maps both Mid and Window to grey7; Mid is not a text role.
+ QPalette theme=app.palette();
+ theme.setColor(QPalette::Window,QColor("#1D1F26"));
+ theme.setColor(QPalette::Mid,theme.color(QPalette::Window));
+ theme.setColor(QPalette::WindowText,Qt::white);
+ app.setPalette(theme);
  bool pixelviewPairingDurable=false, pixelviewUnpairRetry=false, nativeBusy=false, closing=false;
  bool pixelviewActualStreaming=false;
  bool pixelviewShutdownPending=false,pixelviewUnpairPending=false,pixelviewClosingSocket=false,pixelviewStopPending=false;
@@ -96,6 +102,25 @@ int main(int argc,char **argv) {
  auto refresh=[&]{REFRESH};
  refresh(); assert(!pair.isHidden() && pair.isEnabled()); assert(identity.text().contains("Pair first"));
  assert(unpair.isHidden());
+ sidebar->layout()->addWidget(&pair); sidebar->layout()->addWidget(&connection);
+ static_cast<QVBoxLayout *>(sidebar->layout())->addStretch();
+ sidebar->resize(330,600); sidebar->show(); app.processEvents();
+ auto assertReadableIdentity=[&]{
+  app.processEvents();
+  assert(identity.isVisible() && row->isVisible());
+  assert(identity.width()>200 && identity.height()>=identity.heightForWidth(identity.width()));
+  assert(row->height()<=identity.sizeHint().height()+8);
+  const QImage rendered=identity.grab().toImage();
+  const QColor background=theme.color(QPalette::Window);
+  int readablePixels=0;
+  for(int y=0;y<rendered.height();++y) for(int x=0;x<rendered.width();++x) {
+   const QColor c=rendered.pixelColor(x,y);
+   if(qAbs(c.red()-background.red())+qAbs(c.green()-background.green())+qAbs(c.blue()-background.blue())>180)
+    ++readablePixels;
+  }
+  assert(readablePixels>20 && "Pairing guidance must paint readable text, not a blank gap");
+ };
+ assertReadableIdentity();
  pixelviewPairingDurable=true; refresh();
  assert(pair.isHidden() && !unpair.isHidden() && unpair.isEnabled() && heading.isHidden());
  assert(identity.text().contains("707880") && identity.text().contains("Offline"));

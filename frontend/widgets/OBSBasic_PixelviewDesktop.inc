@@ -181,7 +181,8 @@ void OBSBasic::RefreshPixelviewPairing()
  pixelviewIdentityStatus->setText(paired ? QStringLiteral("Node %1 · %2").arg(pixelviewIdentity.nodeId,
   pixelviewLease.ready ? QStringLiteral("Connected") : pixelviewLease.intent ? QStringLiteral("Reconnecting…") : QStringLiteral("Offline")) :
   QStringLiteral("Pair first to unlock capture, audio and stream settings."));
- pixelviewIdentityStatus->setStyleSheet(paired && pixelviewLease.ready ? QStringLiteral("color: #68b984;") : QStringLiteral("color: palette(mid);"));
+ // Mid is a background/shading role (equal to Window in Yami), not readable text.
+ pixelviewIdentityStatus->setStyleSheet(paired && pixelviewLease.ready ? QStringLiteral("color: #68b984;") : QStringLiteral("color: palette(window-text);"));
 }
 
 void OBSBasic::PairPixelviewDesktop()
