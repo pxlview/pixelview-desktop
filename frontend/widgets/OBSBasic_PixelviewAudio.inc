@@ -29,8 +29,8 @@ void OBSBasic::InitPixelviewAudio(QWidget *previewContainer)
 	auto *panel = new QWidget(previewContainer);
 	panel->setObjectName(QStringLiteral("pixelviewAudioPanel"));
 	panel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-	panel->setMinimumWidth(360);
-	panel->setMaximumWidth(420);
+	panel->setMinimumWidth(480);
+	panel->setMaximumWidth(560);
 	auto *rows = new QVBoxLayout(panel);
 	rows->setContentsMargins(12, 8, 12, 8);
 	rows->setSpacing(4);
@@ -54,10 +54,13 @@ void OBSBasic::InitPixelviewAudio(QWidget *previewContainer)
 	pixelviewStreamMute->setObjectName(QStringLiteral("pixelviewStreamMute"));
 	pixelviewStreamMute->setAccessibleName(QStringLiteral("Mute audio"));
 	pixelviewStreamMute->setToolTip(QStringLiteral("Mute this Blackmagic source in the stream and local monitoring. Unmuting leaves local listening off; enable Listen locally explicitly."));
-	pixelviewMeterRow->addWidget(pixelviewStreamMute);
 	rows->addLayout(pixelviewMeterRow);
 	auto *listenRow = new QHBoxLayout;
 	listenRow->setSpacing(8);
+	pixelviewStreamMute->setAttribute(Qt::WA_LayoutUsesWidgetRect);
+	pixelviewStreamMute->ensurePolished();
+	pixelviewStreamMute->setMinimumWidth(pixelviewStreamMute->sizeHint().width());
+	listenRow->addWidget(pixelviewStreamMute);
 	pixelviewListen = new QCheckBox(QStringLiteral("Listen locally"), panel);
 	pixelviewListen->setObjectName(QStringLiteral("pixelviewListen"));
 	pixelviewListen->setToolTip(QStringLiteral("Local audio monitoring only; off does not mute the stream. Use headphones to avoid feedback. Device acceptance does not verify audible output."));
@@ -153,8 +156,8 @@ void OBSBasic::RefreshPixelviewAudio()
 	}
 	const bool muted = source && obs_source_muted(source);
 	const QSignalBlocker muteBlock(pixelviewStreamMute), listenBlock(pixelviewListen);
-	pixelviewStreamMute->setEnabled(source != nullptr);
-	pixelviewListen->setEnabled(source != nullptr && !muted && obs_audio_monitoring_available());
+	pixelviewStreamMute->setEnabled(pixelviewPairingDurable && source != nullptr);
+	pixelviewListen->setEnabled(pixelviewPairingDurable && source != nullptr && !muted && obs_audio_monitoring_available());
 	pixelviewStreamMute->setChecked(muted);
 	pixelviewListen->setChecked(source && !muted && obs_source_get_monitoring_enabled(source));
 	if (pixelviewMeter) {
@@ -164,7 +167,7 @@ void OBSBasic::RefreshPixelviewAudio()
 	pixelviewMeterMuted->setVisible(muted);
 
 	// Never rebuild an open/focused combo or silently replace a missing explicit device.
-	pixelviewMonitorDevice->setEnabled(!PixelviewSettingsBusy() && obs_audio_monitoring_available());
+	pixelviewMonitorDevice->setEnabled(!PixelviewConfigurationLocked() && obs_audio_monitoring_available());
 	if (pixelviewMonitorDevice->hasFocus() || pixelviewMonitorDevice->view()->isVisible())
 		return;
 	auto devices = PixelviewMonitoringDevices();
@@ -215,6 +218,7 @@ bool OBSBasic::SavePixelviewAudioSource(obs_source_t *source)
 
 void OBSBasic::ChangePixelviewAudio(bool monitoring, bool checked)
 {
+	if (!pixelviewPairingDurable) return;
 	if (isClosing() || pixelviewAudioShuttingDown || pixelviewAudioRefreshing)
 		return;
 	// Normalize legacy/external invalid flags before taking a rollback snapshot.
@@ -259,7 +263,7 @@ void OBSBasic::SelectPixelviewMonitorDevice(int index)
 {
 	if (isClosing() || index < 0)
 		return;
-	if (PixelviewSettingsBusy()) {
+	if (PixelviewConfigurationLocked()) {
 		const QSignalBlocker blocker(pixelviewMonitorDevice);
 		pixelviewMonitorDevice->setCurrentIndex(pixelviewMonitorDevice->findData(QString::fromUtf8(config_get_string(activeConfiguration, "Audio", "MonitoringDeviceId"))));
 		return;

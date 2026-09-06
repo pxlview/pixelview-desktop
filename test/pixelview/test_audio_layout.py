@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class AudioLayout(unittest.TestCase):
-    def test_native_listen_row_fits_304px(self):
+    def test_native_listen_row_fits_456px(self):
         audio = (ROOT / 'frontend/widgets/OBSBasic_PixelviewAudio.inc').read_text()
         row = 'auto *listenRow = new QHBoxLayout;' + audio.split(
             'auto *listenRow = new QHBoxLayout;', 1)[1].split('rows->addLayout(listenRow);', 1)[0]
@@ -47,8 +47,9 @@ int main(int argc, char **argv) {
     QWidget sidebar;
     sidebar.setStyleSheet(QStringLiteral(SIDEBAR_STYLE));
     auto *panel = new QWidget(&sidebar);
-    panel->setFixedSize(304, 40);
+    panel->setFixedSize(456, 40);
     QCheckBox *pixelviewListen;
+    auto *pixelviewStreamMute = new QCheckBox(QStringLiteral("Mute audio"), panel);
     QComboBox *pixelviewMonitorDevice;
     auto *rows = new QVBoxLayout(panel);
     rows->setContentsMargins(0, 0, 0, 0);
@@ -71,7 +72,11 @@ int main(int argc, char **argv) {
             pixelviewMonitorDevice->style()->polish(pixelviewMonitorDevice);
             listenRow->invalidate();
             listenRow->setGeometry(panel->rect());
+            const auto m = pixelviewStreamMute->geometry();
             const auto c = pixelviewListen->geometry();
+            ok &= listenRow->indexOf(pixelviewStreamMute) >= 0;
+            ok &= c.x() >= m.right() + listenRow->spacing();
+            ok &= m.center().y() == c.center().y();
             const auto d = pixelviewMonitorDevice->geometry();
             const int gap = d.x() - c.x() - c.width();
             std::cout << "nameLength=" << name.size() << " checked=" << checked
@@ -84,11 +89,11 @@ int main(int argc, char **argv) {
                       << " gap=" << gap << " spacing=" << listenRow->spacing() << '\n';
             ok &= c.width() >= pixelviewListen->sizeHint().width();
             ok &= gap >= listenRow->spacing() && gap > 0;
-            ok &= d.right() < 304 && d.width() >= 100;
+            ok &= d.right() < 456 && d.width() >= 100;
             ok &= unrelated.minimumWidth() == unrelatedMinimum;
         }
     }
-    if (!ok) std::cerr << "FAIL: native 304px audio row overlaps or clips\n";
+    if (!ok) std::cerr << "FAIL: native 456px audio row overlaps or clips\n";
     return ok ? 0 : 1;
 }
 '''.replace('SIDEBAR_STYLE', sidebar_style).replace('AUDIO_ROW', row)

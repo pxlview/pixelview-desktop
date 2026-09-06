@@ -10,6 +10,10 @@ Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview.app`.
 Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
 No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
 
+## Pairing/audio UX build (41)
+
+Build 41 implements the durable pairing-first gate, compact authenticated node/status row, guarded pairing/cleanup actions and common Mute/Listen/output row, while removing the redundant capture footer. Native build, deep/strict ad-hoc signature verification and all 84 regressions passed. Final log: `/tmp/pixelview-desktop-build40.log` (the processed bundle number is 41). See [pairing UX verification](pixelview-pairing-ux.md) for behavioral coverage, independent approval and parent-owned GUI scope.
+
 ## Recovery build (38)
 
 Build 38 adds the pairing separator, branded one-Continue crash prompt, and fresh-authority automatic streaming recovery. Native compilation and deep/strict development ad-hoc signature verification passed. See [recovery verification](pixelview-recovery.md) for TDD, independent review and current acceptance scope; older build-35 no-auto-resume descriptions are historical.

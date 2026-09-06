@@ -34,33 +34,33 @@ class StreamLock(unittest.TestCase):
             (encoding, 'SavePixelviewEncoding', 'PixelviewEnforceNoBFrames'),
             (encoding, 'AdvancedPixelviewEncoding', 'QDialog dialog')):
             handler = body(text, name)
-            self.assertIn('PixelviewSettingsBusy()', handler, name)
-            self.assertLess(handler.index('PixelviewSettingsBusy()'), handler.index(effect))
+            self.assertIn('PixelviewConfigurationLocked()', handler, name)
+            self.assertLess(handler.index('PixelviewConfigurationLocked()'), handler.index(effect))
         init = body(main, 'InitPixelview')
         for control, effect in (('pixelviewFit', 'pixelviewFitPolicy.requestReset'),
                                 ('pixelviewSettings', 'CreatePropertiesWindow')):
             handler = init.split('connect(' + control + ',', 1)[1].split('\n\t});', 1)[0]
-            self.assertLess(handler.index('PixelviewSettingsBusy()'), handler.index(effect))
+            self.assertLess(handler.index('PixelviewConfigurationLocked()'), handler.index(effect))
         refresh = body(main, 'RefreshPixelviewDevices')
         for control in ('pixelviewDevices', 'pixelviewSettings', 'pixelviewFit'):
             self.assertRegex(refresh, control + r'->setEnabled\([^;]*!busy')
         self.assertIn('ui->preview->setEnabled(!busy)', refresh)
         self.assertIn('properties->setEnabled(!busy)', refresh)
-        self.assertIn('PixelviewSettingsBusy()', body(main, 'RefreshPixelviewFPS'))
-        self.assertIn('PixelviewSettingsBusy()', body(encoding, 'RefreshPixelviewEncoding'))
+        self.assertIn('PixelviewConfigurationLocked()', body(main, 'RefreshPixelviewFPS'))
+        self.assertIn('PixelviewConfigurationLocked()', body(encoding, 'RefreshPixelviewEncoding'))
         encoder_init = body(encoding, 'InitPixelviewEncoding')
         for control in ('pixelviewEncoder', 'pixelviewBitrate', 'pixelviewProfile'):
             handler = encoder_init.split('connect(' + control + ',', 1)[1].split('\n\t});', 1)[0]
-            self.assertIn('PixelviewSettingsBusy()', handler, control)
-            self.assertLess(handler.index('PixelviewSettingsBusy()'), handler.index('PixelviewEncoderData'))
+            self.assertIn('PixelviewConfigurationLocked()', handler, control)
+            self.assertLess(handler.index('PixelviewConfigurationLocked()'), handler.index('PixelviewEncoderData'))
         self.assertIn('connect(this, &OBSBasic::StreamingPreparing, &dialog, &QDialog::reject)', body(encoding, 'AdvancedPixelviewEncoding'))
         audio_refresh = body(audio, 'RefreshPixelviewAudio')
-        self.assertIn('pixelviewMonitorDevice->setEnabled(!PixelviewSettingsBusy()', audio_refresh)
+        self.assertIn('pixelviewMonitorDevice->setEnabled(!PixelviewConfigurationLocked()', audio_refresh)
         self.assertLess(audio_refresh.index('pixelviewMonitorDevice->setEnabled'), audio_refresh.index('pixelviewMonitorDevice->hasFocus'))
-        self.assertNotIn('PixelviewSettingsBusy()', body(audio, 'ChangePixelviewAudio'))
-        self.assertIn('pixelviewStreamMute->setEnabled(source != nullptr)', audio_refresh)
-        self.assertIn('pixelviewListen->setEnabled(source != nullptr && !muted && obs_audio_monitoring_available())', audio_refresh)
-        self.assertNotIn('if (PixelviewSettingsBusy())', audio_refresh)
+        self.assertNotIn('PixelviewConfigurationLocked()', body(audio, 'ChangePixelviewAudio'))
+        self.assertIn('pixelviewStreamMute->setEnabled(pixelviewPairingDurable && source != nullptr)', audio_refresh)
+        self.assertIn('pixelviewListen->setEnabled(pixelviewPairingDurable && source != nullptr && !muted && obs_audio_monitoring_available())', audio_refresh)
+        self.assertNotIn('if (PixelviewConfigurationLocked())', audio_refresh)
         streaming = body(main, 'InitPixelviewStreaming')
         for signal in ('StreamingPreparing', 'StreamingStarting', 'StreamingStarted', 'StreamingStopping', 'StreamingStopped'):
             self.assertIn('&OBSBasic::' + signal, streaming)

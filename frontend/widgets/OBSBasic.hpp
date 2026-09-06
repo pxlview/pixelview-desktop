@@ -343,7 +343,7 @@ private:
 	QComboBox *pixelviewMonitorDevice = nullptr;
 	void InitPixelviewEncoding(QWidget *sidebar);
 	void RefreshPixelviewEncoding();
-	bool SavePixelviewEncoding(const char *id, obs_data_t *settings);
+	bool SavePixelviewEncoding(const char *id, obs_data_t *settings, bool initializing = false);
 	void AdvancedPixelviewEncoding();
 	QComboBox *pixelviewEncoder = nullptr;
 	QComboBox *pixelviewProfile = nullptr;
@@ -353,7 +353,15 @@ private:
 	QComboBox *pixelviewFPS = nullptr;
 	QTimer *pixelviewRefreshTimer = nullptr;
 	QComboBox *pixelviewDevices = nullptr;
-	QLabel *pixelviewStatus = nullptr;
+	bool pixelviewPairingDurable = false;
+	bool pixelviewUnpairRetry = false;
+	pixelview::DesktopIdentity pixelviewExpectedIdentity;
+	bool PixelviewConfigurationLocked() const;
+	bool PixelviewPairingBusy();
+	void RefreshPixelviewPairing();
+	QLabel *pixelviewPairingHeading = nullptr;
+	QPushButton *pixelviewPair = nullptr;
+	QPushButton *pixelviewUnpair = nullptr;
 	QPushButton *pixelviewSettings = nullptr;
 	QPushButton *pixelviewFit = nullptr;
 	pixelview::FitPolicy pixelviewFitPolicy;

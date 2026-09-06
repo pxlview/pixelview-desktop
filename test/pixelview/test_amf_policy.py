@@ -119,4 +119,4 @@ class AmfPolicy(unittest.TestCase):
         before, after = save.split('obs_properties_apply_settings(props, settings)', 1)
         self.assertIn('PixelviewEnforceNoBFrames(id, settings)', before)
         self.assertLess(after.index('PixelviewEnforceNoBFrames(id, settings)'), after.index('obs_data_save_json_safe(settings'))
-        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data)', ui)
+        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data, true)', ui)

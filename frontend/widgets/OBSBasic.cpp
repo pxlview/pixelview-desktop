@@ -1569,30 +1569,17 @@ void OBSBasic::InitPixelview()
 		QMessageBox::warning(this, QStringLiteral("Pixelview"),
 			QStringLiteral("Could not save the 1920 × 1080 video configuration. Check profile folder permissions."));
 
-	auto *footer = new QToolBar(QStringLiteral("Capture status"), this);
-	footer->setObjectName(QStringLiteral("pixelviewStatusBar"));
-	footer->setMovable(false);
-	footer->setFloatable(false);
-	footer->setContextMenuPolicy(Qt::PreventContextMenu);
-	addToolBar(Qt::BottomToolBarArea, footer);
-	pixelviewStatus = new QLabel(QStringLiteral("Choose a Blackmagic device"), footer);
-	pixelviewStatus->setObjectName(QStringLiteral("pixelviewStatus"));
-	pixelviewStatus->setWordWrap(true);
-	pixelviewStatus->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-	pixelviewStatus->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	pixelviewStatus->setContentsMargins(16, 6, 16, 6);
-	footer->addWidget(pixelviewStatus);
 	setMinimumSize(900, 600);
 	UpdateTitleBar();
 
 	connect(pixelviewDevices, &QComboBox::activated, this, &OBSBasic::SelectPixelviewDevice);
 	connect(pixelviewFit, &QPushButton::clicked, this, [this] {
-		if (PixelviewSettingsBusy()) return;
+		if (PixelviewConfigurationLocked()) return;
 		pixelviewFitPolicy.requestReset();
 		FitPixelviewCapture();
 	});
 	connect(pixelviewSettings, &QPushButton::clicked, this, [this] {
-		if (PixelviewSettingsBusy()) return;
+		if (PixelviewConfigurationLocked()) return;
 		OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
 		if (source) {
 			// Upstream dialog exposes every native property and runs all modified callbacks.
@@ -1638,6 +1625,7 @@ void OBSBasic::InitPixelviewStreaming(QWidget *sidebar)
 	// Configuration lock only: the native transport owns its enabled state.
 	auto lockSettings = [this] {
 		pixelviewStreamingBusy = true;
+		RefreshPixelviewPairing();
 		RefreshPixelviewDevices();
 	};
 	connect(this, &OBSBasic::StreamingPreparing, this, lockSettings);
@@ -1696,12 +1684,12 @@ void OBSBasic::RefreshPixelviewFPS()
 	}
 	pixelviewFPS->setCurrentIndex(index);
 	pixelviewFPS->setEnabled(!pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard));
-	if (PixelviewSettingsBusy()) pixelviewFPS->setEnabled(false);
+	if (PixelviewConfigurationLocked()) pixelviewFPS->setEnabled(false);
 }
 
 void OBSBasic::SelectPixelviewFPS(int index)
 {
-	if (PixelviewSettingsBusy()) { RefreshPixelviewFPS(); return; }
+	if (PixelviewConfigurationLocked()) { RefreshPixelviewFPS(); return; }
 	if (isClosing() || index < 0 || index >= static_cast<int>(pixelview::FrameRates.size()))
 		return;
 	const auto &rate = pixelview::FrameRates[index];
@@ -1794,7 +1782,7 @@ void OBSBasic::RefreshPixelviewDevices()
 		int index = pixelviewDevices->findData(QString::fromStdString(selected));
 		pixelviewDevices->setCurrentIndex(index < 0 ? 0 : index);
 	}
-	const bool busy = PixelviewSettingsBusy();
+	const bool busy = PixelviewConfigurationLocked();
 	pixelviewDevices->setEnabled(!busy && !devices.empty() && !properties);
 	pixelviewSettings->setEnabled(!busy && source && list);
 	pixelviewFit->setEnabled(!busy && source != nullptr);
@@ -1803,30 +1791,31 @@ void OBSBasic::RefreshPixelviewDevices()
 	ui->previewXContainer->setEnabled(!busy);
 	ui->previewYScrollBar->setEnabled(!busy);
 	if (properties) properties->setEnabled(!busy);
+	QString captureHelp;
 	using pixelview::CaptureStatus;
 	switch (status) {
 	case CaptureStatus::PluginUnavailable:
-		pixelviewStatus->setText(QStringLiteral("DeckLink unavailable — check the bundled plugin and Blackmagic Desktop Video, then restart Pixelview."));
+		captureHelp = QStringLiteral("DeckLink unavailable — check the bundled plugin and Blackmagic Desktop Video, then restart Pixelview.");
 		break;
 	case CaptureStatus::NoDevices:
-		pixelviewStatus->setText(QStringLiteral("No Blackmagic input devices found. Connect a device; it will appear automatically."));
+		captureHelp = QStringLiteral("No Blackmagic input devices found. Connect a device; it will appear automatically.");
 		break;
 	case CaptureStatus::NotSelected:
-		pixelviewStatus->setText(QStringLiteral("Choose a Blackmagic input device to begin."));
+		captureHelp = QStringLiteral("Choose a Blackmagic input device to begin.");
 		break;
 	case CaptureStatus::Disconnected:
-		pixelviewStatus->setText(QStringLiteral("Selected device is disconnected. Reconnect it or choose another device. Preview may retain its last frame."));
+		captureHelp = QStringLiteral("Selected device is disconnected. Reconnect it or choose another device. Preview may retain its last frame.");
 		break;
 	case CaptureStatus::AvailableUnverified:
-		pixelviewStatus->setText(QStringLiteral("Device selected • Local preview   |   1920 × 1080 • Drag handles to reframe"));
-		pixelviewStatus->setToolTip(QStringLiteral("Input signal is not verified independently. If the preview is blank or frozen, check input mode, cable and other capture apps."));
+		captureHelp = QStringLiteral("Input signal is not verified independently. If the preview is blank or frozen, check input mode, cable and other capture apps.");
 		break;
 	}
+	pixelviewDevices->setToolTip(captureHelp);
 }
 
 void OBSBasic::SelectPixelviewDevice(int index)
 {
-	if (PixelviewSettingsBusy()) { RefreshPixelviewDevices(); return; }
+	if (PixelviewConfigurationLocked()) { RefreshPixelviewDevices(); return; }
 	if (index <= 0 || isClosing() || properties)
 		return;
 	const QByteArray id = pixelviewDevices->itemData(index).toString().toUtf8();
@@ -1878,7 +1867,7 @@ void OBSBasic::SelectPixelviewDevice(int index)
 	if (!source) {
 		source = obs_source_create("decklink-input", "Pixelview Capture", settings, nullptr);
 		if (!source) {
-			pixelviewStatus->setText(QStringLiteral("Could not create the DeckLink input. Check the application log and Desktop Video installation."));
+			QMessageBox::warning(this, QStringLiteral("Pixelview"), QStringLiteral("Could not create the DeckLink input. Check the application log and Desktop Video installation."));
 			return;
 		}
 		auto *item = obs_scene_add(GetCurrentScene(), source);
@@ -1896,7 +1885,7 @@ void OBSBasic::SelectPixelviewDevice(int index)
 
 void OBSBasic::FitPixelviewCapture()
 {
-	if (PixelviewSettingsBusy()) return;
+	if (PixelviewConfigurationLocked()) return;
 	auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
 	if (!item || !pixelviewFitPolicy.takeRequest())
 		return;

@@ -202,16 +202,16 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 		if (selected >= 0) {
 			const auto selectedId = pixelviewEncoder->itemData(selected).toString().toUtf8();
 			OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", selectedId.constData(), true);
-			SavePixelviewEncoding(selectedId.constData(), data);
+			SavePixelviewEncoding(selectedId.constData(), data, true);
 		}
 	}
 	if (initialized && pixelviewEncoder->findData(saved) >= 0) {
 		// Normalize persisted overrides before the native output handler is reused.
 		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", saved.toUtf8().constData(), false);
-		SavePixelviewEncoding(saved.toUtf8().constData(), data);
+		SavePixelviewEncoding(saved.toUtf8().constData(), data, true);
 	}
 	connect(pixelviewEncoder, &QComboBox::activated, this, [this](int index) {
-		if (PixelviewSettingsBusy()) return;
+		if (PixelviewConfigurationLocked()) return;
 		const auto id = pixelviewEncoder->itemData(index).toString().toUtf8();
 		if (id == config_get_string(activeConfiguration, "AdvOut", "Encoder")) return;
 		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.constData(), true);
@@ -219,7 +219,7 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 		RefreshPixelviewEncoding();
 	});
 	connect(pixelviewBitrate, &QSpinBox::editingFinished, this, [this] {
-		if (PixelviewSettingsBusy()) return;
+		if (PixelviewConfigurationLocked()) return;
 		const std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
 		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.c_str(), false);
 		const int bitrate = pixelview::quickBitrateKbps(pixelviewBitrate->value());
@@ -232,7 +232,7 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	});
 	connect(pixelviewBitrate, &QSpinBox::valueChanged, this, [this] { pixelviewBitrate->setProperty("edited", true); });
 	connect(pixelviewProfile, &QComboBox::activated, this, [this](int index) {
-		if (PixelviewSettingsBusy()) return;
+		if (PixelviewConfigurationLocked()) return;
 		const std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
 		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.c_str(), false);
 		const auto value = pixelviewProfile->itemData(index).toString().toUtf8();
@@ -252,7 +252,7 @@ void OBSBasic::RefreshPixelviewEncoding()
 	const int index = pixelviewEncoder->findData(QString::fromStdString(id));
 	if (!pixelviewEncoder->hasFocus() && !pixelviewEncoder->view()->isVisible() && pixelviewEncoder->currentIndex() != index)
 		pixelviewEncoder->setCurrentIndex(index);
-	const bool idle = !PixelviewSettingsBusy();
+	const bool idle = !PixelviewConfigurationLocked();
 	const bool ready = index >= 0 && !PixelviewOpusEncoder().empty();
 	pixelviewEncoder->setEnabled(idle && ready);
 	pixelviewAdvanced->setEnabled(idle && ready);
@@ -296,9 +296,9 @@ void OBSBasic::RefreshPixelviewEncoding()
 	pixelviewBitrate->setToolTip(QStringLiteral("Quick control: 1–12 Mbps. Actual saved bitrate: %1 kbps. Advanced values are retained until you edit this control.").arg(kbps));
 }
 
-bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings)
+bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool initializing)
 {
-	if (PixelviewSettingsBusy()) return false;
+	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return false;
 	auto fail = [this](const QString &message) { QMessageBox::warning(this, QStringLiteral("Pixelview encoding"), message); return false; };
 	if (pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard))
 		return fail(QStringLiteral("Stop active outputs and wait for stream setup before changing encoding."));
@@ -393,7 +393,7 @@ bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings)
 
 void OBSBasic::AdvancedPixelviewEncoding()
 {
-	if (PixelviewSettingsBusy()) return;
+	if (PixelviewConfigurationLocked()) return;
 	if (pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard)) return;
 	const std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
 	OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.c_str(), false);

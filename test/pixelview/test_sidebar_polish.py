@@ -31,11 +31,8 @@ class SidebarPolish(unittest.TestCase):
     def test_footer_content_and_custom_fps_are_self_explanatory(self):
         main = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
         init = main.split('void OBSBasic::InitPixelview()', 1)[1].split('void OBSBasic::RefreshPixelviewFPS()', 1)[0]
-        self.assertTrue('pixelviewStatus->setSizePolicy(QSizePolicy::Expanding' in init,
-                        'One left-aligned status line needs the full footer width')
-        footer = init.split('auto *footer =', 1)[1].split('setMinimumSize', 1)[0]
-        self.assertEqual(footer.count('footer->addWidget('), 1,
-                         'Do not split the footer into competing, wrapping labels')
+        self.assertNotIn('pixelviewStatusBar', init)
+        self.assertIn('pixelviewDevices->setToolTip(captureHelp)', main)
         self.assertTrue('control->ensurePolished();' in init,
                         'Apply theme minimums before fixing equal control heights')
         self.assertTrue('QStringLiteral("%1/%2 fps")' in main,
@@ -150,6 +147,6 @@ int main() {
         self.assertNotIn('obs_data_apply(data, saved); return', loader)
         startup = text.split('void OBSBasic::InitPixelviewEncoding', 1)[1].split('void OBSBasic::RefreshPixelviewEncoding', 1)[0]
         self.assertIn('Normalize persisted overrides before the native output handler is reused.', startup)
-        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data)', startup)
+        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data, true)', startup)
         save = text.split('bool OBSBasic::SavePixelviewEncoding', 1)[1]
         self.assertLess(save.index('PixelviewEnforceNoBFrames(id, settings)'), save.index('obs_data_save_json_safe(settings'))

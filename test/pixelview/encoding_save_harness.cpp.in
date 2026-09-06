@@ -77,6 +77,8 @@ struct OBSBasic {
  std::shared_future<void> setupStreamingGuard;
  bool pixelviewStreamingBusy = false;
  /* PRODUCTION_BUSY */
+ bool paired = true;
+ bool PixelviewConfigurationLocked() const {return !paired || PixelviewSettingsBusy();}
  Tray *sysTrayReplayBuffer = nullptr;
  struct Profile { std::filesystem::path path; } profile;
  Profile &GetCurrentProfile() { return profile; }
@@ -96,7 +98,7 @@ struct OBSBasic {
  }
  void ReplayBufEnabled(bool) {}
  void UpdateIsRecordingPausable() {}
- bool SavePixelviewEncoding(const char *, obs_data_t *);
+ bool SavePixelviewEncoding(const char *, obs_data_t *, bool initializing = false);
 };
 Handler *CreateAdvancedOutputHandler(OBSBasic *) {
  ++constructions; if (constructFail) throw "injected factory failure"; return new Handler;
@@ -126,7 +128,8 @@ int main(int argc, char **argv) {
   rollbackJsonFail = test == "json-partial-rollback";
   std::ofstream(app.profile.path / "streamEncoder.json") << previousData.profile;
  }
- bool success = app.SavePixelviewEncoding("com.apple.videotoolbox.videoencoder.ave.hevc", &settings);
+ if (test == "unpaired" || test == "rescale-initialize") app.paired=false;
+ bool success = app.SavePixelviewEncoding("com.apple.videotoolbox.videoencoder.ave.hevc", &settings, test == "rescale-initialize");
  if (test.find("rescale") == 0) {
   assert(success); assert(config["AdvOut/RescaleFilter"] == std::to_string(OBS_SCALE_DISABLE));
   app.CheckNativeRescale(); assert(scaledX == 0 && scaledY == 0 && scaleType == OBS_SCALE_DISABLE);
@@ -149,7 +152,7 @@ int main(int argc, char **argv) {
    }
    assert(jsonWrites == 2);
   }
-  if (test == "pending" || test == "lifecycle") assert(jsonWrites == 0 && videoResets == 0 && configWrites == 0 && constructions == 0);
+  if (test == "pending" || test == "lifecycle" || test == "unpaired") assert(jsonWrites == 0 && videoResets == 0 && configWrites == 0 && constructions == 0);
   if (test == "json-video-rollback" || test == "config-delete-rollback" || test == "construct-rollback")
    assert(warning.find("rollback failed") != std::string::npos);
   if (test == "construct" || test == "config") { assert(liveFormat == "NV12"); assert(jsonWrites == 2); }

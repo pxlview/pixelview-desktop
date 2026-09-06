@@ -33,18 +33,16 @@ class MinimalShell(unittest.TestCase):
         self.assertTrue('pixelview::chooseOption(' in select, 'Keep still-supported input choices on device switch')
         self.assertLess(select.index('pixelview::shouldChangeDevice('), select.index('obs_data_set_string(settings'))
 
-    def test_available_device_status_is_concise_without_live_claim(self):
+    def test_available_device_help_is_truthful_without_footer(self):
         main = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
-        self.assertTrue('Device selected • Local preview' in main, 'Keep availability status concise')
-        self.assertTrue('pixelviewStatus->setToolTip(' in main, 'Signal uncertainty belongs in tooltip')
+        self.assertNotIn('Device selected • Local preview', main)
+        self.assertIn('pixelviewDevices->setToolTip(captureHelp)', main)
+        self.assertIn('Input signal is not verified independently', main)
 
-    def test_status_label_gets_available_horizontal_space(self):
+    def test_redundant_status_toolbar_is_absent(self):
         main = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
-        self.assertTrue('pixelviewStatus->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred)' in main,
-                        'Status label must expand instead of wrapping into a tiny column')
-        self.assertTrue('pixelviewStatus->setWordWrap(true)' in main,
-                        'Long device errors must still wrap at narrow window sizes')
-        self.assertNotIn('footer->addWidget(spacer)', main)
+        self.assertNotIn('pixelviewStatusBar', main)
+        self.assertNotIn('footer->addWidget', main)
 
     def test_launch_is_preview_only_and_keeps_native_preview(self):
         main = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()

@@ -59,7 +59,12 @@ public:
  qint64 pixelviewReconnectAt=0,pixelviewAuthDeadline=0;
  int pixelviewBackoff=1000;
  pixelview::DesktopIdentity pixelviewIdentity;
- bool SavePixelviewIdentity(){return true;}
+ bool pixelviewPairingDurable=true;
+ void RefreshPixelviewPairing(){} // Widget policy is compiled with actual Qt in test_pairing_ux.
+ bool identitySaveSucceeds=true;
+ bool pixelviewUnpairRetry=false;
+ pixelview::DesktopIdentity pixelviewExpectedIdentity;
+ bool SavePixelviewIdentity(){return identitySaveSucceeds;}
  Timer heartbeat,watchdog;Timer *pixelviewHeartbeat=&heartbeat,*pixelviewWatchdog=&watchdog;
  Handler handler;Handler *outputHandler=&handler;
  Connection connection;Connection *pixelviewDesktop=&connection;
@@ -97,6 +102,19 @@ public:
 } // namespace fixture: avoid interposing real Qt symbols at link time.
 using namespace fixture;
 int main() {
+ for (bool save : {false,true}) {
+  OBSBasic first; first.bind(); first.pixelviewPairingDurable=false; first.identitySaveSucceeds=save;
+  first.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
+  assert(first.pixelviewPairingDurable==save);
+  assert(first.pixelviewLease.ready==save);
+  assert(first.pixelviewUnpairRetry==!save);
+  Timer::run();
+ }
+ { OBSBasic mismatch;mismatch.bind();mismatch.pixelviewPairingDurable=false;
+ mismatch.pixelviewExpectedIdentity.accept({{"node_id","expected"},{"desktop_id","desktop"}});
+ mismatch.connection.message(R"({"type":"ready","node_id":"other","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
+ assert(!mismatch.pixelviewPairingDurable && !mismatch.pixelviewLease.ready && mismatch.pixelviewUnpairRetry);
+ Timer::run(); }
  // Drain callbacks deliberately run before the queued 100ms accepted close.
  for(int mode : {0,1,2,3}) {
   OBSBasic shutdown;shutdown.bind();Output output;
@@ -175,8 +193,8 @@ int main() {
   assert(tray.text=="Basic.Main.StoppingStreaming" && !tray.enabled);
   finish(true);assert(pending.handler.starts==0);
   setup.set_value();Timer::run();assert(!pending.pixelviewStopPending);
-  assert(pending.button.text=="Basic.Main.StartStreaming" && pending.button.enabled);
-  assert(tray.text=="Basic.Main.StartStreaming" && tray.enabled);
+  assert(pending.button.text=="Basic.Main.StartStreaming" && !pending.button.enabled);
+  assert(tray.text=="Basic.Main.StartStreaming" && !tray.enabled);
   assert(!pending.status.text.contains("Reconnecting") && !pending.pixelviewLease.intent);
   Timer::run();
  }

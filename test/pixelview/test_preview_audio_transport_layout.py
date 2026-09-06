@@ -80,7 +80,9 @@ int main(int argc, char **argv) {
   const auto p = panel->geometry(), c = canvas->geometry(), b = nativeButton->geometry();
   assert(p.x() == 0 && p.top() == c.bottom() + 1);
   assert(p.bottom() == previewContainer->height() - 1);
-  assert(p.width() <= 420 && p.width() >= 360);
+  assert(p.width() <= 560 && p.width() >= 480);
+  assert(pixelviewListen->x() >= pixelviewStreamMute->geometry().right() + 8);
+  assert(pixelviewListen->geometry().center().y() == pixelviewStreamMute->geometry().center().y());
   assert(pixelviewMonitorDevice->x() >= pixelviewListen->x() + pixelviewListen->width() + 8);
   assert(pixelviewMonitorDevice->geometry().right() < panel->width());
   // Native macOS widget rects can extend beyond their layout-item margins.

@@ -134,7 +134,7 @@ int main() {
             bad_json = tmp / 'streamEncoder.json'
             bad_json.mkdir()
             (bad_json / 'keep').write_text('not removable as a file')
-            for case in ('pending', 'lifecycle', 'rescale', 'rescale-main', 'rescale-main42210', 'json-video-rollback', 'config-delete-rollback', 'construct', 'construct-rollback', 'config', 'json-partial', 'json-partial-rollback'):
+            for case in ('unpaired', 'rescale-initialize', 'pending', 'lifecycle', 'rescale', 'rescale-main', 'rescale-main42210', 'json-video-rollback', 'config-delete-rollback', 'construct', 'construct-rollback', 'config', 'json-partial', 'json-partial-rollback'):
                 with self.subTest(case=case):
                     profile = tmp
                     if case.startswith('json-partial'):

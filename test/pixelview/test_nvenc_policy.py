@@ -30,7 +30,7 @@ class NvencPolicy(unittest.TestCase):
         loader = text.split('OBSData PixelviewEncoderData(', 1)[1].split('std::string PixelviewOpusEncoder()', 1)[0]
         self.assertIn('PixelviewEnforceNoBFrames(id, data)', loader)
         startup = text.split('void OBSBasic::InitPixelviewEncoding', 1)[1].split('void OBSBasic::RefreshPixelviewEncoding', 1)[0]
-        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data)', startup)
+        self.assertIn('SavePixelviewEncoding(saved.toUtf8().constData(), data, true)', startup)
         save = text.split('bool OBSBasic::SavePixelviewEncoding', 1)[1].split('void OBSBasic::AdvancedPixelviewEncoding', 1)[0]
         before, after = save.split('obs_properties_apply_settings(props, settings)', 1)
         self.assertIn('PixelviewEnforceNoBFrames(id, settings)', before)
