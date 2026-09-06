@@ -32,6 +32,10 @@
 
 void OBSBasic::DisplayStreamStartError()
 {
+	if (pixelviewDesktop) {
+		pixelviewNativeAttempt = false;
+		pixelviewLease.fail("Native stream setup failed. Check settings and start manually.");
+	}
 	QString message = !outputHandler->lastError.empty() ? QTStr(outputHandler->lastError.c_str())
 							    : QTStr("Output.StartFailedGeneric");
 
@@ -51,6 +55,7 @@ void OBSBasic::StartStreaming()
 		return;
 	}
 	if (disableOutputsRef) {
+		if (pixelviewDesktop) pixelviewLease.fail("Streaming is disabled by the current lifecycle.");
 		if (pixelviewLease.leased) PixelviewOutputStopped();
 		return;
 	}
@@ -82,8 +87,15 @@ void OBSBasic::StartStreaming()
 		sysTrayStream->setText("Basic.Main.PreparingStream");
 	}
 
-	auto finish_stream_setup = [&](bool setupStreamingResult) {
-		if (!PixelviewLeaseValid()) { DisplayStreamStartError(); return; }
+	const auto attempt = pixelviewLease.generation;
+	auto finish_stream_setup = [this, attempt](bool setupStreamingResult) {
+		if (isClosing() || pixelviewStopPending || !PixelviewLeaseValid() ||
+		    !pixelviewLease.acceptSetup(attempt, pixelviewClock.elapsed())) {
+			// A delayed setup belongs to the old attempt, never to a newly acquired lease.
+			if (pixelviewStopPending) QueuePixelviewOutputStopped();
+			return;
+		}
+		if (!pixelviewLease.claimSetup(attempt, pixelviewClock.elapsed())) return;
 		if (!setupStreamingResult) {
 			DisplayStreamStartError();
 			return;
@@ -99,6 +111,14 @@ void OBSBasic::StartStreaming()
 			sysTrayStream->setText("Basic.Main.Connecting");
 		}
 
+		// Native Starting subscribers may synchronously Stop/Unpair or expire authority.
+		if (isClosing() || pixelviewStopPending || !PixelviewLeaseValid() ||
+		    !pixelviewLease.acceptSetup(attempt, pixelviewClock.elapsed())) return;
+		if (disableOutputsRef) {
+			pixelviewLease.fail("Streaming is disabled by the current lifecycle.");
+			return;
+		}
+		pixelviewNativeAttempt = true;
 		if (!outputHandler->StartStreaming(service)) {
 			DisplayStreamStartError();
 			return;
@@ -128,13 +148,15 @@ void OBSBasic::StartStreaming()
 	};
 
 	setupStreamingGuard = outputHandler->SetupStreaming(service, finish_stream_setup);
+	RefreshPixelviewReconnect();
 }
 
 void OBSBasic::StopStreaming()
 {
+	if (pixelviewDesktop) CancelPixelviewStart();
 	SaveProject();
 
-	if (outputHandler->StreamingActive()) {
+	if (!pixelviewDesktop && outputHandler->StreamingActive()) {
 		outputHandler->StopStreaming(streamingStopping);
 	}
 
@@ -174,9 +196,10 @@ void OBSBasic::StopStreaming()
 
 void OBSBasic::ForceStopStreaming()
 {
+	if (pixelviewDesktop) CancelPixelviewStart();
 	SaveProject();
 
-	if (outputHandler->StreamingActive()) {
+	if (!pixelviewDesktop && outputHandler->StreamingActive()) {
 		outputHandler->StopStreaming(true);
 	}
 
@@ -216,6 +239,7 @@ void OBSBasic::ForceStopStreaming()
 
 void OBSBasic::StreamDelayStarting(int sec)
 {
+	if (pixelviewDesktop && (!pixelviewNativeAttempt || pixelviewStopPending || !PixelviewLeaseValid())) return;
 	emit StreamingStarted(true);
 
 	if (sysTrayStream) {
@@ -244,6 +268,7 @@ void OBSBasic::StreamDelayStopping(int sec)
 
 void OBSBasic::StreamingStart()
 {
+	if (pixelviewDesktop && (!pixelviewNativeAttempt || pixelviewStopPending || !PixelviewLeaseValid())) return;
 	emit StreamingStarted();
 	OBSOutputAutoRelease output = obs_frontend_get_streaming_output();
 	ui->statusbar->StreamStarted(output);
@@ -294,6 +319,15 @@ void OBSBasic::StreamStopping()
 
 void OBSBasic::StreamingStop(int code, QString last_error)
 {
+	if (pixelviewDesktop) {
+		// Native WHIP can report stop more than once (including an unused forced output).
+		if (!pixelviewNativeAttempt) return;
+		pixelviewNativeAttempt = false;
+		if (!pixelviewStopPending) {
+			const bool transient = code == OBS_OUTPUT_DISCONNECTED || code == OBS_OUTPUT_CONNECT_FAILED;
+			pixelviewLease.fail(transient ? "Media connection lost. Stream stopped." : "Native output stopped. Start manually.", transient);
+		}
+	}
 	const char *errorDescription = "";
 	DStr errorMessage;
 	bool use_last_error = false;
@@ -369,6 +403,12 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 #endif
 
 	blog(LOG_INFO, STREAMING_STOP);
+	if (pixelviewDesktop) {
+		QueuePixelviewOutputStopped();
+		RefreshPixelviewReconnect();
+		// Retry progress belongs in native controls/status, not a modal error per attempt.
+		if (pixelviewLease.intent || code == OBS_OUTPUT_SUCCESS) return;
+	}
 
 	if (encode_error) {
 		QString msg = last_error.isEmpty() ? QTStr("Output.StreamEncodeError.Msg")
@@ -393,6 +433,10 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 
 void OBSBasic::StreamActionTriggered()
 {
+	if (pixelviewDesktop && pixelviewLease.intent && !outputHandler->StreamingActive()) {
+		StopStreaming();
+		return;
+	}
 	if (outputHandler->StreamingActive()) {
 		bool confirm = config_get_bool(App()->GetUserConfig(), "BasicWindow", "WarnBeforeStoppingStream");
 

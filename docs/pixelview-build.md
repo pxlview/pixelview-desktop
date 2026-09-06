@@ -10,6 +10,10 @@ Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview.app`.
 Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
 No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
 
+## Recovery build (38)
+
+Build 38 adds the pairing separator, branded one-Continue crash prompt, and fresh-authority automatic streaming recovery. Native compilation and deep/strict development ad-hoc signature verification passed. See [recovery verification](pixelview-recovery.md) for TDD, independent review and current acceptance scope; older build-35 no-auto-resume descriptions are historical.
+
 ## Desktop protocol build and harness (build 35)
 
 The current bundle includes the actual Objective-C++ Desktop transport, macOS Keychain support and native WHIP plugin. `bash cmake/macos/pixelview-build.sh` returned `BUILD SUCCEEDED`; `codesign --verify --deep --strict build_macos/frontend/RelWithDebInfo/Pixelview.app` passed and `Pixelview --version` returned `OBS Studio - 32.1.0`. Build log: `/tmp/pixelview-desktop-build35.log`. Regression command: `uv run --with pillow python -m unittest discover -s test/pixelview -p 'test_*.py' -v` (69 passed).

@@ -1534,6 +1534,10 @@ void OBSBasic::InitPixelview()
 	sidebarLayout->addLayout(brandRow);
 	sidebarLayout->addSpacing(8);
 	InitPixelviewDesktop(sidebar);
+	auto *pairingDivider = new QFrame(sidebar);
+	pairingDivider->setObjectName(QStringLiteral("pixelviewPairingDivider"));
+	pairingDivider->setFrameShape(QFrame::HLine);
+	sidebarLayout->addWidget(pairingDivider);
 	pixelviewDevices = new QComboBox(sidebar);
 	pixelviewDevices->setObjectName(QStringLiteral("pixelviewDevices"));
 	pixelviewDevices->setAccessibleName(QStringLiteral("Blackmagic device"));
@@ -2492,11 +2496,17 @@ void OBSBasic::closeWindow()
 	// Keep the control connection until actual output/setup completion, before
 	// scene teardown can pump timers and release the backend reservation.
 	if (pixelviewDesktop) {
-		if (pixelviewLease.pending || pixelviewLease.leased || pixelviewClosingSocket || pixelviewStreamingBusy ||
+		if (!pixelviewShutdownPending) {
+			// Accepted close is terminal, including an existing transient recovery drain.
+			// Keep isClosing_ for final teardown so the deferred close can still run.
+			pixelviewShutdownPending=true;
+			pixelviewWatchdog->stop(); pixelviewHeartbeat->stop();
+			pixelviewLease.fail("Stopping before shutdown.");
+			pixelviewReconnectAt=0; pixelviewAuthDeadline=0;
+		}
+		if (pixelviewStopPending || pixelviewLease.pending || pixelviewLease.leased || pixelviewClosingSocket || pixelviewStreamingBusy ||
 		    (outputHandler && outputHandler->StreamingActive()) ||
 		    (setupStreamingGuard.valid() && setupStreamingGuard.wait_for(std::chrono::seconds(0)) != std::future_status::ready)) {
-			if (!pixelviewClosingSocket) pixelviewLease.fail("Stopping before shutdown.");
-			pixelviewReconnectAt=0;
 			QTimer::singleShot(100, this, &OBSBasic::closeWindow);
 			return;
 		}

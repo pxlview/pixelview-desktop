@@ -313,7 +313,7 @@ bool WHIPOutput::Setup()
 		case rtc::PeerConnection::State::Failed:
 			do_log(LOG_INFO, "PeerConnection state is now: Failed");
 			Stop(false);
-			obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
+			obs_output_signal_stop(output, OBS_OUTPUT_DISCONNECTED);
 			break;
 		case rtc::PeerConnection::State::Closed:
 			do_log(LOG_INFO, "PeerConnection state is now: Closed");
@@ -434,11 +434,11 @@ bool WHIPOutput::Connect()
 	curl_easy_setopt(c, CURLOPT_UNRESTRICTED_AUTH, 0L);
 	curl_easy_setopt(c, CURLOPT_ERRORBUFFER, error_buffer);
 
-	auto doCleanup = [&](bool connectFailed) {
+	auto doCleanup = [&](int stopCode) {
 		curl_easy_cleanup(c);
 		curl_slist_free_all(headers);
-		if (connectFailed) {
-			obs_output_signal_stop(output, OBS_OUTPUT_CONNECT_FAILED);
+		if (stopCode != OBS_OUTPUT_SUCCESS) {
+			obs_output_signal_stop(output, stopCode);
 		}
 	};
 
@@ -453,7 +453,11 @@ bool WHIPOutput::Connect()
 	CURLcode res = curl_easy_perform(c);
 	if (res != CURLE_OK) {
 		do_log(LOG_ERROR, "Connect failed: %s", curl_easy_strerror(res));
-		doCleanup(true);
+		// Retry only transport failures, never TLS/authentication or malformed configuration.
+		const bool transient = res == CURLE_COULDNT_RESOLVE_HOST || res == CURLE_COULDNT_RESOLVE_PROXY ||
+			res == CURLE_COULDNT_CONNECT || res == CURLE_OPERATION_TIMEDOUT ||
+			res == CURLE_SEND_ERROR || res == CURLE_RECV_ERROR || res == CURLE_GOT_NOTHING;
+		doCleanup(transient ? OBS_OUTPUT_CONNECT_FAILED : OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
@@ -461,14 +465,15 @@ bool WHIPOutput::Connect()
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &response_code);
 	if (response_code != 201) {
 		do_log(LOG_ERROR, "Connect failed: HTTP endpoint returned response code %ld", response_code);
-		doCleanup(false);
-		obs_output_signal_stop(output, OBS_OUTPUT_INVALID_STREAM);
+		doCleanup(OBS_OUTPUT_SUCCESS);
+		const bool transient = response_code == 502 || response_code == 503 || response_code == 504;
+		obs_output_signal_stop(output, transient ? OBS_OUTPUT_CONNECT_FAILED : OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
 	if (read_buffer.empty()) {
 		do_log(LOG_ERROR, "Connect failed: No data returned from HTTP endpoint request");
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
@@ -489,7 +494,7 @@ bool WHIPOutput::Connect()
 
 	if (location_header_count < static_cast<size_t>(redirect_count) + 1) {
 		do_log(LOG_ERROR, "WHIP server did not provide a resource URL via the Location header");
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
@@ -518,7 +523,7 @@ bool WHIPOutput::Connect()
 		curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &effective_url);
 		if (effective_url == nullptr) {
 			do_log(LOG_ERROR, "Failed to build Resource URL");
-			doCleanup(true);
+			doCleanup(OBS_OUTPUT_INVALID_STREAM);
 			return false;
 		}
 
@@ -533,7 +538,7 @@ bool WHIPOutput::Connect()
 	CURLUcode rc = curl_url_get(url_builder, CURLUPART_URL, &url, CURLU_NO_DEFAULT_PORT);
 	if (rc) {
 		do_log(LOG_ERROR, "WHIP server provided a invalid resource URL via the Location header");
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
@@ -543,7 +548,7 @@ bool WHIPOutput::Connect()
 		do_log(LOG_ERROR, "WHIP resource origin rejected (credential boundary; URLs redacted)");
 		resource_url.clear();
 		curl_url_cleanup(url_builder);
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		return false;
 	}
 
@@ -560,7 +565,7 @@ bool WHIPOutput::Connect()
 		if (videoLayerStates.size() != layersAccepted) {
 			do_log(LOG_ERROR, "WHIP only accepted %lu layers", layersAccepted);
 			displayError(std::to_string(layersAccepted).c_str(), "Error.SimulcastLayersRejected");
-			doCleanup(true);
+			doCleanup(OBS_OUTPUT_INVALID_STREAM);
 			return false;
 		}
 	}
@@ -570,7 +575,7 @@ bool WHIPOutput::Connect()
 		peer_connection->setRemoteDescription(answer);
 	} catch (const std::invalid_argument &err) {
 		do_log(LOG_ERROR, "WHIP server responded with invalid SDP: %s", "Details redacted");
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		struct dstr error_message;
 		dstr_init_copy(&error_message, obs_module_text("Error.InvalidSDP"));
 		dstr_replace(&error_message, "%1", "Details redacted");
@@ -579,7 +584,7 @@ bool WHIPOutput::Connect()
 		return false;
 	} catch (const std::exception &err) {
 		do_log(LOG_ERROR, "Failed to set remote description: %s", "Details redacted");
-		doCleanup(true);
+		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		struct dstr error_message;
 		dstr_init_copy(&error_message, obs_module_text("Error.NoRemoteDescription"));
 		dstr_replace(&error_message, "%1", "Details redacted");
@@ -587,7 +592,7 @@ bool WHIPOutput::Connect()
 		dstr_free(&error_message);
 		return false;
 	}
-	doCleanup(false);
+	doCleanup(OBS_OUTPUT_SUCCESS);
 
 #if RTC_VERSION_MAJOR == 0 && RTC_VERSION_MINOR > 20 || RTC_VERSION_MAJOR > 0
 	peer_connection->gatherLocalCandidates(iceServers);

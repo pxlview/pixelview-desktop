@@ -3,6 +3,7 @@
 #include <QtCore/QJsonObject>
 #include <functional>
 #include <cmath>
+#include <algorithm>
 namespace pixelview {
 struct DesktopIdentity {
  QString nodeId,desktopId;
@@ -23,24 +24,56 @@ public:
  std::function<void(QString,QString)> publish = [](QString,QString){};
  std::function<void()> halt = []{};
  bool ready=false, pending=false, leased=false, stopping=false;
+ // Session-only intent: never persisted with pairing identity.
+ bool intent=false;
+ bool reconnect=true;
+ bool transientFailure=false;
+ int retries=0, maxRetries=20, retryDelay=2;
+ qint64 retryAt=-1;
+ quint64 generation=0;
+ bool setupClaimed=false;
+ bool acceptSetup(quint64 attempt, qint64 now) const {
+  return attempt==generation && intent && authorized(now);
+ }
+ bool claimSetup(quint64 attempt, qint64 now) {
+  if(setupClaimed || !acceptSetup(attempt,now)) return false;
+  setupClaimed=true;return true;
+ }
+ void outputStarted() {if(intent && leased) retries=0;}
+ static bool transientClose(int code) {
+  return code==0 || code==1001 || code==1006 || code==1011 || code==1012 || code==1013;
+ }
+ std::function<qint64()> monotonic=[] {return qint64(0);};
+ bool takeRetry(qint64 now, bool drained) {
+  if(!intent || retryAt<0 || now<retryAt || !drained) return false;
+  retryAt=-1;return true;
+ }
  qint64 deadline=0, heartbeatRequest=-1;
  bool heartbeatSent(qint64 now) { if(heartbeatRequest>=0) return false; heartbeatRequest=now; return true; }
  bool authorized(qint64 now) const { return ready && leased && now < deadline; }
  bool requestStart(qint64 now) {
   if (!ready || pending || leased || stopping || now >= deadline) return false;
-  pending=true; send({{"type","start"}}); return true;
+  if(!intent) retries=0;
+  ++generation;setupClaimed=false;intent=true; pending=true; send({{"type","start"}}); return true;
  }
- void fail(QString message) {
+ void fail(QString message, bool transient=false) {
+  if(transient && retryAt>=0) return; // Duplicate transport notifications.
+  transientFailure=transient;
+  ++generation;
+  if(!transient || !reconnect || retries>=maxRetries) intent=false;
+  retryAt=-1;
+  if(intent) {++retries;retryAt=monotonic()+qint64(std::max(0,retryDelay))*1000;}
   ready=false; pending=false; leased=false; stopping=false; deadline=0;
   halt(); error(message);
  }
  std::function<void(QString)> error=[](QString){};
  bool development=false;
- void tick(qint64 now) { if(ready && now>=deadline) fail("Connection acknowledgement expired. Stream stopped."); }
+ void tick(qint64 now) { if(ready && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true); }
  void receive(const QJsonObject &o, qint64 now) {
   const auto type=o["type"].toString();
   if (type=="ready" && !ready && o["heartbeat_interval"].toInt()==15 && o["lease_seconds"].toInt()==45) {
-   ready=true; deadline=now+30000;
+   ready=true; deadline=now+30000; heartbeatRequest=-1;
+   if(intent && retryAt<0) requestStart(now);
   } else if(type=="started" && ready && pending && now<deadline) {
    pending=false; leased=true;
    const auto whip=o["config"].toObject()["whip"].toObject();
@@ -65,6 +98,7 @@ public:
   }
  }
  void outputStopped() {
+  ++generation;intent=false;retryAt=-1;
   if (ready && (leased || pending)) {stopping=true;send({{"type","stop"}});}
   leased=pending=false;
  }

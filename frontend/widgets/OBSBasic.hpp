@@ -290,6 +290,11 @@ private:
 	bool RequestPixelviewStart();
 	bool PixelviewLeaseValid() const;
 	void PixelviewOutputStopped();
+	void QueuePixelviewOutputStopped(int delay=0);
+	void CancelPixelviewStart();
+	void RefreshPixelviewReconnect();
+	bool pixelviewStopPending=false, pixelviewNativeAttempt=false;
+	quint64 pixelviewStopGeneration=0;
 	QJsonObject PixelviewReportedSettings();
 	std::unique_ptr<pixelview::DesktopConnection> pixelviewDesktop;
 	pixelview::Desktop pixelviewLease;
@@ -304,6 +309,7 @@ private:
 	QUrl pixelviewOrigin;
 	bool pixelviewDev=false, pixelviewStartPermit=false, pixelviewActualStreaming=false;
 	bool pixelviewClosingSocket=false;
+	bool pixelviewShutdownPending=false;
 	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
 	int pixelviewBackoff=1000;
 	OBSService pixelviewPreviousService;

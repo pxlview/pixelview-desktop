@@ -1,5 +1,9 @@
 # Pixelview capture and encoding prototype — local verification
 
+## Recovery update
+
+See [recovery verification](pixelview-recovery.md) for the new pairing separator, single-button branded crash prompt, and session-only automatic streaming recovery with fresh authority. The build-35 sections below are historical: their no-auto-resume behavior is superseded. Actual GUI/network recovery and cancellation acceptance remains parent-owned until recorded separately.
+
 ## Pairing-first controls (build 35)
 
 The **Pairing / Connection** category is above the DeckLink selector. Its plain-text identity label shows **Not paired** or **Paired · Node <node_id>**, independently of Disconnected, Connected, and Streaming state. HTTP exchange persists nonsecret node/device identity; an accepted authenticated ready message validates it. Identity survives offline/restart; the device token remains only in macOS Keychain.
