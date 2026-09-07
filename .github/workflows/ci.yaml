@@ -1,0 +1,23 @@
+name: Pixelview checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate release contracts
+        run: python3 test/pixelview/test_pixelview_release.py -v
+      - name: Validate bundled license
+        run: python3 test/pixelview/test_pixelview_license.py -v
+      - name: Validate shell syntax
+        run: |
+          bash -n cmake/macos/pixelview-build.sh
+          bash -n cmake/macos/pixelview-release.sh

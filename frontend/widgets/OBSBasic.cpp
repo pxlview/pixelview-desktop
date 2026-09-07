@@ -1382,6 +1382,7 @@ void OBSBasic::OBSInit()
 
 	UpdatePreviewProgramIndicators();
 	InitPixelview();
+	TimedCheckForUpdates();
 	OnFirstLoad();
 
 	if (!hideWindowOnStart) {
@@ -1483,6 +1484,13 @@ void OBSBasic::InitPixelview()
 	auto *appMenu = menuBar()->addMenu(QStringLiteral("Help"));
 #else
 	auto *appMenu = menuBar()->addMenu(QStringLiteral("Pixelview Desktop"));
+#endif
+#ifdef ENABLE_SPARKLE_UPDATER
+	ui->actionCheckForUpdates->setText(QStringLiteral("Check for Updates…"));
+	ui->actionCheckForUpdates->setMenuRole(QAction::NoRole);
+	ui->actionCheckForUpdates->setVisible(true);
+	appMenu->addAction(ui->actionCheckForUpdates);
+	appMenu->addSeparator();
 #endif
 	auto *license = appMenu->addAction(QStringLiteral("License information…"));
 	license->setMenuRole(QAction::NoRole);

@@ -66,16 +66,38 @@ class AppBranding(unittest.TestCase):
                 'project(BrandingProbe LANGUAGES C)\n'
                 'set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0)\n'
                 'set(OBS_BUILD_NUMBER 99)\n'
+                'set(PIXELVIEW_BUILD_NUMBER 1)\n'
+                'set(PIXELVIEW_VERSION 0.0.1)\n'
+                'set(PIXELVIEW_SOURCE_COMMIT test-source)\n'
+                'set(PIXELVIEW_SOURCE_TAG v0.0.1)\n'
+                'set(PIXELVIEW_OBS_BASE_VERSION 32.2.1)\n'
+                'set(PIXELVIEW_OBS_BASE_DESCRIBE 32.2.1-66-g6b3e55072)\n'
+                'set(PIXELVIEW_OBS_BASE_COMMIT 6b3e550729f125b6c5b3767df88c08f5aef9d264)\n'
                 'set(SPARKLE_UPDATE_INTERVAL 0)\n'
-                'set(OBS_VERSION_CANONICAL 32.1.0)\n'
+                'set(OBS_VERSION_CANONICAL 32.2.1)\n'
                 'string(TIMESTAMP CURRENT_YEAR "%Y")\n'
                 'function(set_target_xcode_properties target)\n' + xcode_function + 'endfunction()\n'
                 'add_executable(obs-studio main.c)\n'
                 'set(target obs-studio)\n' + branding
             )
             build = fixture / 'build'
+            compiler = subprocess.run(
+                ['xcrun', '--find', 'clang'],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            env['SDKROOT'] = subprocess.run(
+                ['xcrun', '--sdk', 'macosx', '--show-sdk-path'],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
             commands = [
-                ['cmake', '-S', str(fixture), '-B', str(build), '-G', 'Xcode'],
+                ['cmake', '-S', str(fixture), '-B', str(build), '-G', 'Xcode',
+                 f'-DCMAKE_C_COMPILER={compiler}'],
                 ['xcodebuild', '-project', str(build / 'BrandingProbe.xcodeproj'),
                  '-target', 'obs-studio', '-configuration', 'Debug',
                  'CODE_SIGNING_ALLOWED=NO', 'build'],
@@ -90,8 +112,13 @@ class AppBranding(unittest.TestCase):
             self.assertEqual(plist['CFBundleExecutable'], 'Pixelview')
             self.assertTrue((app / 'Contents/MacOS/Pixelview').is_file())
             self.assertEqual(plist['CFBundleIdentifier'], 'com.pixelview.desktop')
-            self.assertEqual(plist['CFBundleVersion'], '99')
-            self.assertEqual(plist['CFBundleShortVersionString'], '32.1.0')
+            self.assertEqual(plist['CFBundleVersion'], '1')
+            self.assertEqual(plist['CFBundleShortVersionString'], '0.0.1')
+            self.assertEqual(plist['PixelviewSourceCommit'], 'test-source')
+            self.assertEqual(plist['PixelviewSourceTag'], 'v0.0.1')
+            self.assertEqual(plist['PixelviewOBSBaseVersion'], '32.2.1')
+            self.assertEqual(plist['PixelviewOBSBaseDescribe'], '32.2.1-66-g6b3e55072')
+            self.assertEqual(plist['PixelviewOBSBaseCommit'], '6b3e550729f125b6c5b3767df88c08f5aef9d264')
             self.assertEqual(plist['CFBundlePackageType'], 'APPL')
             self.assertEqual(plist['LSMinimumSystemVersion'], '13.0')
             self.assertEqual(plist['CFBundleIconFile'], 'pixelview-app.icns')

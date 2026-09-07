@@ -1,30 +1,30 @@
+option(PIXELVIEW_RELEASE_BUILD "Enable fail-closed Pixelview release checks" OFF)
+
+if(PIXELVIEW_RELEASE_BUILD)
+  if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+    message(FATAL_ERROR "Pixelview macOS releases currently support arm64 only")
+  endif()
+  if(NOT SPARKLE_APPCAST_URL STREQUAL "https://downloads.pixelview.io/desktop/macos/appcast-arm64.xml")
+    message(FATAL_ERROR "Pixelview releases require the production downloads.pixelview.io arm64 appcast")
+  endif()
+  if(NOT SPARKLE_PUBLIC_KEY)
+    message(FATAL_ERROR "Pixelview releases require the Pixelview Sparkle public key")
+  endif()
+  if(SPARKLE_APPCAST_URL MATCHES "obsproject\\.com")
+    message(FATAL_ERROR "Pixelview releases must never use OBS update infrastructure")
+  endif()
+endif()
+
 if(SPARKLE_APPCAST_URL AND SPARKLE_PUBLIC_KEY)
-  find_library(SPARKLE Sparkle)
+  find_library(SPARKLE Sparkle REQUIRED)
   mark_as_advanced(SPARKLE)
-  target_sources(
-    obs-studio
-    PRIVATE
-      utility/MacUpdateThread.cpp
-      utility/MacUpdateThread.hpp
-      utility/OBSSparkle.hpp
-      utility/OBSSparkle.mm
-      utility/OBSUpdateDelegate.h
-      utility/OBSUpdateDelegate.mm
-  )
-  set_source_files_properties(utility/OBSSparkle.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+  target_sources(obs-studio PRIVATE utility/PixelviewSparkle.hpp utility/PixelviewSparkle.mm)
+  set_source_files_properties(utility/PixelviewSparkle.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
 
   target_link_libraries(obs-studio PRIVATE "$<LINK_LIBRARY:FRAMEWORK,${SPARKLE}>")
-
-  if(OBS_BETA GREATER 0 OR OBS_RELEASE_CANDIDATE GREATER 0)
-    set(SPARKLE_UPDATE_INTERVAL 3600) # 1 hour
-  else()
-    set(SPARKLE_UPDATE_INTERVAL 86400) # 24 hours
-  endif()
-
-  target_enable_feature(obs-studio "Sparkle updater" ENABLE_SPARKLE_UPDATER)
-
-  include(cmake/feature-macos-update.cmake)
+  set(SPARKLE_UPDATE_INTERVAL 86400) # 24 hours
+  target_enable_feature(obs-studio "Pixelview Sparkle updater" ENABLE_SPARKLE_UPDATER)
 else()
-  set(SPARKLE_UPDATE_INTERVAL 0) # Set anything that's not an empty integer
-  target_disable_feature(obs-studio "Sparkle updater")
+  set(SPARKLE_UPDATE_INTERVAL 0)
+  target_disable_feature(obs-studio "Pixelview Sparkle updater")
 endif()

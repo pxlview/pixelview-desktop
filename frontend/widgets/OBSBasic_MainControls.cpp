@@ -258,56 +258,13 @@ void OBSBasic::on_actionAdvAudioProperties_triggered()
 	advAudioWindow->SetIconsVisible(iconsVisible);
 }
 
-static BPtr<char> ReadLogFile(const char *subdir, const char *log)
-{
-	char logDir[512];
-	if (GetAppConfigPath(logDir, sizeof(logDir), subdir) <= 0) {
-		return nullptr;
-	}
-
-	string path = logDir;
-	path += "/";
-	path += log;
-
-	BPtr<char> file = os_quick_read_utf8_file(path.c_str());
-	if (!file) {
-		blog(LOG_WARNING, "Failed to read log file %s", path.c_str());
-	}
-
-	return file;
-}
-
 void OBSBasic::UploadLog(const char *subdir, const char *file, const LogUploadType uploadType)
 {
-	BPtr<char> fileString{ReadLogFile(subdir, file)};
-
-	if (!fileString || !*fileString) {
-		OBSApp *app = App();
-		emit app->logUploadFailed(uploadType, QTStr("LogUploadDialog.Errors.NoLogFile"));
-		return;
-	}
-
-	ui->menuLogFiles->setEnabled(false);
-
-	stringstream ss;
-	ss << "OBS " << App()->GetVersionString(false) << " log file uploaded at " << CurrentDateTimeString()
-	   << ((uploadType == OBS::LogFileType::CurrentAppLog) ? " (Active Log)" : " (Complete Log)") << "\n\n"
-	   << fileString;
-
-	if (logUploadThread) {
-		logUploadThread->wait();
-	}
-
-	RemoteTextThread *thread = new RemoteTextThread("https://obsproject.com/logs/upload", "text/plain", ss.str());
-
-	logUploadThread.reset(thread);
-
-	connect(thread, &RemoteTextThread::Result, this,
-		[this, uploadType](const std::string &text, const std::string &error) {
-			logUploadFinished(text, error, uploadType);
-		});
-
-	logUploadThread->start();
+	UNUSED_PARAMETER(subdir);
+	UNUSED_PARAMETER(file);
+	emit App()->logUploadFailed(
+		uploadType,
+		QStringLiteral("Pixelview log upload is not configured. Use the local log folder instead."));
 }
 
 void OBSBasic::on_actionShowLogs_triggered()

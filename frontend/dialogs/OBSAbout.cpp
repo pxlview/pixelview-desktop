@@ -1,15 +1,10 @@
 #include "OBSAbout.hpp"
 
 #include <widgets/OBSBasic.hpp>
-#include <utility/RemoteTextThread.hpp>
 
 #include <qt-wrappers.hpp>
 
-#include <json11.hpp>
-
 #include "moc_OBSAbout.cpp"
-
-using namespace json11;
 
 extern bool steam;
 
@@ -62,67 +57,15 @@ OBSAbout::OBSAbout(QWidget *parent) : QDialog(parent), ui(new Ui::OBSAbout)
 	connect(ui->authors, &ClickableLabel::clicked, this, &OBSAbout::ShowAuthors);
 	connect(ui->license, &ClickableLabel::clicked, this, &OBSAbout::ShowLicense);
 
-	QPointer<OBSAbout> about(this);
-
-	OBSBasic *main = OBSBasic::Get();
-	if (main->patronJson.empty() && !main->patronJsonThread) {
-		RemoteTextThread *thread =
-			new RemoteTextThread("https://obsproject.com/patreon/about-box.json", "application/json");
-		QObject::connect(thread, &RemoteTextThread::Result, main, &OBSBasic::UpdatePatronJson);
-		QObject::connect(thread, &RemoteTextThread::Result, this, &OBSAbout::ShowAbout);
-		main->patronJsonThread.reset(thread);
-		thread->start();
-	} else {
-		ShowAbout();
-	}
+	ShowAbout();
 }
 
 void OBSAbout::ShowAbout()
 {
-	OBSBasic *main = OBSBasic::Get();
-
-	if (main->patronJson.empty()) {
-		return;
-	}
-
-	std::string error;
-	Json json = Json::parse(main->patronJson, error);
-	const Json::array &patrons = json.array_items();
-	QString text;
-
-	text += "<h1>Top Patreon contributors:</h1>";
-	text += "<p style=\"font-size:16px;\">";
-	bool first = true;
-	bool top = true;
-
-	for (const Json &patron : patrons) {
-		std::string name = patron["name"].string_value();
-		std::string link = patron["link"].string_value();
-		int amount = patron["amount"].int_value();
-
-		if (top && amount < 5000) {
-			text += "</p>";
-			top = false;
-		} else if (!first) {
-			text += "<br/>";
-		}
-
-		if (!link.empty()) {
-			text += "<a href=\"";
-			text += QT_UTF8(link.c_str()).toHtmlEscaped();
-			text += "\">";
-		}
-		text += QT_UTF8(name.c_str()).toHtmlEscaped();
-		if (!link.empty()) {
-			text += "</a>";
-		}
-
-		if (first) {
-			first = false;
-		}
-	}
-
-	ui->textBrowser->setHtml(text);
+	ui->textBrowser->setHtml(
+		QStringLiteral("<h1>Pixelview Desktop</h1>"
+			       "<p>Pixelview Desktop is independently maintained and derived from OBS Studio.</p>"
+			       "<p>See Authors and License for upstream attribution and licensing details.</p>"));
 }
 
 void OBSAbout::ShowAuthors()

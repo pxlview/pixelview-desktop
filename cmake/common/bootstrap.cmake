@@ -59,6 +59,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/common" "${CMAK
 include(policies NO_POLICY_SCOPE)
 include(versionconfig)
 include(buildnumber)
+include(pixelview-version)
 include(osconfig)
 
 # Allow selection of common build types via UI

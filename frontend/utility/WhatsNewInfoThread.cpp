@@ -6,7 +6,6 @@
 #include <utility/platform.hpp>
 #include <utility/update-helpers.hpp>
 
-#include <QRandomGenerator>
 #include <blake2.h>
 
 #include <fstream>
@@ -120,45 +119,6 @@ try {
 
 /* ------------------------------------------------------------------------ */
 
-void GenerateGUID(std::string &guid)
-{
-	const char alphabet[] = "0123456789abcdef";
-	QRandomGenerator *rng = QRandomGenerator::system();
-
-	guid.resize(40);
-
-	for (size_t i = 0; i < 40; i++) {
-		guid[i] = alphabet[rng->bounded(0, 16)];
-	}
-}
-
-std::string GetProgramGUID()
-{
-	static std::mutex m;
-	std::lock_guard<std::mutex> lock(m);
-
-	/* NOTE: this is an arbitrary random number that we use to count the
-	 * number of unique OBS installations and is not associated with any
-	 * kind of identifiable information */
-	const char *pguid = config_get_string(App()->GetAppConfig(), "General", "InstallGUID");
-	std::string guid;
-	if (pguid) {
-		guid = pguid;
-	}
-
-	if (guid.empty()) {
-		GenerateGUID(guid);
-
-		if (!guid.empty()) {
-			config_set_string(App()->GetAppConfig(), "General", "InstallGUID", guid.c_str());
-		}
-	}
-
-	return guid;
-}
-
-/* ------------------------------------------------------------------------ */
-
 static void LoadPublicKey(std::string &pubkey)
 {
 	std::string pemFilePath;
@@ -227,16 +187,6 @@ bool FetchAndVerifyFile(const char *name, const char *file, const char *url, std
 
 		QString header = "If-None-Match: " + hash.toHex();
 		headers.push_back(header.toStdString());
-	}
-
-	/* ----------------------------------- *
-	 * get current install GUID            */
-
-	std::string guid = GetProgramGUID();
-
-	if (!guid.empty()) {
-		std::string header = "X-OBS2-GUID: " + guid;
-		headers.push_back(std::move(header));
 	}
 
 	/* ----------------------------------- *

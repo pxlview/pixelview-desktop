@@ -4,7 +4,7 @@ A local OBS fork with capture/encoding settings on the left and an editable Blac
 
 The compact sidebar uses the original `pv-home` logo plus **Desktop**, grouped left-aligned controls, adjacent FPS/Mbps fields, and automatic device discovery without a Refresh button. B-frame controls are hidden and the no-B-frame policy is enforced on saved and Advanced settings. Native device and encoder properties remain available.
 
-The native **Start/Stop Streaming** button is bottom-anchored in the sidebar; configuration locks during streaming while operational audio controls remain usable. Native audio meters, **Mute audio** (stream and local playback), and **Listen locally** with an output selector sit under the preview. The compact live OBS status bar and **Show stats** retain the detailed native telemetry. macOS **Help → License information** shows offline OBS attribution and the full GPL. There is no destination configured by default. Earlier local build **27** verified audio with 63 tests and loopback SRT; current build **29** adds macOS Desktop pairing and lease-gated WHIP and passes 67 tests. See [audio controls and verification](docs/pixelview-audio.md) and [current integration verification](docs/pixelview-acceptance.md).
+The native **Start/Stop Streaming** button is bottom-anchored in the sidebar; configuration locks during streaming while operational audio controls remain usable. Native audio meters, **Mute audio** (stream and local playback), and **Listen locally** with an output selector sit under the preview. The compact live status bar and **Show stats** retain detailed native telemetry. macOS **Help** includes offline license information and, in release builds, **Check for Updates…**. There is no destination configured by default. See [audio controls and verification](docs/pixelview-audio.md) and [current integration verification](docs/pixelview-acceptance.md).
 
 See [distribution licensing requirements](docs/pixelview-distribution-license.md) before shipping binaries; public GitHub source alone is not a completed release compliance audit.
 
@@ -43,4 +43,4 @@ This prototype does not replace `/Applications/OBS.app`. Its settings are separa
 - [UI implementation details](docs/PIXELVIEW-UI.md)
 - [Encoding defaults, native Advanced controls and HEVC color formats](docs/pixelview-encoding.md)
 
-This remains an OBS-derived GPL project; upstream source and attribution are retained. The bundle is locally ad-hoc signed, not a notarized customer release.
+This remains an OBS-derived GPL project; upstream source and attribution are retained. Development builds are ad-hoc signed and updater-free. Start with the top-level [Pixelview release checklist](PIXELVIEW_RELEASE.md); the detailed Apple Silicon customer-release path is in [the macOS release runbook](docs/pixelview-macos-updates-and-releases.md). Release creation requires local Developer ID signing, Apple notarization, a signed Sparkle appcast, and R2 publishing.

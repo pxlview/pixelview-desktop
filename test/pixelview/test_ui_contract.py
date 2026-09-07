@@ -55,7 +55,7 @@ class MinimalShell(unittest.TestCase):
             self.assertIn(contract, main)
         self.assertIn('ui->preview->SetLocked(false)', init)
         self.assertNotIn('on_autoConfigure_triggered, Qt::QueuedConnection', main)
-        self.assertNotIn('TimedCheckForUpdates();', main)
+        self.assertIn('TimedCheckForUpdates();', main)
         self.assertNotIn('Auth::Load();', main)
         entry = (ROOT / 'frontend/obs-main.cpp').read_text()
         self.assertNotIn('check.exec();', entry)

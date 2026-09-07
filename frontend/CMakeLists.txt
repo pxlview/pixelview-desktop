@@ -30,6 +30,12 @@ endif()
 
 add_executable(obs-studio)
 add_executable(OBS::studio ALIAS obs-studio)
+target_compile_definitions(
+  obs-studio
+  PRIVATE "PIXELVIEW_VERSION=\"${PIXELVIEW_VERSION}\""
+          "PIXELVIEW_OBS_BASE_VERSION=\"${PIXELVIEW_OBS_BASE_VERSION}\""
+          "PIXELVIEW_OBS_BASE_DESCRIBE=\"${PIXELVIEW_OBS_BASE_DESCRIBE}\""
+)
 
 target_link_libraries(
   obs-studio

@@ -1,0 +1,15 @@
+{
+  "architecture": "arm64",
+  "appcast_url": "https://downloads.pixelview.io/desktop/macos/appcast-arm64.xml",
+  "download_base_url": "https://downloads.pixelview.io/desktop/macos",
+  "source_repository": "https://github.com/pxlview/pixelview-desktop",
+  "sparkle_public_key": "k1+OJc59i2HxlsfpR/lS8Yv4iU1RttFDMYzahG/N0lw=",
+  "sparkle_key_account": "com.pixelview.desktop",
+  "sparkle_version": "2.9.2",
+  "sparkle_sha256": "1cb340cbbef04c6c0d162078610c25e2221031d794a3449d89f2f56f4df77c95",
+  "sparkle_generate_appcast_sha256": "d70b1872fb6a859695f8abc0a403301d151d1c6c83cf427f4a2716c37a48983d",
+  "sparkle_generate_keys_sha256": "2d18ed3a9c744e58150513d9b2e3c2eb76fd0b9621e3e4678d46dd972547e8fe",
+  "sparkle_sign_update_sha256": "bfb52400c3da18bb4c251ac4818c2c2e1e31c2e649a45b31c11109b6e57b34ad",
+  "apple_team_id": "MA47F3M8W9",
+  "r2_prefix": "desktop/macos"
+}

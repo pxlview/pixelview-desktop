@@ -1708,7 +1708,6 @@ private:
 	void TimedCheckForUpdates();
 	void CheckForUpdates(bool manualUpdate);
 
-	void MacBranchesFetched(const QString &branch, bool manualUpdate);
 	void ReceivedIntroJson(const std::string &text);
 	void ShowWhatsNew(const QString &url);
 

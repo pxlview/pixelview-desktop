@@ -16,6 +16,16 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>PixelviewSourceCommit</key>
+	<string>${PIXELVIEW_SOURCE_COMMIT}</string>
+	<key>PixelviewSourceTag</key>
+	<string>${PIXELVIEW_SOURCE_TAG}</string>
+	<key>PixelviewOBSBaseVersion</key>
+	<string>${PIXELVIEW_OBS_BASE_VERSION}</string>
+	<key>PixelviewOBSBaseDescribe</key>
+	<string>${PIXELVIEW_OBS_BASE_DESCRIBE}</string>
+	<key>PixelviewOBSBaseCommit</key>
+	<string>${PIXELVIEW_OBS_BASE_COMMIT}</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
@@ -44,5 +54,15 @@
 	<string>${SPARKLE_PUBLIC_KEY}</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>${SPARKLE_UPDATE_INTERVAL}</integer>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
 </dict>
 </plist>

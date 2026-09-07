@@ -56,8 +56,8 @@ function(set_target_properties_obs target)
         ${target}
         PROPERTIES PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop
                    PRODUCT_NAME Pixelview
-                   CURRENT_PROJECT_VERSION ${OBS_BUILD_NUMBER}
-                   MARKETING_VERSION ${OBS_VERSION_CANONICAL}
+                   CURRENT_PROJECT_VERSION ${PIXELVIEW_BUILD_NUMBER}
+                   MARKETING_VERSION ${PIXELVIEW_VERSION}
                    # Xcode's generated defaults overwrite CFBundleName with PRODUCT_NAME.
                    # Use the complete explicit plist and expand its build-setting references.
                    GENERATE_INFOPLIST_FILE NO

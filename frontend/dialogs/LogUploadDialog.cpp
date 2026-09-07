@@ -22,7 +22,6 @@
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QTimer>
-#include <QUrlQuery>
 
 #include "moc_LogUploadDialog.cpp"
 
@@ -139,12 +138,7 @@ void LogUploadDialog::copyToClipBoard() const
 
 void LogUploadDialog::openAnalyzeURL() const
 {
-	QUrlQuery queryParameters;
-	queryParameters.addQueryItem("log_url", QUrl::toPercentEncoding(ui->urlEdit->text()));
-	QUrl analyzerUrl = QUrl("https://obsproject.com/tools/analyzer", QUrl::TolerantMode);
-
-	analyzerUrl.setQuery(queryParameters);
-
-	QDesktopServices::openUrl(analyzerUrl);
+	QDesktopServices::openUrl(
+		QUrl("https://github.com/pxlview/pixelview-desktop/issues", QUrl::TolerantMode));
 }
 } // namespace OBS

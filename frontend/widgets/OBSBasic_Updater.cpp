@@ -25,8 +25,7 @@
 #include <utility/AutoUpdateThread.hpp>
 #endif
 #ifdef ENABLE_SPARKLE_UPDATER
-#include <utility/MacUpdateThread.hpp>
-#include <utility/OBSSparkle.hpp>
+#include <utility/PixelviewSparkle.hpp>
 #endif
 #if defined(_WIN32) || defined(WHATSNEW_ENABLED)
 #include <utility/WhatsNewBrowserInitThread.hpp>
@@ -212,35 +211,9 @@ void OBSBasic::CheckForUpdates(bool manualUpdate)
 	updateCheckThread.reset(new AutoUpdateThread(manualUpdate));
 	updateCheckThread->start();
 #elif defined(ENABLE_SPARKLE_UPDATER)
-	ui->actionCheckForUpdates->setEnabled(false);
-
-	if (updateCheckThread && updateCheckThread->isRunning()) {
-		return;
-	}
-
-	MacUpdateThread *mut = new MacUpdateThread(manualUpdate);
-	connect(mut, &MacUpdateThread::Result, this, &OBSBasic::MacBranchesFetched, Qt::QueuedConnection);
-	updateCheckThread.reset(mut);
-	updateCheckThread->start();
-#else
-	UNUSED_PARAMETER(manualUpdate);
-#endif
-}
-
-void OBSBasic::MacBranchesFetched(const QString &branch, bool manualUpdate)
-{
-#ifdef ENABLE_SPARKLE_UPDATER
-	static OBSSparkle *updater;
-
-	if (!updater) {
-		updater = new OBSSparkle(QT_TO_UTF8(branch), ui->actionCheckForUpdates);
-		return;
-	}
-
-	updater->setBranch(QT_TO_UTF8(branch));
+	static PixelviewSparkle *updater = new PixelviewSparkle(ui->actionCheckForUpdates);
 	updater->checkForUpdates(manualUpdate);
 #else
-	UNUSED_PARAMETER(branch);
 	UNUSED_PARAMETER(manualUpdate);
 #endif
 }

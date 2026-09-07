@@ -1044,7 +1044,8 @@ int main(int argc, char *argv[])
 			exit(0);
 
 		} else if (arg_is(argv[i], "--version", "-V")) {
-			std::cout << "OBS Studio - " << App()->GetVersionString(false) << "\n";
+			std::cout << "Pixelview Desktop - " << PIXELVIEW_VERSION << " (OBS base "
+				  << PIXELVIEW_OBS_BASE_DESCRIBE << ")\n";
 			exit(0);
 		}
 	}

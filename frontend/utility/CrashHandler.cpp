@@ -23,7 +23,6 @@
 
 #include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string_view>
 
 #include "moc_CrashHandler.cpp"
@@ -35,7 +34,6 @@ namespace {
 
 constexpr std::string_view crashSentinelPath = "obs-studio/.sentinel";
 constexpr std::string_view crashSentinelPrefix = "run_";
-constexpr std::string_view crashUploadURL = "https://obsproject.com/logs/upload";
 
 #ifndef NDEBUG
 constexpr bool isSentinelEnabled = false;
@@ -43,62 +41,12 @@ constexpr bool isSentinelEnabled = false;
 constexpr bool isSentinelEnabled = true;
 #endif
 
-std::string getCrashLogFileContent(std::filesystem::path crashLogFile)
-{
-	std::string crashLogFileContent;
-
-	if (!std::filesystem::exists(crashLogFile)) {
-		return crashLogFileContent;
-	}
-
-	std::fstream filestream;
-	std::streampos crashLogFileSize = 0;
-	filestream.open(crashLogFile, std::ios::in | std::ios::binary);
-
-	if (filestream.is_open()) {
-		crashLogFileSize = filestream.tellg();
-		filestream.seekg(0, std::ios::end);
-		crashLogFileSize = filestream.tellg() - crashLogFileSize;
-		filestream.seekg(0);
-
-		crashLogFileContent.resize(crashLogFileSize);
-		crashLogFileContent.assign((std::istreambuf_iterator<char>(filestream)),
-					   (std::istreambuf_iterator<char>()));
-	}
-
-	return crashLogFileContent;
-}
-
-std::pair<OBS::TimePoint, std::string> buildCrashLogUploadContent(OBS::PlatformType platformType,
-								  std::string crashLogFileContent)
-{
-	OBS::TimePoint uploadTimePoint = OBS::Clock::now();
-	std::time_t uploadTimePoint_c = OBS::Clock::to_time_t(uploadTimePoint);
-	std::tm uploadTimeLocal = *std::localtime(&uploadTimePoint_c);
-
-	std::stringstream uploadLogMessage;
-
-	switch (platformType) {
-	case OBS::PlatformType::Windows:
-		uploadLogMessage << "OBS " << App()->GetVersionString(false) << " crash file uploaded at "
-				 << std::put_time(&uploadTimeLocal, "%Y-%m-%d, %X") << "\n\n"
-				 << crashLogFileContent;
-		break;
-	case OBS::PlatformType::macOS:
-		uploadLogMessage << crashLogFileContent;
-	default:
-		break;
-	}
-
-	return std::pair<OBS::TimePoint, std::string>(uploadTimePoint, uploadLogMessage.str());
-}
 } // namespace
 
 namespace OBS {
 
 static_assert(!crashSentinelPath.empty(), "Crash sentinel path name cannot be empty");
 static_assert(!crashSentinelPrefix.empty(), "Crash sentinel filename prefix cannot be empty");
-static_assert(!crashUploadURL.empty(), "Crash sentinel upload URL cannot be empty");
 
 CrashHandler::CrashHandler(QUuid appLaunchUUID) : appLaunchUUID_(appLaunchUUID)
 {
@@ -283,34 +231,8 @@ void CrashHandler::saveCrashLogToConfig()
 
 void CrashHandler::uploadCrashLogToServer()
 {
-	std::string crashLogFileContent = getCrashLogFileContent(lastCrashLogFile_);
-
-	if (crashLogFileContent.empty()) {
-		blog(LOG_WARNING, "Most recent crash log file was empty or unavailable for reading");
-		return;
-	}
-
-	emit crashLogUploadStarted();
-
-	PlatformType platformType = getPlatformType();
-
-	auto crashLogUploadContent = buildCrashLogUploadContent(platformType, crashLogFileContent);
-
-	if (crashLogUploadThread_) {
-		crashLogUploadThread_->wait();
-	}
-
-	auto uploadThread =
-		std::make_unique<RemoteTextThread>(crashUploadURL.data(), "text/plain", crashLogUploadContent.second);
-
-	std::swap(crashLogUploadThread_, uploadThread);
-
-	connect(crashLogUploadThread_.get(), &RemoteTextThread::Result, this,
-		&CrashHandler::crashLogUploadResultHandler);
-
-	lastCrashUploadTime_ = crashLogUploadContent.first;
-
-	crashLogUploadThread_->start();
+	emit crashLogUploadFailed(
+		QStringLiteral("Pixelview crash upload is not configured. The crash report remains on this Mac."));
 }
 
 void CrashHandler::handleExistingCrashLogUpload()
