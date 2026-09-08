@@ -43,6 +43,9 @@ void blog(int,const char*){}
 constexpr int OBS_FRONTEND_EVENT_STREAMING_STARTING=1;
 class OBSBasic {
 public:
+ bool pixelviewReceiving=false; void *pixelviewSendOutput=nullptr, *pixelviewReceiveScene=nullptr;
+ void StopPixelviewReceive() {}
+ void obs_set_output_source(int,void*) {}
  pixelview::Desktop pixelviewLease;
  Clock pixelviewClock;
  bool pixelviewStartPermit=false,pixelviewActualStreaming=false,pixelviewStopPending=false;

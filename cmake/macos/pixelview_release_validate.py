@@ -61,6 +61,32 @@ def validate_prepared_release(release_dir, appcast_path, expected, download_base
     if checksum_line != f"{digest}  {artifact}":
         raise ValueError("checksum file does not match artifact basename and digest")
 
+    compliance = manifest.get('compliance')
+    if not isinstance(compliance, dict) or set(compliance) != {'sources', 'notices', 'inventory'}:
+        raise ValueError('compliance source archive, notices and inventory are required')
+    suffixes = {'sources': '-sources.tar.gz', 'notices': '-NOTICES.txt', 'inventory': '-source-inventory.json'}
+    for role, record in compliance.items():
+        name = f"Pixelview-Desktop-{expected['release_id']}{suffixes[role]}"
+        if set(record) != {'name', 'sha256', 'size', 'url'} or record['name'] != name:
+            raise ValueError('compliance artifact name/fields are invalid')
+        path = release_dir / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('compliance artifact missing or unsafe')
+        data = path.read_bytes()
+        if type(record['size']) is not int or record['size'] <= 0 or record['size'] != len(data):
+            raise ValueError('compliance artifact size mismatch')
+        if record['sha256'] != hashlib.sha256(data).hexdigest():
+            raise ValueError('compliance artifact checksum mismatch')
+        if record['url'] != f"{download_base_url}/releases/{expected['release_id']}/{name}":
+            raise ValueError('compliance artifact URL is not the immutable release URL')
+    resolved = json.loads((release_dir / compliance['inventory']['name']).read_text())
+    for field in ('source_commit', 'source_tag', 'release_id'):
+        if resolved.get(field) != expected[field]:
+            raise ValueError(f'compliance inventory {field} mismatch')
+    review = resolved.get('inventory', {}).get('review', {})
+    if review.get('status') != 'approved' or review.get('blockers') != [] or not review.get('evidence'):
+        raise ValueError('compliance inventory review is incomplete')
+
     notes = release_dir / f"{pathlib.Path(artifact).stem}.html"
     if not notes.is_file():
         raise ValueError("signed release notes are missing")

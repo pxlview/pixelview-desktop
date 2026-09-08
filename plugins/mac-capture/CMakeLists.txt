@@ -20,6 +20,14 @@ target_sources(
     window-utils.m
 )
 
+# Keep legacy capture fallbacks buildable at the receiver's macOS 14 floor.
+# ScreenCaptureKit remains the current path; retain deprecation warnings without
+# making them fatal in these two legacy translation units.
+set_source_files_properties(
+  mac-window-capture.m mac-display-capture.m
+  PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated-declarations"
+)
+
 target_link_libraries(
   mac-capture
   PRIVATE

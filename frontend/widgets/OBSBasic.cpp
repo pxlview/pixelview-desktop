@@ -64,6 +64,7 @@
 #include <QFrame>
 #include <QFile>
 #include <QPlainTextEdit>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <properties-view.hpp>
 #include <utility/PixelviewEncoding.hpp>
@@ -92,6 +93,8 @@ using namespace std;
 #include "OBSBasic_PixelviewEncoding.inc"
 #include "OBSBasic_PixelviewDesktop.inc"
 #include "OBSBasic_PixelviewAudio.inc"
+#include "OBSBasic_PixelviewReceive.inc"
+#include "OBSBasic_PixelviewDeepLinks.inc"
 
 extern bool portable_mode;
 extern bool disable_3p_plugins;
@@ -1422,8 +1425,7 @@ void OBSBasic::ShowPixelviewLicense()
 		"Pixelview is a modified distribution based on OBS Studio. "
 		"OBS Studio is copyright its respective OBS Project contributors; "
 		"Pixelview modifications are by the Pixelview contributors.\n\n"
-		"This program is free software under GNU GPL version 2 or, at your option, "
-		"any later version (GPL-2.0-or-later), subject to the included component licenses. "
+		"The original OBS grant is GPL-2.0-or-later, subject to individual component licenses. "
 		"It is provided WITHOUT ANY WARRANTY, including implied warranties of "
 		"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE, to the extent permitted by law.\n\n"
 		"Corresponding source must be made available under the GPL when this program is distributed. "
@@ -1434,9 +1436,6 @@ void OBSBasic::ShowPixelviewLicense()
 	notice->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
 	layout->addWidget(notice);
 
-	auto *text = new QPlainTextEdit(dialog);
-	text->setAccessibleName(QStringLiteral("GNU General Public License"));
-	text->setReadOnly(true);
 	QString licenseText = QStringLiteral(
 		"The bundled license/COPYING could not be loaded. "
 		"Please consult COPYING supplied with this distribution.");
@@ -1449,8 +1448,52 @@ void OBSBasic::ShowPixelviewLicense()
 				licenseText = QString::fromUtf8(contents);
 		}
 	}
-	text->setPlainText(licenseText);
-	layout->addWidget(text, 1);
+	auto *tabs = new QTabWidget(dialog);
+	tabs->setAccessibleName(QStringLiteral("License information sections"));
+	layout->addWidget(tabs, 1);
+	auto addPage = [tabs](const QString &title, const QString &contents) {
+		auto *page = new QPlainTextEdit(tabs);
+		page->setAccessibleName(title);
+		page->setReadOnly(true);
+		page->setPlainText(contents);
+		tabs->addTab(page, title);
+	};
+	auto readAsset = [](const char *name) {
+		std::string assetPath;
+		if (GetDataFilePath(name, assetPath)) {
+			QFile file(QString::fromStdString(assetPath));
+			if (file.open(QIODevice::ReadOnly)) {
+				const QByteArray contents = file.readAll();
+				if (file.error() == QFile::NoError && !contents.trimmed().isEmpty())
+					return QString::fromUtf8(contents);
+			}
+		}
+		return QStringLiteral("Unavailable: bundled %1 could not be loaded.")
+			.arg(QString::fromUtf8(name));
+	};
+	const QString explanation = QStringLiteral(
+		"This combined build contains GPL-3.0-or-later FFmpeg. Distribution of the combined "
+		"work must satisfy GPL version 3 or later and the applicable component obligations. "
+		"This does not relicense all upstream files: OBS retains its GPL-2.0-or-later grant, "
+		"and third-party files retain their own copyright notices and licenses. "
+		"The original full COPYING (GPL version 2) is preserved below alongside the full GPL version 3.\n\n");
+	addPage(QStringLiteral("License"), explanation + QStringLiteral("=== Original OBS COPYING ===\n\n") +
+		licenseText + QStringLiteral("\n\n=== GNU GPL version 3 ===\n\n") + readAsset("license/gplv3.txt") +
+		QStringLiteral("\n\n=== OBS AUTHORS ===\n\n") + readAsset("license/AUTHORS"));
+	addPage(QStringLiteral("Third-party notices"),
+		QStringLiteral("Bundled build inventory and notices follow. A GStreamer SDK inventory alone is not a "
+			       "complete whole-application inventory. This viewer does not certify license compliance. "
+			       "Missing generated notices mean the inventory is unavailable for this development build.\n\n") +
+			readAsset("license/third-party-notices.txt"));
+	addPage(QStringLiteral("Source & build info"),
+		QStringLiteral("Pixelview version: ") + QString::fromUtf8(PIXELVIEW_VERSION) +
+			QStringLiteral("\nOBS base: ") + QString::fromUtf8(PIXELVIEW_OBS_BASE_DESCRIBE) +
+			QStringLiteral("\n\nThe complete build-generated manifest follows, including its source status and exact "
+				       "source URL when supplied. A URL alone is not proof that corresponding source has been "
+				       "published or that all distribution obligations are satisfied. No network request is made. "
+				       "If the manifest is unavailable, source publication and exact build provenance have not "
+				       "been established for this development build.\n\n") +
+			readAsset("license/source-manifest.json"));
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
 	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
@@ -1544,6 +1587,13 @@ void OBSBasic::InitPixelview()
 	brandRow->addStretch();
 	sidebarLayout->addLayout(brandRow);
 	sidebarLayout->addSpacing(8);
+	auto *sharedSidebar = sidebar;
+	pixelviewSendingPanel = new QWidget(sharedSidebar);
+	sidebarLayout->addWidget(pixelviewSendingPanel, 1);
+	sidebar = pixelviewSendingPanel;
+	sidebarLayout = new QVBoxLayout(sidebar);
+	sidebarLayout->setContentsMargins(0, 0, 0, 0);
+	sidebarLayout->setSpacing(12);
 	InitPixelviewDesktop(sidebar);
 	auto *pairingDivider = new QFrame(sidebar);
 	pairingDivider->setObjectName(QStringLiteral("pixelviewPairingDivider"));
@@ -1606,6 +1656,8 @@ void OBSBasic::InitPixelview()
 	InitPixelviewEncoding(sidebar);
 	sidebarLayout->addStretch(1);
 	InitPixelviewStreaming(sidebar);
+	InitPixelviewReceive(sharedSidebar);
+	pixelview::deepLinkInbox().attach(this, [this](const auto &link) { ApplyPixelviewDeepLink(link); });
 	for (auto *control : sidebar->findChildren<QWidget *>()) {
 		if (qobject_cast<QComboBox *>(control) || qobject_cast<QSpinBox *>(control) || qobject_cast<QPushButton *>(control)) {
 			control->ensurePolished();
@@ -1758,6 +1810,7 @@ void OBSBasic::SelectPixelviewFPS(int index)
 
 void OBSBasic::RefreshPixelviewDevices()
 {
+	RefreshPixelviewModes();
 	RefreshPixelviewAudio();
 	RefreshPixelviewFPS();
 	RefreshPixelviewEncoding();
@@ -1832,7 +1885,7 @@ void OBSBasic::RefreshPixelviewDevices()
 void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 {
 	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) { RefreshPixelviewDevices(); return; }
-	if (index <= 0 || isClosing() || properties)
+	if (pixelviewReceiving || index <= 0 || isClosing() || properties)
 		return;
 	const QByteArray id = pixelviewDevices->itemData(index).toString().toUtf8();
 	const QByteArray name = pixelviewDevices->itemText(index).toUtf8();
@@ -1901,7 +1954,7 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 
 void OBSBasic::FitPixelviewCapture(bool initializing)
 {
-	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return;
+	if (pixelviewReceiving || PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return;
 	auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
 	if (!item || !pixelviewFitPolicy.takeRequest())
 		return;
@@ -1933,6 +1986,11 @@ OBSBasic::~OBSBasic() {}
 
 void OBSBasic::applicationShutdown() noexcept
 {
+	StopPixelviewReceive();
+	pixelviewReceiver.reset();
+	pixelviewReceiveScene = nullptr;
+	pixelviewReceiveSource = nullptr;
+	pixelviewSendOutput = nullptr;
 	pixelviewAudioShuttingDown = true;
 	ClearPixelviewAudio();
 	if (pixelviewRefreshTimer)
@@ -2498,6 +2556,13 @@ void OBSBasic::closeWindow()
 	if (isClosing()) {
 		return;
 	}
+	StopPixelviewReceive();
+	if (pixelviewReceiving) {
+		obs_set_output_source(0, pixelviewSendOutput);
+		pixelviewSendOutput = nullptr;
+		pixelviewReceiving = false;
+	}
+	pixelviewReceiveScene = nullptr;
 	// Keep the control connection until actual output/setup completion, before
 	// scene teardown can pump timers and release the backend reservation.
 	if (pixelviewDesktop) {

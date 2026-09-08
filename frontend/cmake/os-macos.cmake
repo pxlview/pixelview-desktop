@@ -8,6 +8,7 @@ target_sources(
     forms/OBSPermissions.ui
     utility/CrashHandler_MacOS.mm
     utility/NativeEventFilter.cpp
+    utility/PixelviewDeepLinkMac.mm
     utility/platform-osx.mm
     utility/system-info-macos.mm
 )
@@ -16,7 +17,7 @@ target_compile_options(obs-studio PRIVATE -Wno-quoted-include-in-framework-heade
 list(APPEND _frontend_objcxx_compile_options -fobjc-arc -fmodules -fcxx-modules)
 
 set_property(
-  SOURCE utility/platform-osx.mm utility/CrashHandler_MacOS.mm
+  SOURCE utility/platform-osx.mm utility/CrashHandler_MacOS.mm utility/PixelviewDeepLinkMac.mm
   APPEND
   PROPERTY COMPILE_OPTIONS ${_frontend_objcxx_compile_options}
 )

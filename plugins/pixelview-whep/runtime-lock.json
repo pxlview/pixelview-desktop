@@ -1,0 +1,108 @@
+{
+  "gstreamer": "1.28.3",
+  "distribution": {
+    "provider": "GStreamer project official macOS universal packages",
+    "version": "1.28.3",
+    "architecture": "arm64",
+    "minimum_macos": "14.0",
+    "authentication": "SHA-256 pinned from upstream HTTPS .sha256sum sidecars; packages are not Apple-signed; detached OpenPGP signatures published but not independently verified",
+    "packages": {
+      "runtime": {
+        "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-1.28.3-universal.pkg",
+        "sha256": "d2940ed843baae348f51e6c014ef4b39502e8dc419e99aac441f5b8d96d02456"
+      },
+      "devel": {
+        "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-devel-1.28.3-universal.pkg",
+        "sha256": "12c01972acb5668416248606bac6148c8d6f0395969650d05a18be9a08de0260"
+      }
+    }
+  },
+  "rswebrtc": "0.15.2",
+  "inputs": {
+    "lib/gstreamer-1.0/libgstcoreelements.dylib": "516b5f71344f26ba3d4ff590adea4995c6de05e4720b65b4f58875d77b1fc281",
+    "lib/libgstreamer-1.0.0.dylib": "a685897177a2a2ee0f30ac9f149e026ccf9271679b0f839d0b0ddd35930264ad",
+    "lib/libgobject-2.0.0.dylib": "b0f0e05236169d860dc223340ed69fb7f994d9d8868dd21ece45a0afa48e857e",
+    "lib/libglib-2.0.0.dylib": "b445687f3d8a9d96188d4bd3857cd21c0f6a12a92d951ae58f0a9de909958a77",
+    "lib/libintl.8.dylib": "498f6c169827179aa156897a71b5f491e173498486e165764ae480343814b05e",
+    "lib/libpcre2-8.0.dylib": "6b7134efbefa7b546f3a06b5fa50d36be3174caf158c0c1beae05370cf3d0122",
+    "lib/libffi.7.dylib": "dd9e74c7dcbc8bc09fc1f859d5acba53ef478159b3304b057339bb692446a7cb",
+    "lib/libgmodule-2.0.0.dylib": "ab16aeb544502ce1b8583a4fb4ef8e9f523e35ff1d17cd2ef0ad868a0ff2d329",
+    "lib/libgstbase-1.0.0.dylib": "b0e07b4c35d208403e84e2cb784d0e0af23f554264dcda0ceb66d12b93fd361b",
+    "lib/gstreamer-1.0/libgstapp.dylib": "e3d63da0c0e9152f95ab61fae30ba25af5490bdc45f97868949579120da2ec30",
+    "lib/libgstapp-1.0.0.dylib": "c31ca2b6e3e00d5a9076b3158e8de1587d33fddf060bd154c9507568b0d23ff0",
+    "lib/gstreamer-1.0/libgstvideoconvertscale.dylib": "b33be7d406efe8df8b812a4fca95a9edb2ada8f8b6b4b83412af2f3e90072138",
+    "lib/libgstvideo-1.0.0.dylib": "7097bb705c3099f4c5be5f69d83ab319ca7f29f9d2f07e21711e5db443985a6c",
+    "lib/liborc-0.4.0.dylib": "263a04970c9effefd928b51fd737ffb61c470aded7f12667d9805aeebb6dfb3b",
+    "lib/gstreamer-1.0/libgstaudioconvert.dylib": "eae2fd6c9acbb3124144ea67166c64d6fb0d7da4ce7bdc2482de8bb94627f788",
+    "lib/libgstaudio-1.0.0.dylib": "48beddabc460421cdd82d8c6bf86a66ddb67545c6d54c4b7df5414dab69f6fd9",
+    "lib/libgsttag-1.0.0.dylib": "729ab2a255e28a2e80186245fe3de6635b687f6c4f360af7a2811da568dfd1b9",
+    "lib/libz.1.dylib": "dd7b454972ef94177a1f2cd01c495d37cf321f64e3714e3fb745f17a6f7c5cfe",
+    "lib/gstreamer-1.0/libgstaudioresample.dylib": "b4cc5b48f4ec50762f7f37abd095279aba0832aaabfeec29bee94e96337cf16e",
+    "lib/gstreamer-1.0/libgstplayback.dylib": "50355052583d865a75e44fcaa4816b7e22674712e5b17fef9dc44033b21f7d0f",
+    "lib/libgstpbutils-1.0.0.dylib": "f617fc2933ed20f9a9721abec314356c65ecb1e3ae4127becd863e9070fde060",
+    "lib/gstreamer-1.0/libgsttypefindfunctions.dylib": "750f115fed4186a1e2808c3a4305fa938972859af8e95790b480069838706fe1",
+    "lib/libgio-2.0.0.dylib": "73a1e6baa5d36cfa8db6be09519f90d9b211617f38a42b5c9254eed95d31d4bc",
+    "lib/gstreamer-1.0/libgstrtp.dylib": "7d0a8add8fbcee9b9e5e82dde15827a9bd0be1d76f4a2040f6ab92ed8f952988",
+    "lib/libgstrtp-1.0.0.dylib": "79f4b9df26fe51a6271f94647982facb59b5385f6f716deb8212d7feee29b9d8",
+    "lib/gstreamer-1.0/libgstrtpmanager.dylib": "9e2dce719a0f899445c4f1f69281de9fb86dfabb53c93e1d3c57c5405aa829a0",
+    "lib/libgstnet-1.0.0.dylib": "cbdfc869b3afc9381c5890b7fe9c0ff677378cfcb6379c40002646e0e7cb8db4",
+    "lib/gstreamer-1.0/libgstwebrtc.dylib": "04ac78c1bc223cc68e77c37ca7e1761efedcdd8094695e6e0664fc42dcbbdd37",
+    "lib/libgstwebrtc-1.0.0.dylib": "de559c4714a04c1a9c67ea4b0d3cb8746c01e7281ca19434cbab178d2602f5fd",
+    "lib/libgstsdp-1.0.0.dylib": "2d21a2952cb9e320054b317c2291a281386ca87968f8ff9b337903dd324dcfa8",
+    "lib/libgstsctp-1.0.0.dylib": "0209834c45303232bd2072c6039c36937ca0f9bffc969f94f7c5e84760df18f6",
+    "lib/libgstwebrtcnice-1.0.0.dylib": "198fd537a93860cd4979d622e0cb80013dca1b284d18797c077724661469a232",
+    "lib/libnice.10.dylib": "19275c848b5aab8fa4b429fcfbba9c2e9db8216985366c7d12174d74aa2b17ba",
+    "lib/libcrypto.3.dylib": "45d3109f4949d27d4cae60c0baa542cda9be4867399be8a65663f3b75af6db00",
+    "lib/gstreamer-1.0/libgstdtls.dylib": "ee6070b10ae6fdd84a30b1df5a8656f6226890d4ed0f0e60adf4bf664b15f173",
+    "lib/libssl.3.dylib": "8f86bf81ccecd06203b6e57961cffce7d16a63439d433d8972c2e19f336d0891",
+    "lib/gstreamer-1.0/libgstsrtp.dylib": "10800a66ba787e437052b50fe5e8ff542cd1867cce2c83d91be543f6e599ff80",
+    "lib/libsrtp2.1.dylib": "74f280b879c18e645f22a3b7d7aecf8c1b701fe04ff711ba4923531f57563a72",
+    "lib/gstreamer-1.0/libgstopus.dylib": "d224aa12e66e06e3f800720e1627101d310b95083b6fdb88ac5623b971d59f0f",
+    "lib/libopus.0.dylib": "d8d4c08d2975ca4433ba70c7aa0664e18307bb4af78cd1421c886da35be0870a",
+    "lib/gstreamer-1.0/libgstvideoparsersbad.dylib": "7bfbe26b72eeb328c3c31e3262e0c3191466e3e4c24b129cf744dac253638cf8",
+    "lib/libgstcodecparsers-1.0.0.dylib": "add36d3decea85e4da730b5bf3ac9d1480538f239921244865947b676784fdbb",
+    "lib/gstreamer-1.0/libgstapplemedia.dylib": "91f01c2fe00a5ce11c06b9f6c05a2c2cd464cec8eff6aa577df8c60a818e047f",
+    "lib/libgstvulkan-1.0.0.dylib": "f86a2457b0d8889ac8a9ec0e95e9ec75bf83527ed7e563eda19f923cdb8e7e92",
+    "lib/libMoltenVK.dylib": "e50581be09547002fef15d4fa01ffd277e8726eb76969f338215770792e70eb8",
+    "lib/libgstgl-1.0.0.dylib": "d3ef3faf5ebeeb54c4634bc57da0f5959d04bcebc26bbdb61c0f2cb1c7d79c66",
+    "lib/gstreamer-1.0/libgstsctp.dylib": "501d74c6cc6f437e6b6889e10b789df31218d511faf0ac310ead0df709feaf71",
+    "lib/gstreamer-1.0/libgstudp.dylib": "963baf1c88d7665022599477c9e0f5ad088c8a2b8f7dc9f5438d51ff7b229464",
+    "lib/gstreamer-1.0/libgsttcp.dylib": "a8501d28cbb95c887ae1fe3ac661a381de14ad25fd9060acb49004c7a2187c4f",
+    "lib/gstreamer-1.0/libgstnice.dylib": "3a8c345d83aa1db1e87b1582b477b2db4671e59b926ebfe8b1e1f001293489bd",
+    "libexec/gstreamer-1.0/gst-plugin-scanner": "cfeea274a27fdbbe15fc6d80fae3b7f077c509b7460f92ee8c9b9d49737a9ad5",
+    "bin/gst-inspect-1.0": "e606f1014130f73180de8ba551cc18ac401cf6d938a7e45ed8c51f460480d561"
+  },
+  "rswebrtc_build": {
+    "version": "0.15.2",
+    "source_url": "https://static.crates.io/crates/gst-plugin-webrtc/gst-plugin-webrtc-0.15.2.crate",
+    "source_sha256": "58b0f7af06bd2e98c71e8ad76a27a4045727b88af769a89d6a7f0fd5903047b0",
+    "patch": "rswebrtc-0.15.2-same-origin.patch",
+    "patch_sha256": "2164b44f8c6781d3375665e6453af16c10fa33ee331f4d1a180fa11cd14251a8",
+    "rust_toolchain": "1.94.0",
+    "target": "aarch64-apple-darwin",
+    "minimum_macos": "14.0",
+    "cargo_args": [
+      "--locked",
+      "--release",
+      "--lib"
+    ],
+    "features": "upstream-default",
+    "sdk_distribution": {
+      "provider": "GStreamer project official macOS universal packages",
+      "version": "1.28.3",
+      "architecture": "arm64",
+      "minimum_macos": "14.0",
+      "authentication": "SHA-256 pinned from upstream HTTPS .sha256sum sidecars; packages are not Apple-signed; detached OpenPGP signatures published but not independently verified",
+      "packages": {
+        "runtime": {
+          "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-1.28.3-universal.pkg",
+          "sha256": "d2940ed843baae348f51e6c014ef4b39502e8dc419e99aac441f5b8d96d02456"
+        },
+        "devel": {
+          "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-devel-1.28.3-universal.pkg",
+          "sha256": "12c01972acb5668416248606bac6148c8d6f0395969650d05a18be9a08de0260"
+        }
+      }
+    }
+  }
+}

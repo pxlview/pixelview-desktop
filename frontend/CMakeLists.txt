@@ -86,7 +86,8 @@ if(OS_WINDOWS)
   include(cmake/os-windows.cmake)
 elseif(OS_MACOS)
   include(cmake/os-macos.cmake)
-  target_sources(obs-studio PRIVATE utility/PixelviewDesktopMac.mm)
+  target_sources(obs-studio PRIVATE utility/PixelviewDesktopMac.mm utility/PixelviewReceiver.cpp utility/PixelviewReceiverMac.mm utility/PixelviewReceiver.hpp)
+  set_source_files_properties(utility/PixelviewReceiverMac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   set_source_files_properties(utility/PixelviewDesktopMac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_link_libraries(obs-studio PRIVATE "-framework Security" "-framework Foundation")
 elseif(OS_LINUX)
@@ -127,3 +128,9 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Header Files" FILES ${ta
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Qt Files" FILES ${target_qt_sources})
 
 set_target_properties_obs(obs-studio PROPERTIES FOLDER frontend OUTPUT_NAME Pixelview)
+
+if(OS_MACOS)
+  include(cmake/pixelview-deep-links.cmake)
+endif()
+
+include(cmake/pixelview-license.cmake)

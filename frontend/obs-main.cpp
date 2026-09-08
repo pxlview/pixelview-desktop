@@ -15,7 +15,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
-#include <OBSApp.hpp>
+#include "OBSApp.hpp"
+#include <utility/PixelviewDeepLinkInbox.hpp>
 
 #include <components/VolumeAccessibleInterface.hpp>
 #ifdef __APPLE__
@@ -661,18 +662,12 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 		}
 #endif
 
-		if (argc > 1) {
-			stringstream stor;
-			stor << argv[1];
-			for (int i = 2; i < argc; ++i) {
-				stor << " " << argv[i];
-			}
-			blog(LOG_INFO, "Command Line Arguments: %s", stor.str().c_str());
-		}
+		// Arguments may contain player credentials; never copy them into logs.
 
 		if (!program.OBSInit()) {
 			return 0;
 		}
+		pixelview::deepLinkInbox().ready();
 
 		prof.Stop();
 

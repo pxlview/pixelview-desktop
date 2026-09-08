@@ -1,0 +1,200 @@
+// Actual receive UI/controller + real Qt/libobs. No network/capture/output hardware.
+#include <QtWidgets/QtWidgets>
+#include <obs.hpp>
+#include <util/config-file.h>
+#include "frontend/utility/PixelviewReceiver.hpp"
+#include "frontend/utility/PixelviewDeepLinkInbox.hpp"
+#include <cassert>
+namespace pixelview {
+class Offline final : public ReceiverTransport {
+public:
+ static inline int logins=0;
+ void login(const QUrl &,const QByteArray &,Events) override { ++logins; }
+ void open(const QUrl &) override {} void send(const QByteArray &) override {} void cancel() override {}
+};
+std::unique_ptr<ReceiverTransport> makeReceiverTransport() { return std::make_unique<Offline>(); }
+}
+struct Application {config_t *config=nullptr; config_t *GetUserConfig(){return config;}} application;
+Application *App(){return &application;}
+class OBSBasic : public QMainWindow {
+public:
+// DECLARATIONS
+ void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
+ QWidget *controlsDock=nullptr;
+ QComboBox *pixelviewDevices=nullptr;
+ QPushButton *pixelviewSettings=nullptr, *pixelviewFit=nullptr;
+ void InitPixelviewDesktop(QWidget *sidebar) {
+  auto *pairing = new QLabel("Offline pairing boundary", sidebar);
+  sidebar->layout()->addWidget(pairing);
+ }
+ void InitSidebar() { // SIDEBAR SETUP
+ }
+ bool closing=false, nativeBusy=false, pixelviewShutdownPending=false, pixelviewStopPending=false, pixelviewUnpairPending=false;
+ struct Lease {bool intent=false,pending=false,leased=false;} pixelviewLease;
+ struct Desktop {bool exchanging=false;} desktop;
+ Desktop *pixelviewDesktop=&desktop;
+ QWidget *properties=nullptr;
+ QUrl pixelviewOrigin{"https://fixture.invalid"}; bool pixelviewDev=false;
+ struct Preview { bool locked=false; bool Locked() const {return locked;} void SetLocked(bool value){locked=value;} } preview;
+ struct UI {QMenu *menuTools=nullptr; Preview *preview=nullptr;} storage, *ui=&storage;
+ bool isClosing() const { return closing; }
+ bool PixelviewSettingsBusy() const {return nativeBusy;}
+ int clears=0;
+ void ClearPixelviewAudio(){++clears;}
+ void RefreshPixelviewAudio(){}
+ void RefreshPixelviewDevices(){RefreshPixelviewModes();}
+ void OpenPreviewProjector(){}
+ template<class T> static void AddProjectorMenuMonitors(QMenu*,T*,void(T::*)()){}
+};
+#include "frontend/widgets/OBSBasic_PixelviewReceive.inc"
+#include "frontend/widgets/OBSBasic_PixelviewDeepLinks.inc"
+int main(int argc,char **argv) {
+ QApplication app(argc,argv); assert(argc==2);
+ // Reproduce the native style's size-hint-only form fields, even offscreen.
+ class NativeFormStyle : public QProxyStyle { public:
+  int styleHint(StyleHint hint,const QStyleOption *option=nullptr,const QWidget *widget=nullptr,QStyleHintReturn *data=nullptr) const override {
+   if(hint==SH_FormLayoutFieldGrowthPolicy) return QFormLayout::FieldsStayAtSizeHint;
+   return QProxyStyle::styleHint(hint,option,widget,data);
+  }
+ };
+ app.setStyle(new NativeFormStyle);
+ assert(config_open(&application.config,argv[1],CONFIG_OPEN_ALWAYS)==CONFIG_SUCCESS);
+ assert(obs_startup("en-US",nullptr,nullptr));
+ // Isolated registered fixture, NOT the DeckLink plugin: no card or audio opens.
+ obs_source_info fixture = {};
+ fixture.id="decklink-input"; fixture.type=OBS_SOURCE_TYPE_INPUT;
+ fixture.get_name=[](void*) {return "Offline fixture";};
+ fixture.create=[](obs_data_t*,obs_source_t *source)->void* {return source;};
+ fixture.destroy=[](void*) {};
+ obs_register_source(&fixture);
+ {
+ OBSSourceAutoRelease capture=obs_source_create("decklink-input","Pixelview Capture",nullptr,nullptr);
+ assert(capture);
+ obs_set_output_source(0, capture);
+ OBSBasic w;
+ w.controlsDock=new QWidget(&w);
+ auto *nativeSend=new QPushButton("Start sending", w.controlsDock); nativeSend->setObjectName("streamButton");
+ w.controlsDock->hide();
+ w.setCentralWidget(new QLabel("Shared canvas/audio fixture"));
+ w.storage.menuTools=new QMenu(&w); w.storage.preview=&w.preview;
+ w.InitSidebar();
+ // Real parser/inbox + complete production mode switching + native form; no network.
+ pixelview::DeepLinkInbox inbox(&app);
+ inbox.submit("pixelview://play/ColdSession?token=cMOkc3M");
+ inbox.attach(&w,[&](const auto &link){ w.ApplyPixelviewDeepLink(link); });
+ assert(!w.pixelviewReceiving); inbox.ready();
+ assert(w.pixelviewReceiving && w.pixelviewReceiveScene && w.pixelviewReceiveId->text()=="ColdSession");
+ assert(w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
+ assert(w.pixelviewReceivePassword->echoMode()==QLineEdit::Password && pixelview::Offline::logins==0);
+ const char *savedSession=config_get_string(application.config,"PixelviewReceive","SessionId");
+ assert(!savedSession || !*savedSession);
+ for(bool *busy : {&w.nativeBusy,&w.pixelviewReceiveIntent,&w.pixelviewLease.intent,&w.pixelviewLease.pending,
+                  &w.pixelviewLease.leased,&w.pixelviewStopPending,&w.pixelviewUnpairPending,&w.desktop.exchanging,
+                  &w.closing,&w.pixelviewShutdownPending}) {
+  *busy=true; inbox.submit("pixelview://play/Rejected?token=Zg");
+  assert(w.pixelviewReceiveId->text()=="ColdSession" && w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
+  assert(pixelview::Offline::logins==0); *busy=false;
+ }
+ inbox.submit("pixelview://play/NoPassword"); assert(w.pixelviewReceivePassword->text().isEmpty());
+ inbox.shutdown(); w.SelectPixelviewMode(0); w.pixelviewReceiveId->clear();
+
+ auto *sidebar=w.findChild<QWidget *>("pixelviewSidebar"); assert(sidebar);
+ w.resize(1000,800); w.show(); app.processEvents();
+ auto *brand=sidebar->findChild<QLabel *>(); assert(brand);
+ assert(w.pixelviewModeTabs->parentWidget()==sidebar && "Mode tabs must belong to the sidebar, not a window header");
+ auto mapped=[](QWidget *widget,QWidget *root){return QRect(widget->mapTo(root,QPoint()),widget->size());};
+ auto tabs=mapped(w.pixelviewModeTabs,sidebar), logo=mapped(brand,sidebar);
+ auto *outer=qobject_cast<QVBoxLayout *>(sidebar->layout()); assert(outer);
+ assert(outer->itemAt(0)->layout()->indexOf(brand)>=0 && logo.bottom()<tabs.top());
+ assert(outer->itemAt(1)->widget()==w.pixelviewModeTabs);
+ assert(tabs.left()==outer->contentsMargins().left());
+ assert(tabs.right()==sidebar->width()-outer->contentsMargins().right()-1);
+ assert(qAbs(w.pixelviewModeTabs->tabRect(0).width()-w.pixelviewModeTabs->tabRect(1).width())<=1);
+ assert(w.pixelviewModeTabs->tabRect(0).width()+w.pixelviewModeTabs->tabRect(1).width()==tabs.width());
+ assert(w.centralWidget()->geometry().left()>sidebar->mapTo(&w,QPoint()).x()+sidebar->width());
+ assert(w.pixelviewReceivePassword->echoMode()==QLineEdit::Password);
+ assert(w.pixelviewReceiveName->text()==QSysInfo::machineHostName());
+ assert(pixelview::Offline::logins==0 && !w.pixelviewReceiveIntent);
+ assert(w.PixelviewManagedSource()==capture);
+ for(bool *busy : {&w.nativeBusy,&w.pixelviewLease.intent,&w.pixelviewLease.pending,&w.pixelviewLease.leased,&w.pixelviewStopPending,&w.desktop.exchanging}) {
+  *busy=true; w.SelectPixelviewMode(1); assert(!w.pixelviewReceiving); *busy=false;
+ }
+ w.SelectPixelviewMode(1); assert(w.pixelviewReceiving && w.pixelviewReceiveScene);
+ app.processEvents();
+ for(auto *field : {w.pixelviewReceiveId,w.pixelviewReceivePassword,w.pixelviewReceiveName})
+  assert(field->width() >= w.pixelviewReceivingPanel->width()-4);
+ assert(w.preview.Locked());
+ // Native hardware settings live in each mode's configuration area. Only the
+ // active transport may occupy the footer; fullscreen belongs to native View.
+ QPushButton *decklink=nullptr;
+ for(auto *button : sidebar->findChildren<QPushButton *>())
+  if(button->text().startsWith("DeckLink output")) decklink=button;
+ assert(decklink && decklink->parentWidget()==w.pixelviewReceivingPanel && "Optional output settings belong inside Receiving, not the shared footer");
+ bool canvasOnly=false;
+ for(auto *label : w.pixelviewReceivingPanel->findChildren<QLabel *>())
+  canvasOnly |= label->text().contains("canvas",Qt::CaseInsensitive) && label->text().contains("optional",Qt::CaseInsensitive);
+ assert(canvasOnly);
+ for(auto *button : sidebar->findChildren<QPushButton *>()) assert(!button->text().contains("Fullscreen"));
+ auto *view=w.menuBar()->actions().last()->menu(); assert(view && view->title()=="View");
+ assert(view->actions().first()->menu()->title()=="Fullscreen canvas");
+ for(auto size : {QSize(900,600),QSize(1200,900)}) {
+  w.resize(size);
+  for(int mode : {0,1}) {
+   w.SelectPixelviewMode(mode); app.processEvents();
+   QWidget *panel=mode ? w.pixelviewReceivingPanel : w.pixelviewSendingPanel;
+   auto *rows=qobject_cast<QVBoxLayout *>(panel->layout()); assert(rows);
+   auto *transport=mode ? w.pixelviewReceiveButton : nativeSend;
+   auto *hardware=mode ? decklink : w.pixelviewSettings;
+   int stretch=-1;
+   for(int i=0;i<rows->count();++i)
+    if(rows->itemAt(i)->spacerItem() && rows->stretch(i)>0) stretch=i;
+   assert(stretch>=0 && rows->count()==stretch+3); // stretch, separator, native transport
+   assert(rows->itemAt(rows->count()-1)->widget()==transport);
+   assert(mapped(hardware,panel).bottom()<rows->itemAt(stretch)->geometry().top());
+   assert(mapped(hardware,sidebar).left()==tabs.left());
+   assert(mapped(panel,sidebar).top()>mapped(w.pixelviewModeTabs,sidebar).bottom());
+   assert(mapped(transport,sidebar).bottom()==sidebar->height()-outer->contentsMargins().bottom()-1);
+   assert(transport->isVisible() && !(mode ? nativeSend : w.pixelviewReceiveButton)->isVisible());
+   const QRect footer(0,mapped(transport,sidebar).top(),sidebar->width(),transport->height());
+   for(auto *button : sidebar->findChildren<QPushButton *>())
+    if(button->isVisible() && mapped(button,sidebar).intersects(footer)) assert(button==transport);
+  }
+ }
+ OBSSourceAutoRelease active=obs_get_output_source(0);
+ assert(active==obs_scene_get_source(w.pixelviewReceiveScene)); active=nullptr;
+ assert(!w.PixelviewManagedSource());
+ OBSDataAutoRelease settings=obs_source_get_settings(capture);
+ assert(obs_data_get_bool(settings,"deactivate_when_not_showing"));
+ w.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("decklink-input","Offline receiver fixture",nullptr));
+ assert(w.PixelviewManagedSource()==w.pixelviewReceiveSource && w.PixelviewManagedSource()!=capture);
+ w.pixelviewReceiveSource=nullptr;
+ w.pixelviewReceiveId->setText("test-session"); w.pixelviewReceivePassword->setText("never-persist-me");
+ w.pixelviewOrigin=QUrl(); // Unpaired installations still receive using controller's production origin.
+ w.StartPixelviewReceive(); assert(w.pixelviewReceiveIntent && pixelview::Offline::logins==1);
+ assert(w.pixelviewReceivePassword->text().isEmpty());
+ assert(!w.pixelviewModeTabs->isEnabled() && !w.pixelviewReceiveId->isEnabled());
+ w.SelectPixelviewMode(0); assert(w.pixelviewReceiving);
+ w.StopPixelviewReceive(true); assert(!w.pixelviewReceiveIntent);
+ assert(w.preview.Locked() && w.pixelviewReceiving);
+ assert(w.pixelviewReceiver->state()==pixelview::PixelviewReceiver::State::Idle);
+ w.SelectPixelviewMode(0); assert(!w.pixelviewReceiving);
+ assert(w.PixelviewManagedSource()==capture);
+ assert(!w.preview.Locked());
+ for (bool locked : {false, true}) {
+  w.preview.SetLocked(locked);
+  w.SelectPixelviewMode(1); assert(w.preview.Locked());
+  w.SelectPixelviewMode(1); // Idempotent entry must not overwrite the snapshot.
+  w.SelectPixelviewMode(0); assert(w.preview.Locked()==locked);
+  w.SelectPixelviewMode(1); assert(w.preview.Locked());
+  w.StopPixelviewReceive(); // The shutdown entrypoint restores sending output/lock.
+  assert(!w.pixelviewReceiving && w.preview.Locked()==locked);
+  active=obs_get_output_source(0); assert(active==capture); active=nullptr;
+  w.StopPixelviewReceive(); assert(w.preview.Locked()==locked);
+ }
+ w.pixelviewReceiveScene=nullptr;
+ obs_set_output_source(0, nullptr);
+ QFile saved(argv[1]); assert(saved.open(QIODevice::ReadOnly)); auto bytes=saved.readAll();
+ assert(bytes.contains("test-session") && !bytes.contains("never-persist-me") && !bytes.contains("Password") && !bytes.contains("endpoint"));
+ }
+ obs_shutdown(); config_close(application.config);
+}

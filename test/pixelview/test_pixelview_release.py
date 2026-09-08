@@ -153,6 +153,22 @@ class PixelviewUpdater(unittest.TestCase):
 
 
 class PixelviewLocalRelease(unittest.TestCase):
+    def test_compliance_is_generated_before_signing_and_published_with_assets(self):
+        script = (ROOT / 'cmake/macos/pixelview-release.sh').read_text()
+        prepare = script.split('prepare_release() {', 1)[1].split('\n}\n', 1)[0]
+        self.assertIn('prepare_compliance', prepare)
+        self.assertLess(prepare.index('prepare_compliance'), prepare.index('resolve_identity_sha1'))
+        self.assertIn('PIXELVIEW_LICENSE_DATA_DIR=', prepare)
+        self.assertIn('rebuild_compliance_bindings', script.split('expected_release_json() {', 1)[1].split('\n}\n', 1)[0])
+        publish = script.split('upload_release_assets() {', 1)[1].split('\n}\n', 1)[0]
+        for suffix in ('sources.tar.gz', 'NOTICES.txt', 'source-inventory.json'):
+            self.assertIn(suffix, publish)
+        self.assertIn('license/source-manifest.json', script)
+        self.assertIn('license/third-party-notices.txt', script)
+        self.assertIn('cmp -s "$compliance_stage/license/$license_asset"', script)
+        self.assertIn('prepare_compliance', script.split('verify_prepared_release() {', 1)[1].split('\n}\n', 1)[0])
+        self.assertIn('-DPIXELVIEW_LICENSE_DATA_DIR=', (ROOT / 'cmake/macos/pixelview-build.sh').read_text())
+
     def test_release_script_is_local_fail_closed_and_r2_appcast_last(self):
         script_path = ROOT / "cmake/macos/pixelview-release.sh"
         self.assertTrue(script_path.is_file())
@@ -422,6 +438,21 @@ class PreparedReleaseValidation(unittest.TestCase):
             "artifact": dmg_name,
             "sha256": digest,
         }
+        compliance = {}
+        for role, suffix, data in (
+            ('sources', '-sources.tar.gz', b'source-archive-fixture'),
+            ('notices', '-NOTICES.txt', b'fixture notices'),
+            ('inventory', '-source-inventory.json', json.dumps({
+                'source_commit': expected['source_commit'], 'source_tag': expected['source_tag'],
+                'release_id': expected['release_id'],
+                'inventory': {'review': {'status': 'approved', 'blockers': [], 'evidence': {'path': 'test-only'}}},
+            }).encode()),
+        ):
+            name = f"Pixelview-Desktop-{expected['release_id']}{suffix}"
+            (release_dir / name).write_bytes(data)
+            compliance[role] = {'name': name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+                                'url': f"https://downloads.pixelview.io/desktop/macos/releases/{expected['release_id']}/{name}"}
+        expected['compliance'] = compliance
         (release_dir / "release-manifest.json").write_text(json.dumps(expected))
         notes_name = "Pixelview-Desktop-0.0.1-build1-arm64.html"
         (release_dir / notes_name).write_text("<p>notes</p>")
@@ -438,6 +469,47 @@ class PreparedReleaseValidation(unittest.TestCase):
             '</item></channel><!-- sparkle:edSignature="feed-fixture" --></rss>'
         )
         return release_dir, appcast, expected
+
+    def test_missing_corresponding_source_is_rejected(self):
+        validator = self._load_validator()
+        with tempfile.TemporaryDirectory() as temp:
+            release_dir, appcast, expected = self._fixture(pathlib.Path(temp))
+            del expected['compliance']
+            (release_dir / 'release-manifest.json').write_text(json.dumps(expected))
+            with self.assertRaisesRegex(ValueError, 'compliance'):
+                validator.validate_prepared_release(release_dir, appcast, expected, 'https://downloads.pixelview.io/desktop/macos')
+
+    def test_compliance_artifacts_fail_closed_on_missing_tampered_or_unsafe_inputs(self):
+        validator = self._load_validator()
+        for case in ('missing', 'tampered', 'symlink', 'size', 'url', 'name', 'review'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                release_dir, appcast, expected = self._fixture(pathlib.Path(temp))
+                record = expected['compliance']['sources']
+                path = release_dir / record['name']
+                if case == 'missing':
+                    path.unlink()
+                elif case == 'tampered':
+                    path.write_bytes(b'x' * record['size'])
+                elif case == 'symlink':
+                    target = pathlib.Path(temp) / 'outside'
+                    path.rename(target)
+                    path.symlink_to(target)
+                elif case == 'size':
+                    record['size'] += 1
+                elif case == 'url':
+                    record['url'] = 'https://example.org/moving-source.tar.gz'
+                elif case == 'name':
+                    record['name'] = '../outside.tar.gz'
+                elif case == 'review':
+                    record = expected['compliance']['inventory']
+                    path = release_dir / record['name']
+                    resolved = json.loads(path.read_text())
+                    resolved['inventory']['review']['status'] = 'blocked'
+                    path.write_text(json.dumps(resolved))
+                    record.update(size=path.stat().st_size, sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+                (release_dir / 'release-manifest.json').write_text(json.dumps(expected))
+                with self.assertRaisesRegex(ValueError, 'compliance'):
+                    validator.validate_prepared_release(release_dir, appcast, expected, 'https://downloads.pixelview.io/desktop/macos')
 
     def test_valid_prepared_release_metadata_is_accepted(self):
         validator = self._load_validator()

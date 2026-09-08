@@ -59,9 +59,18 @@ fi
 
 build_dir="${PIXELVIEW_BUILD_DIR:-$build_dir}"
 
+# Verify pins and stage the curated receiver runtime for EVERY build, including
+# ordinary local development. Missing/unreviewed dependencies fail closed.
+python3 plugins/pixelview-whep/scripts/fetch-gstreamer.py
+python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
+python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer
+
 # Upstream manual Xcode signing signs dependencies on copy. The release mode is
 # fail-closed; ordinary local builds remain ad-hoc and updater-free.
 cmake --preset macos -B "$build_dir" \
+  "-DPIXELVIEW_LICENSE_DATA_DIR=${PIXELVIEW_LICENSE_DATA_DIR:-}" \
+  "-DPIXELVIEW_ENABLE_UNIVERSAL_LINKS=${PIXELVIEW_ENABLE_UNIVERSAL_LINKS:-OFF}" \
+  "-DPIXELVIEW_ASSOCIATED_DOMAINS_PROFILE=${PIXELVIEW_ASSOCIATED_DOMAINS_PROFILE:-}" \
   "-DOBS_CODESIGN_IDENTITY=$identity" "-DOBS_CODESIGN_TEAM=$team" \
   -DOBS_PROVISIONING_PROFILE= \
   "-DOBS_VERSION_OVERRIDE=$obs_base_version" \
@@ -71,7 +80,7 @@ cmake --preset macos -B "$build_dir" \
   "-DCMAKE_C_COMPILER=$c_compiler" \
   "-DCMAKE_CXX_COMPILER=$cxx_compiler" \
   "-DCMAKE_OSX_SYSROOT=$macos_sdk" \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
   -DPIXELVIEW_LEGACY_TOOLCHAIN=ON \
   -DENABLE_BROWSER=OFF -DENABLE_WHATSNEW=OFF -DENABLE_WEBSOCKET=OFF \
   -DENABLE_SCRIPTING=OFF -DENABLE_VIRTUALCAM=OFF \

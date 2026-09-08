@@ -1,0 +1,146 @@
+--- a/src/whep_signaller/client.rs
++++ b/src/whep_signaller/client.rs
+@@ -10,7 +10,7 @@
+ use crate::RUNTIME;
+ use crate::signaller::{Signallable, SignallableImpl};
+ use crate::utils::{
+-    WaitError, build_reqwest_client, parse_redirect_location, set_ice_servers, wait, wait_async,
++    WaitError, build_reqwest_client, set_ice_servers, wait, wait_async,
+ };
+ use bytes::Bytes;
+ use futures::future;
+@@ -31,7 +31,6 @@
+     )
+ });
+ 
+-const MAX_REDIRECTS: u8 = 10;
+ const DEFAULT_TIMEOUT: u32 = 15;
+ const WHEP_CLIENT_OFFER: &str = "whep-client-offer";
+ const WHEP_SSO: &str = "whep-server-sent-offer";
+@@ -107,8 +106,8 @@
+ 
+ impl Default for WhepClient {
+     fn default() -> Self {
+-        // We'll handle redirects manually since the default redirect handler does not
+-        // reuse the authentication token on the redirected server
++        // Pixelview accepts direct endpoint responses only. This policy also
++        // disables automatic redirects for all PATCH requests.
+         let pol = reqwest::redirect::Policy::none();
+         let client = build_reqwest_client(pol);
+ 
+@@ -267,21 +266,14 @@
+ 
+     async fn parse_endpoint_response(
+         &self,
+-        sess_desc: WebRTCSessionDescription,
++        _sess_desc: WebRTCSessionDescription,
+         resp: reqwest::Response,
+-        redirects: u8,
++        _redirects: u8,
+         webrtcbin: gst::Element,
+     ) {
+-        let endpoint;
+-        let use_link_headers;
+-
+-        {
+-            let settings = self.settings.lock().unwrap();
+-            endpoint =
+-                reqwest::Url::parse(settings.whep_endpoint.as_ref().unwrap().as_str()).unwrap();
+-            use_link_headers = settings.use_link_headers;
+-            drop(settings);
+-        }
++        // Resolve only against the URL of the actual accepted HTTP response.
++        let endpoint = resp.url().clone();
++        let use_link_headers = self.settings.lock().unwrap().use_link_headers;
+ 
+         let status = resp.status();
+ 
+@@ -318,17 +310,26 @@
+                     }
+                 };
+ 
+-                let url = reqwest::Url::parse(endpoint.as_str()).unwrap();
+-
+-                gst::debug!(CAT, imp = self, "WHEP resource: {:?}", location);
+-
+-                let url = match url.join(location) {
++                let url = match endpoint.join(location) {
+                     Ok(joined_url) => joined_url,
+                     Err(err) => {
+                         self.raise_error(format!("URL join operation failed: {err:?}"));
+                         return;
+                     }
+                 };
++
++                // Pixelview: never let session Location redirect credentials or SDP
++                // to another origin (including TLS downgrade or URL userinfo).
++                if !matches!(url.scheme(), "http" | "https")
++                    || url.scheme() != endpoint.scheme()
++                    || url.host_str() != endpoint.host_str()
++                    || url.port_or_known_default() != endpoint.port_or_known_default()
++                    || !url.username().is_empty()
++                    || url.password().is_some()
++                {
++                    self.raise_error("WHEP resource Location must be same-origin without userinfo".to_string());
++                    return;
++                }
+ 
+                 let server_sent_offer = status == StatusCode::NOT_ACCEPTABLE;
+ 
+@@ -363,46 +364,7 @@
+             }
+ 
+             status if status.is_redirection() => {
+-                if redirects < MAX_REDIRECTS {
+-                    match parse_redirect_location(resp.headers(), &endpoint) {
+-                        Ok(redirect_url) => {
+-                            {
+-                                let mut state = self.state.lock().unwrap();
+-                                *state = match *state {
+-                                    State::Post { redirects: _r } => State::Post {
+-                                        redirects: redirects + 1,
+-                                    },
+-                                    /*
+-                                     * As per section 4.6 of the specification, redirection is
+-                                     * not required to be supported for the PATCH and DELETE
+-                                     * requests to the final WHEP resource URL. Only the initial
+-                                     * POST request may support redirection.
+-                                     */
+-                                    State::Running { .. } => {
+-                                        self.raise_error(
+-                                            "Unexpected redirection in RUNNING state".to_string(),
+-                                        );
+-                                        return;
+-                                    }
+-                                    _ => unreachable!(),
+-                                };
+-                                drop(state);
+-                            }
+-
+-                            gst::warning!(
+-                                CAT,
+-                                imp = self,
+-                                "Redirecting endpoint to {}",
+-                                redirect_url.as_str()
+-                            );
+-
+-                            Box::pin(self.do_post(sess_desc, webrtcbin, redirect_url)).await
+-                        }
+-                        Err(e) => self.raise_error(e.to_string()),
+-                    }
+-                } else {
+-                    self.raise_error("Too many redirects. Unable to connect.".to_string());
+-                }
++                self.raise_error("WHEP endpoint redirects are disabled".to_string());
+             }
+ 
+             s => {
+@@ -664,7 +626,7 @@
+         gst::debug!(CAT, imp = self, "DELETE request on {}", resource_url);
+ 
+         /* DELETE request goes to the WHEP resource URL. See section 3 of the specification. */
+-        let client = build_reqwest_client(reqwest::redirect::Policy::default());
++        let client = build_reqwest_client(reqwest::redirect::Policy::none());
+         let future = async {
+             client
+                 .delete(resource_url.clone())

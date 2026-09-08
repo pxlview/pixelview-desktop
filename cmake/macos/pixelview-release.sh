@@ -16,11 +16,14 @@ release_lock_owned=0
 appcast_precondition=""
 notary_key_file=""
 notary_auth_args=()
+compliance_stage=""
+source_cache="${PIXELVIEW_SOURCE_CACHE:-$HOME/Library/Caches/pixelview-sources}"
 
 cleanup() {
   if [[ -n "$mounted_release_path" && -d "$mounted_release_path" ]]; then
     hdiutil detach "$mounted_release_path" >/dev/null 2>&1 || true
   fi
+  [[ -z "$compliance_stage" ]] || rm -rf "$compliance_stage"
   [[ -z "$temporary_stage" ]] || rm -rf "$temporary_stage"
   [[ -z "$downloaded_dmg" ]] || rm -f "$downloaded_dmg"
   [[ -z "$notary_key_file" ]] || rm -f "$notary_key_file"
@@ -286,6 +289,11 @@ verify_app() {
   local app_to_verify="${1:-$app_path}"
   local expected_certificate="${2:-}"
   [[ -d "$app_to_verify" ]] || die "missing application bundle: $app_to_verify"
+  [[ -n "$compliance_stage" ]] || die "compliance assets have not been regenerated"
+  local license_asset
+  for license_asset in third-party-notices.txt source-manifest.json; do
+    cmp -s "$compliance_stage/license/$license_asset" "$app_to_verify/Contents/Resources/license/$license_asset" || die "signed app compliance asset differs: $license_asset"
+  done
   codesign --verify --deep --strict --verbose=2 "$app_to_verify"
   local plist="$app_to_verify/Contents/Info.plist"
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" == com.pixelview.desktop ]] || die "wrong bundle identifier"
@@ -311,14 +319,40 @@ verify_app() {
   fi
 }
 
+prepare_compliance() {
+  [[ -z "$compliance_stage" ]] || rm -rf "$compliance_stage"
+  compliance_stage="$(mktemp -d /tmp/pixelview-compliance.XXXXXX)"
+  python3 "$root/cmake/macos/pixelview_sources.py" --root "$root" --tag "$tag" \
+    --cache "$source_cache" --output "$compliance_stage" --release-id "$release_id" \
+    --base-url "$download_base_url" > "$compliance_stage/bindings.json" || die "corresponding-source review/materials incomplete"
+  # The builder also writes license/third-party-notices.txt and
+  # license/source-manifest.json for installation before code signing.
+}
+
+rebuild_compliance_bindings() {
+  # Rebuild from the clean tag and pinned cache, not mutable staged metadata.
+  local scratch result
+  scratch="$(mktemp -d /tmp/pixelview-source-verify.XXXXXX)"
+  if ! result="$(python3 "$root/cmake/macos/pixelview_sources.py" --root "$root" --tag "$tag" \
+    --cache "$source_cache" --output "$scratch" --release-id "$release_id" --base-url "$download_base_url")"; then
+    rm -rf "$scratch"
+    die "corresponding-source verification failed"
+  fi
+  rm -rf "$scratch"
+  printf '%s\n' "$result"
+}
+
 expected_release_json() {
-  python3 - "$version" "$build_number" "$release_id" "$source_commit" "$tag" "$obs_base_version" "$obs_base_describe" "$obs_base_commit" "$apple_team_id" "$source_repository" "$dmg_name" "$dmg_path" <<'PY'
+  local compliance_json
+  compliance_json="$(rebuild_compliance_bindings)" || die "could not rebuild compliance bindings"
+  python3 - "$version" "$build_number" "$release_id" "$source_commit" "$tag" "$obs_base_version" "$obs_base_describe" "$obs_base_commit" "$apple_team_id" "$source_repository" "$dmg_name" "$dmg_path" "$compliance_json" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
-version, build, release_id, commit, tag, obs_version, obs_describe, obs_commit, team, source_repository, dmg_name, dmg_path = sys.argv[1:]
+version, build, release_id, commit, tag, obs_version, obs_describe, obs_commit, team, source_repository, dmg_name, dmg_path, compliance_json = sys.argv[1:]
 manifest = {
+    "compliance": json.loads(compliance_json),
     "product": "Pixelview Desktop",
     "version": version,
     "build_number": int(build),
@@ -370,6 +404,7 @@ verify_build_progression() {
 }
 
 verify_prepared_release() {
+  prepare_compliance
   [[ -f "$dmg_path" && -f "$dmg_path.sha256" && -f "$notes_path" && -f "$release_dir/release-manifest.json" && -f "$appcast_path" ]] || die "prepared release assets are incomplete"
   local expected_json
   expected_json="$(expected_release_json)"
@@ -418,6 +453,7 @@ prepare_notary_auth() {
 }
 
 prepare_release() {
+  prepare_compliance
   [[ -n "$identity" ]] || die "PIXELVIEW_CODESIGN_IDENTITY is required"
   [[ "$team" == "$apple_team_id" ]] || die "PIXELVIEW_CODESIGN_TEAM must match the configured Apple team"
   identity="$(resolve_identity_sha1)" || die "Developer ID identity is not installed or ambiguous"
@@ -439,6 +475,7 @@ prepare_release() {
   PIXELVIEW_SPARKLE_PUBLIC_KEY="$sparkle_public_key" \
   PIXELVIEW_SOURCE_COMMIT="$source_commit" \
   PIXELVIEW_SOURCE_TAG="$tag" \
+  PIXELVIEW_LICENSE_DATA_DIR="$compliance_stage/license" \
     bash cmake/macos/pixelview-build.sh
 
   verify_app "$app_path" "$identity"
@@ -449,6 +486,7 @@ prepare_release() {
   ditto "$app_path" "$stage/Pixelview.app"
   ln -s /Applications "$stage/Applications"
   cp "$root/COPYING" "$root/AUTHORS" "$stage/"
+  cp "$compliance_stage/Pixelview-Desktop-$release_id-NOTICES.txt" "$stage/THIRD-PARTY-NOTICES.txt"
   cat > "$stage/RELEASE.txt" <<EOF
 Pixelview Desktop $version (build $build_number)
 Architecture: arm64
@@ -482,6 +520,10 @@ EOF
   grep -F 'sparkle:edSignature=' "$appcast_path" >/dev/null || die "appcast enclosure is unsigned"
 
   (cd "$release_dir" && shasum -a 256 "$dmg_name" > "$dmg_name.sha256")
+  # Keep source tarballs out of Sparkle's application-archive scan above.
+  cp "$compliance_stage/Pixelview-Desktop-$release_id-sources.tar.gz" \
+    "$compliance_stage/Pixelview-Desktop-$release_id-NOTICES.txt" \
+    "$compliance_stage/Pixelview-Desktop-$release_id-source-inventory.json" "$release_dir/"
   expected_release_json > "$release_dir/release-manifest.json"
   verify_prepared_release
   printf 'Prepared %s\nStaged appcast: %s\n' "$dmg_path" "$appcast_path"
@@ -618,6 +660,12 @@ upload_release_assets() {
   local files=("$dmg_path" "$dmg_path.sha256" "$notes_path" "$release_dir/release-manifest.json")
   local keys=("$key_prefix/$dmg_name" "$key_prefix/$dmg_name.sha256" "$key_prefix/$notes_name" "$key_prefix/release-manifest.json")
   local content_types=("application/x-apple-diskimage" "text/plain" "text/html" "application/json")
+  local compliance_name
+  for compliance_name in "Pixelview-Desktop-$release_id-sources.tar.gz" "Pixelview-Desktop-$release_id-NOTICES.txt" "Pixelview-Desktop-$release_id-source-inventory.json"; do
+    files+=("$release_dir/$compliance_name")
+    keys+=("$key_prefix/$compliance_name")
+  done
+  content_types+=("application/gzip" "text/plain; charset=utf-8" "application/json")
   local states=() state i
 
   # Check every immutable key before writing any of them. Existing identical

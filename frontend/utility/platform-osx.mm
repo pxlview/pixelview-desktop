@@ -18,6 +18,7 @@
 #import "platform.hpp"
 
 #import <OBSApp.hpp>
+#include "PixelviewDeepLinkInbox.hpp"
 
 #import <util/threading.h>
 
@@ -331,6 +332,12 @@ void TaskbarOverlaySetStatus(TaskbarOverlayStatus status)
 @end
 
 @implementation OBSApplication
+
+- (void)setDelegate:(id<NSApplicationDelegate>)delegate
+{
+    [super setDelegate:delegate];
+    pixelview::installMacDeepLinks();
+}
 
 - (void)sendEvent:(NSEvent *)event
 {

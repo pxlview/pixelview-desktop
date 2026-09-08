@@ -16,6 +16,7 @@
 ******************************************************************************/
 
 #include "OBSApp.hpp"
+#include <utility/PixelviewDeepLinkInbox.hpp>
 
 #include <components/Multiview.hpp>
 #include <dialogs/LogUploadDialog.hpp>
@@ -882,6 +883,10 @@ OBSApp::OBSApp(int &argc, char **argv, profiler_name_store_t *store)
 	  profilerNameStore(store),
 	  appLaunchUUID_(QUuid::createUuid())
 {
+	pixelview::deepLinkInbox();
+#ifdef __APPLE__
+	pixelview::installMacDeepLinks();
+#endif
 	installNativeEventFilter(new OBS::NativeEventFilter);
 
 	/* fix float handling */

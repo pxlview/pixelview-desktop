@@ -53,7 +53,7 @@ void OBSBasic::InitPixelviewAudio(QWidget *previewContainer)
 	pixelviewStreamMute = new QCheckBox(QStringLiteral("Mute audio"), panel);
 	pixelviewStreamMute->setObjectName(QStringLiteral("pixelviewStreamMute"));
 	pixelviewStreamMute->setAccessibleName(QStringLiteral("Mute audio"));
-	pixelviewStreamMute->setToolTip(QStringLiteral("Mute this Blackmagic source in the stream and local monitoring. Unmuting leaves local listening off; enable Listen locally explicitly."));
+	pixelviewStreamMute->setToolTip(QStringLiteral("Mute the active source in the stream and local monitoring. Unmuting leaves local listening off; enable Listen locally explicitly."));
 	rows->addLayout(pixelviewMeterRow);
 	auto *listenRow = new QHBoxLayout;
 	listenRow->setSpacing(8);
@@ -113,9 +113,7 @@ void OBSBasic::RefreshPixelviewAudio()
 	if (pixelviewAudioShuttingDown || isClosing() || !pixelviewListen || pixelviewAudioRefreshing)
 		return;
 	QScopedValueRollback<bool> refreshing(pixelviewAudioRefreshing, true);
-	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
-	if (source && (obs_source_removed(source) || strcmp(obs_source_get_id(source), "decklink-input") != 0))
-		source = nullptr;
+	auto source = PixelviewManagedSource();
 	auto previous = OBSGetStrongRef(pixelviewAudioSource);
 	if (previous != source || (!source && pixelviewMeter)) {
 		ClearPixelviewAudio();
@@ -125,7 +123,7 @@ void OBSBasic::RefreshPixelviewAudio()
 			pixelviewAudioSource = OBSGetWeakRef(source);
 			pixelviewMeter = new VolumeMeter(pixelviewMeterHost, source);
 			pixelviewMeter->setObjectName(QStringLiteral("pixelviewAudioMeter"));
-			pixelviewMeter->setAccessibleName(QStringLiteral("Blackmagic audio levels"));
+			pixelviewMeter->setAccessibleName(QStringLiteral("Source audio levels"));
 			auto meterPolicy = pixelviewMeter->sizePolicy();
 			meterPolicy.setRetainSizeWhenHidden(true);
 			pixelviewMeter->setSizePolicy(meterPolicy);
@@ -156,8 +154,8 @@ void OBSBasic::RefreshPixelviewAudio()
 	}
 	const bool muted = source && obs_source_muted(source);
 	const QSignalBlocker muteBlock(pixelviewStreamMute), listenBlock(pixelviewListen);
-	pixelviewStreamMute->setEnabled(pixelviewPairingDurable && source != nullptr);
-	pixelviewListen->setEnabled(pixelviewPairingDurable && source != nullptr && !muted && obs_audio_monitoring_available());
+	pixelviewStreamMute->setEnabled((pixelviewReceiving || pixelviewPairingDurable) && source != nullptr);
+	pixelviewListen->setEnabled((pixelviewReceiving || pixelviewPairingDurable) && source != nullptr && !muted && obs_audio_monitoring_available());
 	pixelviewStreamMute->setChecked(muted);
 	pixelviewListen->setChecked(source && !muted && obs_source_get_monitoring_enabled(source));
 	if (pixelviewMeter) {
@@ -167,7 +165,12 @@ void OBSBasic::RefreshPixelviewAudio()
 	pixelviewMeterMuted->setVisible(muted);
 
 	// Never rebuild an open/focused combo or silently replace a missing explicit device.
-	pixelviewMonitorDevice->setEnabled(!PixelviewConfigurationLocked() && obs_audio_monitoring_available());
+	// Receive has no publishing-pairing gate; native output/video and teardown
+	// still lock profile-wide device configuration in either mode.
+	pixelviewMonitorDevice->setEnabled((!PixelviewConfigurationLocked() &&
+		!isClosing() && !pixelviewShutdownPending && !pixelviewAudioShuttingDown && obs_audio_monitoring_available()) ||
+		(pixelviewReceiving && !PixelviewSettingsBusy() && !isClosing() &&
+		 !pixelviewShutdownPending && !pixelviewAudioShuttingDown && obs_audio_monitoring_available()));
 	if (pixelviewMonitorDevice->hasFocus() || pixelviewMonitorDevice->view()->isVisible())
 		return;
 	auto devices = PixelviewMonitoringDevices();
@@ -190,6 +193,8 @@ void OBSBasic::RefreshPixelviewAudio()
 
 bool OBSBasic::SavePixelviewAudioSource(obs_source_t *source)
 {
+	// Receive media is private and ephemeral: never serialize it or its endpoint.
+	if (source == pixelviewReceiveSource) return true;
 	if (disableSaving)
 		return false;
 	// Native SaveProjectNow has no success return. Read back the exact native source
@@ -218,7 +223,7 @@ bool OBSBasic::SavePixelviewAudioSource(obs_source_t *source)
 
 void OBSBasic::ChangePixelviewAudio(bool monitoring, bool checked)
 {
-	if (!pixelviewPairingDurable) return;
+	if (!pixelviewReceiving && !pixelviewPairingDurable) return;
 	if (isClosing() || pixelviewAudioShuttingDown || pixelviewAudioRefreshing)
 		return;
 	// Normalize legacy/external invalid flags before taking a rollback snapshot.
@@ -263,7 +268,8 @@ void OBSBasic::SelectPixelviewMonitorDevice(int index)
 {
 	if (isClosing() || index < 0)
 		return;
-	if (PixelviewConfigurationLocked()) {
+	if ((PixelviewConfigurationLocked() && !pixelviewReceiving) || PixelviewSettingsBusy() ||
+	    isClosing() || pixelviewShutdownPending || pixelviewAudioShuttingDown || !obs_audio_monitoring_available()) {
 		const QSignalBlocker blocker(pixelviewMonitorDevice);
 		pixelviewMonitorDevice->setCurrentIndex(pixelviewMonitorDevice->findData(QString::fromUtf8(config_get_string(activeConfiguration, "Audio", "MonitoringDeviceId"))));
 		return;

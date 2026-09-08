@@ -14,7 +14,7 @@ class PairingUX(unittest.TestCase):
         predicate = body(text, 'PixelviewConfigurationLocked')
         code = '''#include <cassert>
 int main() {
- bool pixelviewPairingDurable=false, nativeBusy=false;
+ bool pixelviewReceiving=false, pixelviewPairingDurable=false, nativeBusy=false;
  struct {bool intent=false;} pixelviewLease;
  auto PixelviewSettingsBusy=[&]{return nativeBusy;};
  auto locked=[&]{PREDICATE};

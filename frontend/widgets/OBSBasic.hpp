@@ -52,6 +52,10 @@ extern volatile bool recording_paused;
 class ColorSelect;
 class OBSAbout;
 #include <utility/PixelviewDesktopConnection.hpp>
+#include <utility/PixelviewReceiver.hpp>
+#include <utility/PixelviewDeepLink.hpp>
+class QTabBar;
+class QLineEdit;
 #include <QElapsedTimer>
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -283,6 +287,26 @@ private:
 
 	void OnFirstLoad();
 	void InitPixelview();
+	void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
+	void InitPixelviewReceive(QWidget *sidebar);
+	void RefreshPixelviewModes();
+	bool PixelviewModeBusy() const;
+	void SelectPixelviewMode(int index);
+	void StartPixelviewReceive();
+	void StopPixelviewReceive(bool keepReceiving = false);
+	void DisconnectPixelviewReceiveMedia();
+	OBSSource PixelviewManagedSource();
+	std::unique_ptr<pixelview::PixelviewReceiver> pixelviewReceiver;
+	bool pixelviewReceiving = false, pixelviewReceiveIntent = false;
+	bool pixelviewSendPreviewLocked = false;
+	QTabBar *pixelviewModeTabs = nullptr;
+	QWidget *pixelviewSendingPanel = nullptr, *pixelviewReceivingPanel = nullptr;
+	QLineEdit *pixelviewReceiveId = nullptr, *pixelviewReceivePassword = nullptr, *pixelviewReceiveName = nullptr;
+	QPushButton *pixelviewReceiveButton = nullptr;
+	QLabel *pixelviewReceiveStatus = nullptr;
+	OBSSource pixelviewReceiveSource, pixelviewSendOutput;
+	OBSScene pixelviewReceiveScene;
+	QTimer *pixelviewReceiveTimer = nullptr;
 	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
 	void InitPixelviewDesktop(QWidget *sidebar);
 	void ConnectPixelviewDesktop();
@@ -409,7 +433,7 @@ public:
 
 	void saveAll();
 	bool shouldPromptForClose();
-	inline bool isClosing() { return isClosing_; }
+	inline bool isClosing() const { return isClosing_; }
 	inline bool isClosePromptOpen() { return isClosePromptOpen_; }
 	void closeWindow();
 

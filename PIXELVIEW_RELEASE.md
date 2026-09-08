@@ -6,6 +6,13 @@ The inherited OBS `README.rst` stays unchanged for upstream attribution and reba
 
 ## Current policy
 
+**Compliance gate is currently blocked.** The signed/notarized DMG flow now requires
+versioned corresponding-source, notices and inventory artifacts before any appcast
+publication. `release/source-inventory.json` intentionally records unresolved
+whole-app licensing/source gaps; a passing media test or `--validate-config` does
+not clear them. Complete the [source release runbook](docs/pixelview-source-release.md)
+before following the release execution steps below.
+
 - Work continues on `pixelview/minimal-capture` and is pushed to `pxlview/pixelview-desktop`.
 - Do **not** create a tag, GitHub release, notarized DMG, R2 upload, or public appcast until the application is accepted for release.
 - Merge this branch into the Pixelview release branch only when the application is ready.

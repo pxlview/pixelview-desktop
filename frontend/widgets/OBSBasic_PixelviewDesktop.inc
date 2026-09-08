@@ -155,7 +155,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
 
 bool OBSBasic::PixelviewConfigurationLocked() const
 {
- return !pixelviewPairingDurable || pixelviewLease.intent || PixelviewSettingsBusy();
+ return pixelviewReceiving || !pixelviewPairingDurable || pixelviewLease.intent || PixelviewSettingsBusy();
 }
 
 bool OBSBasic::PixelviewPairingBusy()
@@ -219,7 +219,7 @@ void OBSBasic::ConnectPixelviewDesktop()
 bool OBSBasic::PixelviewLeaseValid() const {return pixelviewDesktop && !pixelviewShutdownPending && !pixelviewUnpairPending && pixelviewLease.authorized(pixelviewClock.elapsed());}
 bool OBSBasic::RequestPixelviewStart()
 {
- if(isClosing() || pixelviewShutdownPending || pixelviewStopPending || pixelviewClosingSocket || pixelviewUnpairPending) return false;
+ if(pixelviewReceiving || isClosing() || pixelviewShutdownPending || pixelviewStopPending || pixelviewClosingSocket || pixelviewUnpairPending) return false;
  if(pixelviewStartPermit) {pixelviewStartPermit=false;return PixelviewLeaseValid();}
  if(!pixelviewPairingDurable || pixelviewLease.intent || PixelviewSettingsBusy()) return false;
  pixelviewLease.reconnect=config_get_bool(activeConfiguration, "Output", "Reconnect");

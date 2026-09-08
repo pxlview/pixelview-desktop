@@ -116,7 +116,7 @@ int main(){
             guard = body(text, method).split('\n', 2)[1]
             compiled('''#include <cassert>
 int main(){
- bool busy=false, paired=false; int refreshed=0;
+ [[maybe_unused]] bool pixelviewReceiving=false; bool busy=false, paired=false; int refreshed=0;
  auto PixelviewSettingsBusy=[&]{return busy;};
  auto PixelviewConfigurationLocked=[&]{return !paired || busy;};
  [[maybe_unused]] auto RefreshPixelviewDevices=[&]{++refreshed;};

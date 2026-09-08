@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "review": {
+    "status": "blocked",
+    "blockers": [
+      "No whole-app binary/static dependency closure review or responsible release approval exists.",
+      "Audited bundled FFmpeg reports GPL version 3 or later: resolve whole-combination GPLv3 distribution terms, full texts, exact FFmpeg sources/build configuration and transitive codec sources.",
+      "Qt 6.11.1 exact module sources, third-party notices, patches, configure options and recipient replacement/relinking materials are incomplete.",
+      "Official GStreamer 1.28.3 Cerbero recipes/patches and all exact transitive sources still need collection; SDK notices lack a separate gst-plugins-good directory.",
+      "rswebrtc 0.15.2 source archive and MPL notice verified, but Cargo static dependency sources/notices and build-tool inputs remain incomplete.",
+      "OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.",
+      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations.",
+      "No clean product tag, full source rebuild, anonymous source-download verification or production publication has occurred."
+    ],
+    "evidence": null
+  },
+  "runtime_bindings": [
+    {
+      "path": "plugins/pixelview-whep/runtime-lock.json",
+      "sha256": "50399fc7e59ef138c6eb0101839d4bce657dcc80ba60c9793db6f26fd1700282",
+      "size": 7835
+    },
+    {
+      "path": "CMakePresets.json",
+      "sha256": "5eea192d5b5278243a44db2d67f06b0396da759e4c5c563f967ea80ca43142c9",
+      "size": 9271
+    },
+    {
+      "path": "release/macos.json",
+      "sha256": "372caab6c9f77a09672de2850443ea1f76309f7ee7f16d77aa9a86089c200275",
+      "size": 867
+    }
+  ],
+  "components": [
+    {
+      "id": "rswebrtc",
+      "version": "0.15.2",
+      "license": "MPL-2.0",
+      "sources": [
+        {
+          "name": "gst-plugin-webrtc-0.15.2.crate",
+          "url": "https://static.crates.io/crates/gst-plugin-webrtc/gst-plugin-webrtc-0.15.2.crate",
+          "sha256": "58b0f7af06bd2e98c71e8ad76a27a4045727b88af769a89d6a7f0fd5903047b0",
+          "size": 630608
+        }
+      ],
+      "notices": [
+        {
+          "path": "plugins/pixelview-whep/licenses/rswebrtc/LICENSE-MPL-2.0",
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+          "size": 16726
+        }
+      ],
+      "patches": [
+        {
+          "path": "plugins/pixelview-whep/patches/rswebrtc-0.15.2-same-origin.patch",
+          "sha256": "2164b44f8c6781d3375665e6453af16c10fa33ee331f4d1a180fa11cd14251a8",
+          "size": 6175
+        }
+      ],
+      "recipes": [
+        {
+          "path": "plugins/pixelview-whep/scripts/build-rswebrtc.py",
+          "sha256": "548aeff845d14e63203221e25277d49ffaef45de8827c5e39df29b16af31d0bf",
+          "size": 5349
+        },
+        {
+          "path": "plugins/pixelview-whep/scripts/fetch-gstreamer.py",
+          "sha256": "8e5305f9e4d750b18309a8d942f684361fa74ca5d62b16c7ba987eba391d3f1a",
+          "size": 4630
+        },
+        {
+          "path": "plugins/pixelview-whep/licenses/rswebrtc/Cargo.lock",
+          "sha256": "90cafa35c6d5b0819557a5c3527ca981da63e4a6c3eb21eb2eb23deba2c8d7d1",
+          "size": 130743
+        },
+        {
+          "path": "plugins/pixelview-whep/scripts/UPSTREAM.md",
+          "sha256": "e9722a39b5497078222380b30489ddbf341025dad312b2209f2fcf3e0935279c",
+          "size": 6004
+        }
+      ]
+    }
+  ]
+}

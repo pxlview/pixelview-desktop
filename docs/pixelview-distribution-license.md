@@ -42,6 +42,24 @@ Suggested separate notice wording (not installed by this review):
 
 ## Dependencies, drivers and remaining release gates
 
+### Whole-app audit and implemented release gate
+
+The dependency audit reports that the actual bundled FFmpeg build is **GPL version
+3 or later**, while Qt **6.11.1** notices/source materials are incomplete. Therefore
+the GPLv2 discussion above is not approval to distribute the current combination
+under GPLv2-only terms. Resolve the actual combined distribution terms, provide the
+applicable full license texts, and complete exact-version source/build/replacement
+materials and third-party notices before release.
+
+The local release flow now fails closed on the review-blocked
+`release/source-inventory.json`. It requires versioned source/notices/inventory
+artifacts, binds their SHA-256/size/immutable URLs in the release manifest and signed
+app license metadata, and publishes/verifies all of them through the existing R2
+conditional-write flow before advancing the appcast. See
+[corresponding-source release artifacts](pixelview-source-release.md) for schema,
+offline UI interface, collected rswebrtc source evidence, tests and unresolved gaps.
+This is working enforcement plumbing, not a completed whole-app license clearance.
+
 Inventory the **actual final app/installer**, not just this repository: bundled frameworks, dynamic/static libraries, plugins, codecs, browser engine if enabled, assets/fonts, installers and updater. Collect each component's exact-version license/copyright notices and source obligations. Qt, FFmpeg, CEF and other dependencies must be reviewed according to the versions, build options and licenses actually present; the OBS GPL text is not an exhaustive third-party notice bundle. GPLv2 distinguishes genuinely separate aggregation from a combined derivative, and FSF guidance discusses license compatibility and linking.[1][2]
 
 Do not assume every proprietary hardware driver or SDK is prohibited, or that every such component is automatically exempt. GPLv2 §3 has a limited operating-system-component source exception, including an explicit limitation when the component accompanies the executable; FSF guidance illustrates why shipping a library can differ from using the installed system copy.[1][2] Independently check vendor redistribution rights, whether a driver is separately installed versus bundled, how it links/interacts, and any applicable exception or permission. No proprietary-driver inventory or blanket OBS-specific linking exception was established in this review. Codec/patent and platform-distribution terms may need specialist review independently of the GPL.
