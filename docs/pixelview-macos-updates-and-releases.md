@@ -165,7 +165,7 @@ https://downloads.pixelview.io/desktop/macos/releases/0.0.1-1/Pixelview-Desktop-
 Before calling `0.0.1` public:
 
 1. Download the DMG through the public custom domain on a clean/quarantined Mac.
-2. Confirm Gatekeeper accepts it, drag `Pixelview.app` to Applications, and launch it.
+2. Confirm Gatekeeper accepts it, drag `Pixelview Desktop.app` to Applications, and launch it.
 3. Verify capture, pairing, WHIP streaming, audio monitoring, and retained configuration.
 4. For the update cycle, publish an internal older build and a higher-build replacement to a staging feed, then verify **Check for Updates…** downloads, replaces, relaunches, and preserves Pixelview configuration and Keychain state.
 5. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub.

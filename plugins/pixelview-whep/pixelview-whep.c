@@ -9,6 +9,9 @@
 #include <gst/audio/audio.h>
 #include <util/platform.h>
 #include <string.h>
+#include "video-format.h"
+#include "capability-probe.h"
+#include "profile-offer.h"
 #ifndef PIXELVIEW_WHEP_TEST
 #include "runtime.h"
 #endif
@@ -27,6 +30,9 @@ struct receiver {
  char *endpoint;
  uint64_t frames, audio_frames, last_video;
  guint latency, active_latency;
+ struct pixelview_receive_capabilities active_caps;
+ struct receive_attempt *attempt;
+ bool offer_failed;
  int jitter_latency;
  bool quit, changed, accept_samples;
  GstElement *pipe; /* worker-owned; callbacks finish before teardown */
@@ -109,22 +115,24 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  struct receiver *r = opaque;
  GstSample *sample = gst_app_sink_pull_sample(sink);
  if (!sample) return GST_FLOW_EOS;
- GstVideoInfo info; GstVideoFrame mapped;
- if (!gst_video_info_from_caps(&info, gst_sample_get_caps(sample)) ||
+ GstVideoInfo info; GstVideoFrame mapped = {0};
+ /* Missing colorimetry must not become GstVideoInfo's resolution-based defaults. */
+ GstCaps *caps = gst_sample_get_caps(sample);
+ if (!pixelview_video_info(caps, &info) ||
      !gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
   gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
- struct obs_source_frame frame = {0};
- frame.format = VIDEO_FORMAT_BGRA; frame.width = info.width; frame.height = info.height;
- frame.data[0] = GST_VIDEO_FRAME_PLANE_DATA(&mapped,0);
- frame.linesize[0] = GST_VIDEO_FRAME_PLANE_STRIDE(&mapped,0);
- frame.timestamp = timestamp(sample, r->pipe); frame.full_range = true;
+ struct obs_source_frame2 frame;
+ if (!pixelview_video_frame(&mapped, &frame)) {
+  gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_NOT_NEGOTIATED;
+ }
+ frame.timestamp = timestamp(sample, r->pipe);
  g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation;
  if (deliver) { r->frames++; r->state = "playing"; r->last_video = os_gettime_ns(); }
  g_mutex_unlock(&r->lock);
- if (deliver) obs_source_output_video(r->source, &frame);
+ if (deliver) obs_source_output_video2(r->source, &frame);
  g_rec_mutex_unlock(&r->delivery);
  gst_video_frame_unmap(&mapped); gst_sample_unref(sample);
  return GST_FLOW_OK;
@@ -153,51 +161,133 @@ static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
  gst_buffer_unmap(gst_sample_get_buffer(sample), &mapped); gst_sample_unref(sample);
  return GST_FLOW_OK;
 }
-/* rswebrtc 0.15.2 omits packetization-mode from raw-output H264
- * receive offers (RFC6184 then defaults to mode 0). Pixelview/Pion sends
- * mode 1, supported by rtph264depay; advertise that before SDP creation. */
+/* Signal closures can outlive pipeline teardown (rswebrtc owns async tasks).
+ * They retain this attempt, never an unguarded receiver pointer. Detach under
+ * gate before teardown, waiting for any callback already using the receiver.
+ * Lock order: attempt gate -> receiver lock; never reverse it. */
+struct receive_attempt {
+ gatomicrefcount refs;
+ GMutex gate;
+ struct receiver *receiver;
+ const uint64_t generation;
+ const struct pixelview_receive_capabilities caps;
+ const guint latency;
+ bool failed;
+};
+static struct receive_attempt *attempt_new(struct receiver *r)
+{
+ struct receive_attempt initial = {.receiver=r, .generation=r->active_generation,
+  .caps=r->active_caps, .latency=r->active_latency};
+ struct receive_attempt *a = g_malloc0(sizeof(*a));
+ memcpy(a, &initial, sizeof(*a));
+ g_atomic_ref_count_init(&a->refs); g_mutex_init(&a->gate);
+ return a;
+}
+static struct receive_attempt *attempt_ref(struct receive_attempt *a)
+{ g_atomic_ref_count_inc(&a->refs); return a; }
+static void attempt_unref(gpointer opaque, GClosure *closure)
+{
+ (void)closure; struct receive_attempt *a = opaque;
+ if (g_atomic_ref_count_dec(&a->refs)) { g_mutex_clear(&a->gate); g_free(a); }
+}
+/* gate held by caller */
+static bool attempt_current(struct receive_attempt *a)
+{
+ struct receiver *r = a->receiver;
+ if (!r) return false;
+ g_mutex_lock(&r->lock);
+ bool current = !r->quit && !r->changed && r->generation == a->generation;
+ g_mutex_unlock(&r->lock);
+ return current;
+}
+/* Every admitted profile was probed at HD60. Only an offered HEVC profile
+ * can impose the older level-120 HD30 envelope; absent HEVC has level zero. */
+static unsigned receive_max_fps(const struct pixelview_receive_capabilities *caps)
+{
+ bool hevc = caps->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10);
+ return hevc && caps->hevc_level_id < 123 ? 30u : 60u;
+}
 static void configure_transceiver(GstElement *rtc, GObject *transceiver, gpointer opaque)
 {
- (void)rtc; (void)opaque;
+ struct receive_attempt *a = opaque;
+ g_mutex_lock(&a->gate);
+ bool current = attempt_current(a);
  GstCaps *caps = NULL;
  g_object_get(transceiver, "codec-preferences", &caps, NULL);
- if (!caps) return;
- caps = gst_caps_make_writable(caps);
- for (guint i = 0; i < gst_caps_get_size(caps); i++) {
-  GstStructure *s = gst_caps_get_structure(caps, i);
-  const char *encoding = gst_structure_get_string(s, "encoding-name");
-  if (encoding && !g_ascii_strcasecmp(encoding, "H264"))
-   gst_structure_set(s, "packetization-mode", G_TYPE_STRING, "1", NULL);
+ struct pixelview_receive_limits limits = {a->caps.profiles, a->caps.hevc_level_id,
+  1920, 1080, receive_max_fps(&a->caps)};
+ GstCaps *offer = current && !a->failed ? pixelview_profile_offer_caps_limited(caps, &limits) : NULL;
+ if (caps) gst_caps_unref(caps);
+ if (!offer || gst_caps_is_empty(offer)) {
+  if (!offer) offer = gst_caps_new_empty();
+  a->failed = true;
+  if (current) {
+   struct receiver *r = a->receiver;
+   g_mutex_lock(&r->lock);
+   if (!r->quit && r->generation == a->generation) { r->offer_failed = true; r->accept_samples = false; }
+   g_mutex_unlock(&r->lock);
+  }
+  /* Empty (not NULL/ANY) codec preferences make create-offer fail rather than
+   * restoring upstream codec defaults. Worker also consumes this safe error. */
+  GST_ELEMENT_ERROR(rtc, CORE, NEGOTIATION, ("No verified receive profile"), (NULL));
  }
- g_object_set(transceiver, "codec-preferences", caps, NULL);
- gst_caps_unref(caps);
+ g_object_set(transceiver, "codec-preferences", offer, NULL);
+ gst_caps_unref(offer);
+ g_mutex_unlock(&a->gate);
+}
+/* Empty preferences alone produce a valid rejected-media SDP in webrtcbin.
+ * Stop the RUN_LAST create-offer action before its default implementation, so
+ * rswebrtc cannot POST an audio-only/fallback offer after video policy failure. */
+static void guard_offer(GstElement *rtc, GstStructure *options, GstPromise *promise, gpointer opaque)
+{
+ (void)options;
+ struct receive_attempt *a = opaque;
+ g_mutex_lock(&a->gate);
+ bool allowed = !a->failed && a->caps.profiles && attempt_current(a);
+ g_mutex_unlock(&a->gate);
+ if (allowed) return;
+ g_signal_stop_emission_by_name(rtc, "create-offer");
+ GError *error = g_error_new_literal(GST_CORE_ERROR, GST_CORE_ERROR_NEGOTIATION, "No verified receive profile");
+ gst_promise_reply(promise, gst_structure_new("application/x-gst-promise", "error", G_TYPE_ERROR, error, NULL));
+ g_error_free(error);
 }
 static void webrtc_ready(GObject *signaller, const char *peer, GstElement *rtc, gpointer opaque)
 {
  (void)signaller; (void)peer;
- struct receiver *r = opaque;
- g_mutex_lock(&r->lock);
- guint latency = r->active_latency;
- g_mutex_unlock(&r->lock);
- g_signal_connect(rtc, "on-new-transceiver", G_CALLBACK(configure_transceiver), NULL);
- g_object_set(rtc, "latency", latency, NULL);
- g_object_get(rtc, "latency", &latency, NULL);
- g_mutex_lock(&r->lock); r->jitter_latency = (int)latency; g_mutex_unlock(&r->lock);
+ struct receive_attempt *a = opaque;
+ g_signal_connect_data(rtc, "on-new-transceiver", G_CALLBACK(configure_transceiver),
+  attempt_ref(a), attempt_unref, 0);
+ g_signal_connect_data(rtc, "create-offer", G_CALLBACK(guard_offer),
+  attempt_ref(a), attempt_unref, 0);
+ g_mutex_lock(&a->gate);
+ if (attempt_current(a)) {
+  guint latency = a->latency;
+  g_object_set(rtc, "latency", latency, NULL);
+  g_object_get(rtc, "latency", &latency, NULL);
+  struct receiver *r = a->receiver;
+  g_mutex_lock(&r->lock);
+  if (!r->quit && r->generation == a->generation) r->jitter_latency = (int)latency;
+  g_mutex_unlock(&r->lock);
+ }
+ g_mutex_unlock(&a->gate);
 }
 static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
 {
  /* Only fixed code is parsed; never interpolate credentials into a pipeline. */
  const char *spec =
-  "whepclientsrc name=rx video-codecs=\"<H264,H265>\" audio-codecs=\"<OPUS>\" "
-  "rx. ! video/x-raw ! queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! videoconvert ! video/x-raw,format=BGRA ! appsink name=video "
+  "whepclientsrc name=rx video-codecs=\"<H265,H264,VP9>\" audio-codecs=\"<OPUS>\" "
+  "rx. ! capsfilter name=video-policy caps=\"" PIXELVIEW_RECEIVE_RAW_CAPS ",width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]\" ! queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! appsink name=video "
   "rx. ! audio/x-raw ! queue max-size-time=200000000 max-size-bytes=0 max-size-buffers=0 ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000 ! appsink name=audio";
 #ifdef PIXELVIEW_WHEP_TEST
  if (!strcmp(endpoint,"test://synthetic")) spec =
-  "videotestsrc is-live=true ! video/x-raw,format=BGRA,width=64,height=64,framerate=30/1 ! appsink name=video "
+  "videotestsrc is-live=true ! video/x-raw,format=BGRA,colorimetry=sRGB,width=64,height=64,framerate=30/1 ! appsink name=video "
   "audiotestsrc is-live=true ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio";
 #endif
  GError *error = NULL;
- GstElement *pipe = gst_parse_launch(spec, &error);
+ /* Only the verified numeric frame-rate ceiling enters the fixed graph. */
+ char *description = g_strdup_printf(spec, receive_max_fps(&r->active_caps));
+ GstElement *pipe = gst_parse_launch(description, &error);
+ g_free(description);
  if (error || !pipe) { g_clear_error(&error); if (pipe) gst_object_unref(pipe); return NULL; }
  GstElement *rx = gst_bin_get_by_name(GST_BIN(pipe), "rx");
  if (rx) {
@@ -207,7 +297,9 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
    if (signaller) g_object_unref(signaller);
    gst_object_unref(rx); gst_object_unref(pipe); return NULL;
   }
-  g_signal_connect(signaller, "webrtcbin-ready", G_CALLBACK(webrtc_ready), r);
+  r->attempt = attempt_new(r);
+  g_signal_connect_data(signaller, "webrtcbin-ready", G_CALLBACK(webrtc_ready),
+   attempt_ref(r->attempt), attempt_unref, 0);
   g_object_set(signaller, "whep-endpoint", endpoint, NULL);
   g_object_unref(signaller); gst_object_unref(rx);
  }
@@ -223,10 +315,37 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
 }
 static void stop_pipeline(struct receiver *r)
 {
+ if (r->attempt) {
+  g_mutex_lock(&r->attempt->gate); r->attempt->receiver = NULL; g_mutex_unlock(&r->attempt->gate);
+  attempt_unref(r->attempt, NULL); r->attempt = NULL;
+ }
  if (!r->pipe) return;
  gst_element_set_state(r->pipe, GST_STATE_NULL);
  gst_object_unref(r->pipe); r->pipe = NULL;
  obs_source_output_video(r->source, NULL);
+}
+struct probe_waiter { struct receiver *receiver; uint64_t generation; };
+static gboolean probe_cancelled(void *opaque)
+{
+ struct probe_waiter *waiter = opaque;
+ struct receiver *r = waiter->receiver;
+ g_mutex_lock(&r->lock);
+ bool cancelled = r->quit || r->generation != waiter->generation;
+ g_mutex_unlock(&r->lock);
+ return cancelled;
+}
+static bool probe_attempt(struct receiver *r, uint64_t generation)
+{
+ /* This stack context is only borrowed by the bounded waiter, never the cached
+  * background decoder. No receiver lock is held across driver/plugin calls. */
+ struct probe_waiter waiter = {r, generation};
+ struct pixelview_receive_capabilities caps = {0};
+ bool success = pixelview_capability_probe_get(&caps, probe_cancelled, &waiter);
+ g_mutex_lock(&r->lock);
+ bool current = !r->quit && r->generation == generation;
+ if (current) { r->active_caps = caps; r->offer_failed = false; }
+ g_mutex_unlock(&r->lock);
+ return success && current && caps.profiles;
 }
 static gpointer worker(gpointer opaque)
 {
@@ -244,12 +363,12 @@ static gpointer worker(gpointer opaque)
    g_mutex_unlock(&r->lock);
    stop_pipeline(r);
    if (endpoint) {
-    r->pipe = make_pipeline(r, endpoint);
+    if (probe_attempt(r, generation)) r->pipe = make_pipeline(r, endpoint);
     wipe(&endpoint);
     g_rec_mutex_lock(&r->delivery);
     g_mutex_lock(&r->lock);
     bool current = !r->quit && generation == r->generation;
-    r->accept_samples = current && r->pipe;
+    r->accept_samples = current && r->pipe && !r->offer_failed;
     g_mutex_unlock(&r->lock);
     bool failed = !current || !r->pipe || gst_element_set_state(r->pipe, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE;
     g_rec_mutex_unlock(&r->delivery);
@@ -313,6 +432,16 @@ static const char *source_name(void *unused) { (void)unused; return "Pixelview W
 bool obs_module_load(void)
 {
 #ifndef PIXELVIEW_WHEP_TEST
+ /* The bounded waiter may leave one driver call running. Retain this image and
+  * its linked GStreamer dependencies for process lifetime BEFORE any probe or
+  * runtime registration. Intentionally never dlclose this handle/gst_deinit. */
+ static void *resident_module;
+ if (!resident_module) {
+  const char *binary = obs_get_module_binary_path(obs_current_module());
+  if (!binary || !(resident_module = dlopen(binary, RTLD_NOW | RTLD_NODELETE))) {
+   blog(LOG_ERROR, "[pixelview-whep] runtime lifetime unavailable"); return false;
+  }
+ }
  if (!pixelview_gst_init()) { blog(LOG_ERROR, "[pixelview-whep] bundled runtime unavailable"); return false; }
 #endif
  struct obs_source_info info = {

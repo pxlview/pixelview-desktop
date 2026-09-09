@@ -11,6 +11,19 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class PixelviewReleaseMetadata(unittest.TestCase):
+    def test_release_uses_renamed_bundle_and_executable_everywhere(self):
+        script = (ROOT / 'cmake/macos/pixelview-release.sh').read_text()
+        for expected in (
+            'app_path="$build_dir/frontend/Release/Pixelview Desktop.app"',
+            'verify_app "$mountpoint/Pixelview Desktop.app"',
+            'ditto "$app_path" "$stage/Pixelview Desktop.app"',
+            'lipo -archs "$app_to_verify/Contents/MacOS/Pixelview Desktop"',
+            'strings "$app_to_verify/Contents/MacOS/Pixelview Desktop"',
+        ):
+            self.assertIn(expected, script)
+        self.assertNotIn('Pixelview.app', script)
+        self.assertNotIn('Contents/MacOS/Pixelview"', script)
+
     def test_product_version_and_obs_base_are_independent_and_pinned(self):
         metadata_path = ROOT / "version.json"
         self.assertTrue(metadata_path.is_file(), "version.json is the release source of truth")

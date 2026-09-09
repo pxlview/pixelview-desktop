@@ -1,0 +1,44 @@
+// Test-only loopback WHEP sender; exact engine selector/registration appended.
+package main
+import("fmt";"strings";"strconv";"slices";"encoding/json";"os";"io";"net";"net/http";"time";"sync";"github.com/pion/sdp";"github.com/pion/webrtc/v4";"github.com/pion/rtp")
+type WebRTCConfig struct {MimeType string;ClockRate uint32;Channels uint16;SDPFmtpLine string;SDPFmtpLines []string;PayloadType uint8}
+type Codec struct {FormatID string;PreferredOutputCodec []string;WebRTC *WebRTCConfig;Profile struct{Name string};Type int}
+type Mapper map[string]Codec
+func(m Mapper)GetCodec(id string)(Codec,bool){c,ok:=m[id];return c,ok}
+type Router struct{transcode bool};func(r Router)TranscodeRequired()bool{return r.transcode}
+type Config struct{};func(c *Config)GetLimit4KEncoding()bool{return false}
+type Stats struct{};func(s *Stats)GetInputResolution()(int,int){return 0,0}
+type Server struct{codecMap Mapper;router Router;config *Config;statsManager *Stats}
+func isABR(id string)bool{return id=="vp9-8bit-420-abr-half"||id=="vp9-8bit-420-abr-quarter"}
+type observedTrack struct{webrtc.TrackLocal;rtp *webrtc.TrackLocalStaticRTP;bound webrtc.RTPCodecParameters}
+func(t *observedTrack)WriteRTP(p *rtp.Packet)error{return t.rtp.WriteRTP(p)}
+func(t *observedTrack)Bind(c webrtc.TrackLocalContext)(webrtc.RTPCodecParameters,error){p,e:=t.TrackLocal.Bind(c);t.bound=p;return p,e}
+func must(e error){if e!=nil{panic(e)}}
+func relay(c *net.UDPConn,t *observedTrack,done <-chan struct{}){
+ b:=make([]byte,65536);for {c.SetReadDeadline(time.Now().Add(time.Second));n,_,e:=c.ReadFromUDP(b);if e!=nil{select{case <-done:return;default:continue}};p:=&rtp.Packet{};must(p.Unmarshal(b[:n]));must(t.WriteRTP(p))}
+}
+func main(){
+ data,e:=os.ReadFile("fixtures.json");must(e);var fixtures []Codec;must(json.Unmarshal(data,&fixtures));s:=Server{codecMap:Mapper{}};for _,c:=range fixtures{s.codecMap[c.FormatID]=c}
+ settings:=webrtc.SettingEngine{};settings.SetIncludeLoopbackCandidate(true);settings.SetIPFilter(func(ip net.IP)bool{return ip.Equal(net.ParseIP("127.0.0.1"))});settings.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+ var pc *webrtc.PeerConnection;var mu sync.Mutex;done:=make(chan struct{})
+ video,e:=net.ListenUDP("udp4",&net.UDPAddr{IP:net.ParseIP("127.0.0.1")});must(e);defer video.Close();audio,e:=net.ListenUDP("udp4",&net.UDPAddr{IP:net.ParseIP("127.0.0.1")});must(e);defer audio.Close()
+ listener,e:=net.Listen("tcp4","127.0.0.1:0");must(e)
+ http.HandleFunc("/",func(w http.ResponseWriter,r *http.Request){
+  if r.Method=="GET"{fmt.Fprint(w,"ready");return};if r.Method=="DELETE"{mu.Lock();if pc!=nil{pc.Close()};mu.Unlock();w.WriteHeader(200);return}
+  if r.Method!="POST"{w.WriteHeader(405);return};offer,e:=io.ReadAll(io.LimitReader(r.Body,1000000));if e!=nil{http.Error(w,e.Error(),400);return};must(os.WriteFile("offer.sdp",offer,0600))
+  if os.Args[1]=="negative"{http.Error(w,"unsupported synthetic codec",406);return}
+  selected,e:=s.findBestCodecMatch(os.Args[1],string(offer),"");if e!=nil{http.Error(w,e.Error(),400);return};if selected!=os.Args[1]{http.Error(w,"unexpected fallback "+selected,400);return}
+  me,_,e:=register(fixtures,string(offer));if e!=nil{http.Error(w,e.Error(),400);return};api:=webrtc.NewAPI(webrtc.WithMediaEngine(me),webrtc.WithSettingEngine(settings));conn,e:=api.NewPeerConnection(webrtc.Configuration{});if e!=nil{http.Error(w,e.Error(),400);return};mu.Lock();pc=conn;mu.Unlock()
+  fail:=func(e error)bool{if e==nil{return false};fmt.Println("SERVER_ERROR",e);http.Error(w,e.Error(),400);conn.Close();return true}
+  if fail(conn.SetRemoteDescription(webrtc.SessionDescription{Type:webrtc.SDPTypeOffer,SDP:string(offer)})){return}
+  c:=s.codecMap[selected];v,e:=webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType:c.WebRTC.MimeType,ClockRate:c.WebRTC.ClockRate,SDPFmtpLine:c.WebRTC.SDPFmtpLine},"video","synthetic");if fail(e){return};vt:=&observedTrack{TrackLocal:trackForReceiver(v,c.WebRTC),rtp:v}
+  a,e:=webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType:webrtc.MimeTypeOpus,ClockRate:48000,Channels:2,SDPFmtpLine:"minptime=10;useinbandfec=1"},"audio","synthetic");if fail(e){return};at:=&observedTrack{TrackLocal:a,rtp:a}
+  for _,track:=range []*observedTrack{vt,at}{sender,e:=conn.AddTrack(track);if fail(e){return};go func(){b:=make([]byte,1500);for{if _,_,e:=sender.Read(b);e!=nil{return}}}()}
+  connected:=make(chan struct{});var once sync.Once;conn.OnConnectionStateChange(func(state webrtc.PeerConnectionState){if state==webrtc.PeerConnectionStateConnected{once.Do(func(){close(connected)})}})
+  answer,e:=conn.CreateAnswer(nil);if fail(e){return};gather:=webrtc.GatheringCompletePromise(conn);if fail(conn.SetLocalDescription(answer)){return};<-gather
+  must(os.WriteFile("answer.sdp",[]byte(conn.LocalDescription().SDP),0600));b,_:=json.Marshal(map[string]interface{}{"selected":selected,"video":vt.bound,"audio":at.bound});must(os.WriteFile("bound.json",b,0600))
+  w.Header().Set("Content-Type","application/sdp");w.Header().Set("Location","http://"+listener.Addr().String()+"/session");w.WriteHeader(201);fmt.Fprint(w,conn.LocalDescription().SDP)
+  go func(){select{case <-connected:fmt.Println("CONNECTED");go relay(video,vt,done);go relay(audio,at,done);case <-time.After(15*time.Second):fmt.Println("ICE_TIMEOUT")}}()
+ })
+ info:=map[string]interface{}{"endpoint":"http://"+listener.Addr().String()+"/whep","video":video.LocalAddr().(*net.UDPAddr).Port,"audio":audio.LocalAddr().(*net.UDPAddr).Port};b,_:=json.Marshal(info);must(os.WriteFile("ready.json",b,0600));time.AfterFunc(120*time.Second,func(){close(done);listener.Close();mu.Lock();if pc!=nil{pc.Close()};mu.Unlock()});http.Serve(listener,nil)
+}

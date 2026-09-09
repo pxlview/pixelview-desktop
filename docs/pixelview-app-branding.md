@@ -5,7 +5,7 @@
 The final Xcode-processed bundle has CFBundleName and CFBundleDisplayName = Pixelview Desktop, while executable/bundle ID remain Pixelview/com.pixelview.desktop. Native NSRunningApplication readback confirms Pixelview Desktop. Both the full COPYING resource and root pixelview-app.icns match their source bytes; deep strict signing passes. The app icon uses authentic enlarged play artwork on OBS sidebar gray #1D1F26; transparent macOS template tray states are separate. Native application-icon readback and connection-error alert show the dark asset. The macOS custom menu is Help, avoiding a duplicate native application-name menu. Windows/Linux resources are source-tested, not runtime-tested.
 
 
-The display name is **Pixelview Desktop**. The native executable remains **Pixelview** (`Pixelview.exe` on Windows); macOS keeps `Pixelview.app` and bundle identifier `com.pixelview.desktop`. Display branding does not change the isolated Pixelview configuration-path helpers or capture/encoding settings.
+The display name is **Pixelview Desktop**. macOS builds **`Pixelview Desktop.app`**, with executable **`Contents/MacOS/Pixelview Desktop`** and unchanged bundle identifier `com.pixelview.desktop`. Windows/Linux retain the **Pixelview** executable (`Pixelview.exe` on Windows). The filename change does not change the isolated Pixelview configuration paths, Keychain service/account identities, or capture/encoding settings.
 
 ## Consumers
 
@@ -19,7 +19,7 @@ The display name is **Pixelview Desktop**. The native executable remains **Pixel
 
 ### macOS
 
-`cmake/macos/helpers.cmake` retains `OUTPUT_NAME Pixelview`, `PRODUCT_NAME Pixelview`, and `PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop`. Both `CFBundleDisplayName` and `CFBundleName` are Pixelview Desktop. `frontend/cmake/macos/Info.plist.in` also declares these names and `CFBundleIconFile=pixelview-app.icns`.
+`cmake/macos/helpers.cmake` sets `OUTPUT_NAME "Pixelview Desktop"` and `PRODUCT_NAME "Pixelview Desktop"`, retaining `PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop`. Both `CFBundleDisplayName` and `CFBundleName` are Pixelview Desktop. `frontend/cmake/macos/Info.plist.in` also declares these names and `CFBundleIconFile=pixelview-app.icns`.
 
 The dedicated `frontend/data/images/pixelview-app.icns` is copied to `Contents/Resources/pixelview-app.icns`. The generic recursive data installer explicitly skips that file so it cannot relocate the resource into `Resources/images`. The old `Assets.xcassets` is no longer compiled into the frontend and `ASSETCATALOG_COMPILER_APPICON_NAME` is removed; therefore an upstream asset-catalog icon cannot override the explicit ICNS. Upstream assets remain untouched on disk.
 
@@ -35,6 +35,6 @@ Both install `com.pixelview.desktop.desktop`, matching Qt's desktop-file name, w
 
 ## Verification
 
-Run `python3 -m unittest discover -s test/pixelview -p 'test_*.py' -v` from the repository. Branding tests are explicitly **source integration contracts**, alongside the existing executable policy harnesses; they do not establish native packaging, rendered icon quality or hardware behavior.
+Run `python3 test/pixelview/test_app_branding.py -v` from the repository for the branding checks. On macOS, the dependency-free Xcode mini-build uses the production branding properties, plist template and plugin-embedding block. It verifies the real `Pixelview Desktop.app` filename, processed plist, executable, generated target paths, embedded plugin path, and installation into a separate prefix; the installed fixture executable must exit successfully. These checks pass alongside the release and build-signing regression suites. They do not build or sign the full application, or establish rendered icon quality or hardware behavior.
 
 Before release, rebuild/reconfigure the current source and check the final bundle's plist, ICNS placement, code signature, Dock hover/app menu/title and every tray state. Old Xcode outputs can retain obsolete Assets.car/AppIcon resources; use a clean application product when verifying. Windows and Linux/BSD native execution/packaging must be checked on their platforms. Do not mistake cached Dock/launcher artwork from an old running build for source verification.

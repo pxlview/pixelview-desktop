@@ -92,7 +92,7 @@ bash cmake/macos/pixelview-build.sh
 python3 -m unittest discover -s test/pixelview -v
 c++ -std=c++17 test/pixelview/test_capture_policy.cpp -o /tmp/pixelview-policy
 /tmp/pixelview-policy
-open build_macos/frontend/RelWithDebInfo/Pixelview.app
+open "build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app"
 ```
 
 Stock OBS was closed while idle (not streaming or recording) to release its capture device. No streaming credentials or stock source settings were changed.

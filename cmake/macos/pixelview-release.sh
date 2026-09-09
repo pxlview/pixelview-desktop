@@ -168,7 +168,7 @@ dmg_path="$release_dir/$dmg_name"
 notes_name="Pixelview-Desktop-$version-build$build_number-arm64.html"
 notes_path="$release_dir/$notes_name"
 build_dir="$root/build_macos_release_${version}_${build_number}"
-app_path="$build_dir/frontend/Release/Pixelview.app"
+app_path="$build_dir/frontend/Release/Pixelview Desktop.app"
 
 if [[ -z "$release_notes" ]]; then
   release_notes="$root/docs/releases/$version.html"
@@ -307,14 +307,14 @@ verify_app() {
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")" == "$appcast_url" ]] || die "wrong appcast URL"
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist")" == "$sparkle_public_key" ]] || die "wrong Sparkle public key"
   [[ -d "$app_to_verify/Contents/Frameworks/Sparkle.framework" ]] || die "Sparkle.framework is missing"
-  [[ "$(lipo -archs "$app_to_verify/Contents/MacOS/Pixelview")" == arm64 ]] || die "application is not arm64-only"
+  [[ "$(lipo -archs "$app_to_verify/Contents/MacOS/Pixelview Desktop")" == arm64 ]] || die "application is not arm64-only"
   codesign -d --verbose=4 "$app_to_verify" 2>&1 | grep -F "TeamIdentifier=$apple_team_id" >/dev/null || die "wrong signing team"
   if [[ -n "$expected_certificate" ]]; then
     local expected_certificate_lower
     expected_certificate_lower="$(printf '%s' "$expected_certificate" | tr '[:upper:]' '[:lower:]')"
     [[ "$(certificate_sha1 "$app_to_verify")" == "$expected_certificate_lower" ]] || die "wrong signing certificate fingerprint"
   fi
-  if strings "$app_to_verify/Contents/MacOS/Pixelview" | grep -E 'obsproject\.com/(osx_update|update_studio)' >/dev/null; then
+  if strings "$app_to_verify/Contents/MacOS/Pixelview Desktop" | grep -E 'obsproject\.com/(osx_update|update_studio)' >/dev/null; then
     die "application still embeds an OBS update endpoint"
   fi
 }
@@ -420,7 +420,7 @@ verify_prepared_release() {
   mountpoint="$(mktemp -d /tmp/pixelview-verify-mount.XXXXXX)"
   hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$dmg_path" >/dev/null || die "could not mount prepared DMG"
   mounted_release_path="$mountpoint"
-  verify_app "$mountpoint/Pixelview.app"
+  verify_app "$mountpoint/Pixelview Desktop.app"
   hdiutil detach "$mountpoint" >/dev/null || die "could not detach prepared DMG"
   mounted_release_path=""
   rmdir "$mountpoint"
@@ -483,7 +483,7 @@ prepare_release() {
   local stage
   stage="$(mktemp -d /tmp/pixelview-dmg.XXXXXX)"
   temporary_stage="$stage"
-  ditto "$app_path" "$stage/Pixelview.app"
+  ditto "$app_path" "$stage/Pixelview Desktop.app"
   ln -s /Applications "$stage/Applications"
   cp "$root/COPYING" "$root/AUTHORS" "$stage/"
   cp "$compliance_stage/Pixelview-Desktop-$release_id-NOTICES.txt" "$stage/THIRD-PARTY-NOTICES.txt"

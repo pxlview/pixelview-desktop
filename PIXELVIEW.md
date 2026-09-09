@@ -25,7 +25,7 @@ These company details identify the business behind Pixelview; they do not replac
 ## Open
 
 ```sh
-open build_macos/frontend/RelWithDebInfo/Pixelview.app
+open "build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app"
 ```
 
 ## Build

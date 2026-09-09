@@ -6,7 +6,7 @@ Run from any directory:
 bash /Users/max/src/pixelview-desktop/cmake/macos/pixelview-build.sh
 ```
 
-Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview.app`.
+Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app` (executable: `Contents/MacOS/Pixelview Desktop`). Quote paths containing spaces. Historical verification entries below retain the artifact names used at the time.
 Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
 No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
 

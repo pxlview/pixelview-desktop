@@ -12,7 +12,7 @@ bash cmake/macos/pixelview-build.sh
 
 A 40-character certificate SHA-1 fingerprint is also accepted as the identity. These inputs select an installed signing identity; no private keys or machine-specific identities are stored in source. Xcode resolves the actual certificate; the helper validates input shape, not the certificate's class or team membership. Verify the resulting authority and team before distribution.
 
-Signed builds default to `build_macos_developer_id/frontend/RelWithDebInfo/Pixelview.app`, separate from the running development app in `build_macos`. `PIXELVIEW_BUILD_DIR` overrides the build directory for either mode; choose a new directory and never target a running app's build directory. `DEVELOPER_DIR` selects Xcode for this invocation only. With no Pixelview signing identity/team, the helper explicitly selects ad-hoc signing and clears inherited upstream signing/provisioning inputs. A team without an identity is rejected instead of triggering automatic Apple Development signing.
+Signed builds default to `build_macos_developer_id/frontend/RelWithDebInfo/Pixelview Desktop.app`, separate from the running development app in `build_macos`. `PIXELVIEW_BUILD_DIR` overrides the build directory for either mode; choose a new directory and never target a running app's build directory. `DEVELOPER_DIR` selects Xcode for this invocation only. With no Pixelview signing identity/team, the helper explicitly selects ad-hoc signing and clears inherited upstream signing/provisioning inputs. A team without an identity is rejected instead of triggering automatic Apple Development signing.
 
 ## Native signing path
 
@@ -23,7 +23,7 @@ If macOS requests private-key authorization, the user must handle the OS prompt 
 Verify a completed artifact before launching or distributing:
 
 ```sh
-app=build_macos_developer_id/frontend/RelWithDebInfo/Pixelview.app
+app="build_macos_developer_id/frontend/RelWithDebInfo/Pixelview Desktop.app"
 codesign --verify --deep --strict --verbose=2 "$app"
 codesign -d --verbose=4 "$app"
 codesign -d -r- "$app"

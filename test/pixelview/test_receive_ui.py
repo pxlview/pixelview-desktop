@@ -4,12 +4,25 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+import uuid
 from test_stream_lock import body
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 INC = ROOT / 'frontend/widgets/OBSBasic_PixelviewReceive.inc'
 
 class ReceiveUI(unittest.TestCase):
+    def test_compact_native_receive_layout(self):
+        self._run_native_receive_ui(layout_only=True)
+
     def test_full_native_receive_ui(self):
+        self._run_native_receive_ui()
+
+    def test_offline_native_receive_lifecycle(self):
+        self._run_native_receive_ui(offline=True)
+
+    def test_unavailable_credential_preserved_until_explicit_replacement(self):
+        self._run_native_receive_ui(offline=True, credential_error=True)
+
+    def _run_native_receive_ui(self, layout_only=False, offline=False, credential_error=False):
         header=(ROOT/'frontend/widgets/OBSBasic.hpp').read_text()
         declarations=header.split('void InitPixelviewReceive',1)[1].split('void ShowPixelviewLicense',1)[0]
         code=(ROOT/'test/pixelview/receive_ui_native.cpp.in').read_text().replace('// DECLARATIONS', 'void InitPixelviewReceive'+declarations)
@@ -24,8 +37,42 @@ class ReceiveUI(unittest.TestCase):
         frameworks=ROOT/'build_macos/libobs/RelWithDebInfo'
         with tempfile.TemporaryDirectory() as td:
             src=pathlib.Path(td)/'native.cpp'; src.write_text(code); exe=pathlib.Path(td)/'native'
-            subprocess.run(['clang++','-std=c++17','-fPIC','-I'+str(ROOT),'-I'+str(ROOT/'frontend'),'-I'+str(ROOT/'libobs'),'-I'+str(ROOT/'build_macos/config'),'-I'+str(ROOT/'build_macos/libobs'),'-I'+str(deps.parent/'include'),'-I'+str(qt/'QtWidgets.framework/Headers'),'-I'+str(qt/'QtCore.framework/Headers'),'-I'+str(qt/'QtGui.framework/Headers'),'-F'+str(qt),'-F'+str(frameworks),'-framework','QtWidgets','-framework','QtGui','-framework','QtCore','-framework','libobs','-Wl,-rpath,'+str(qt),'-Wl,-rpath,'+str(frameworks),'-Wl,-rpath,'+str(deps),str(src),str(ROOT/'frontend/utility/PixelviewReceiver.cpp'),'-o',str(exe)],check=True)
-            subprocess.run([str(exe),td+'/receiver.ini'],check=True,env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},timeout=20)
+            subprocess.run(['clang++','-std=c++17','-fPIC','-I'+str(ROOT),'-I'+str(ROOT/'frontend'),'-I'+str(ROOT/'libobs'),'-I'+str(ROOT/'build_macos/config'),'-I'+str(ROOT/'build_macos/libobs'),'-I'+str(deps.parent/'include'),'-I'+str(qt/'QtWidgets.framework/Headers'),'-I'+str(qt/'QtCore.framework/Headers'),'-I'+str(qt/'QtGui.framework/Headers'),'-F'+str(qt),'-F'+str(frameworks),'-framework','QtWidgets','-framework','QtGui','-framework','QtCore','-framework','libobs','-Wl,-rpath,'+str(qt),'-Wl,-rpath,'+str(frameworks),'-Wl,-rpath,'+str(deps),str(src),str(ROOT/'frontend/utility/PixelviewReceiver.cpp'),str(ROOT/'frontend/utility/PixelviewReceiveCredentialStoreMac.mm'),'-fobjc-arc','-framework','Security','-framework','Foundation','-framework','LocalAuthentication','-o',str(exe)],check=True)
+            service = 'com.pixelview.test.receiver.' + str(uuid.uuid4())
+            if offline:
+                run = subprocess.run([str(exe),td+'/offline.ini',service] + (['credential-error'] if credential_error else []),env={**os.environ,'QT_QPA_PLATFORM':'offscreen','PIXELVIEW_RECEIVE_OFFLINE':'1'},timeout=30,capture_output=True,text=True)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                return
+            try:
+                layout = subprocess.run([str(exe),td+'/layout.ini',service,'layout'],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},timeout=30,capture_output=True,text=True)
+                self.assertEqual(layout.returncode, 0, layout.stdout + layout.stderr)
+                if layout_only:
+                    return
+                run = subprocess.run([str(exe),td+'/receiver.ini',service],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},timeout=30,capture_output=True,text=True)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                restarts = []
+                for mode in ('restore', 'other-origin', 'missing', 'denied', 'corrupt'):
+                    if mode in ('denied', 'corrupt'):
+                        # Only the corrupt-data fixture trusts the reader. The denied
+                        # fixture deliberately belongs to security, exercising the
+                        # legacy ACL path that must fail without an access dialog.
+                        trusted = ['-T', str(exe)] if mode == 'corrupt' else []
+                        # Recreate rather than updating the previous fixture's ACL.
+                        deleted = subprocess.run(['security','delete-generic-password','-s',service,'-a','latest-session'],capture_output=True,timeout=10)
+                        self.assertIn(deleted.returncode, (0, 44))
+                        subprocess.run(['security','add-generic-password','-s',service,'-a','latest-session','-w','invalid-fixture',*trusted],check=True,capture_output=True,timeout=10)
+                    restarted = subprocess.run([str(exe),td+'/receiver.ini',service,mode],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},timeout=30,capture_output=True,text=True)
+                    self.assertEqual(restarted.returncode, 0, restarted.stdout + restarted.stderr)
+                    restarts.append(restarted.stdout + restarted.stderr)
+            finally:
+                subprocess.run(['security','delete-generic-password','-s',service,'-a','latest-session'],capture_output=True,timeout=10)
+                absent = subprocess.run(['security','find-generic-password','-s',service,'-a','latest-session'],capture_output=True,timeout=10)
+                self.assertEqual(absent.returncode, 44, 'Isolated receive Keychain fixture must be absent after cleanup')
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            for secret in ('policy-password', 'never-persist-me', 'corrected-password', 'päss', 'cMOkc3M', 'edited-password', 'failed-password', 'restart-password'):
+                self.assertNotIn(secret, run.stdout + run.stderr + ''.join(restarts))
+                for saved in pathlib.Path(td).glob('receiver.ini*'):
+                    self.assertNotIn(secret.encode(), saved.read_bytes())
 
     def test_native_receive_credentials_lifecycle_and_shared_outputs(self):
         self.assertTrue(INC.exists())
@@ -38,7 +85,7 @@ class ReceiveUI(unittest.TestCase):
         self.assertNotIn('->start(', init)
         start = body(text, 'StartPixelviewReceive')
         self.assertLess(start.index('PixelviewModeBusy()'), start.index('->start('))
-        self.assertIn('pixelviewReceivePassword->clear()', start)
+        self.assertNotIn('pixelviewReceivePassword->clear()', start)
         self.assertNotRegex(text, r'config_set_string\([^;]*(?:Password|Endpoint|endpoint|password)')
         self.assertIn('obs_source_create_private("pixelview_whep_source"', text)
         self.assertIn('obs_scene_create_private', text)

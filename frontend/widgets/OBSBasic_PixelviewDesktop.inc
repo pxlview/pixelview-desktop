@@ -210,7 +210,12 @@ void OBSBasic::ConnectPixelviewDesktop()
 {
  if(isClosing() || pixelviewShutdownPending || pixelviewStopPending || pixelviewClosingSocket || pixelviewUnpairPending || config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled") || !pixelview::Desktop::validOrigin(pixelviewOrigin,pixelviewDev)) return;
  QString token=pixelview::loadDevice(pixelviewOrigin.toString());
- if(token.isEmpty()) {pixelviewLease.fail("Pair with Pixelview to connect");pixelviewIdentity.clear();SavePixelviewIdentity();return;}
+ if(token.isEmpty()) {
+  // An inaccessible Keychain is not evidence of an unpaired installation.
+  // Preserve durable identity and credentials; never reset them on read failure.
+  pixelviewLease.fail("Pairing credential unavailable in Keychain. Connection disabled; saved pairing has not been removed.");
+  return;
+ }
  pixelviewLease.ready=false;pixelviewLease.pending=false;pixelviewLease.leased=false;pixelviewLease.stopping=false;pixelviewLease.heartbeatRequest=-1;pixelviewLease.development=pixelviewDev;
  QUrl ws=pixelviewOrigin;ws.setScheme(ws.scheme()=="https" ? "wss":"ws");ws.setPath("/desktop/ws");
  pixelviewAuthDeadline=pixelviewClock.elapsed()+10000;

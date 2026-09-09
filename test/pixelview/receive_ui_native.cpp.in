@@ -3,22 +3,52 @@
 #include <obs.hpp>
 #include <util/config-file.h>
 #include "frontend/utility/PixelviewReceiver.hpp"
+#include "frontend/utility/PixelviewReceiveCredentialStore.hpp"
 #include "frontend/utility/PixelviewDeepLinkInbox.hpp"
 #include <cassert>
+#include <Security/Security.h>
 namespace pixelview {
 class Offline final : public ReceiverTransport {
 public:
  static inline int logins=0;
- void login(const QUrl &,const QByteArray &,Events) override { ++logins; }
+ static inline QJsonObject lastLogin;
+ static inline Events events;
+ void login(const QUrl &,const QByteArray &body,Events e) override {
+  ++logins; lastLogin=QJsonDocument::fromJson(body).object(); events=std::move(e);
+ }
  void open(const QUrl &) override {} void send(const QByteArray &) override {} void cancel() override {}
 };
 std::unique_ptr<ReceiverTransport> makeReceiverTransport() { return std::make_unique<Offline>(); }
 }
 struct Application {config_t *config=nullptr; config_t *GetUserConfig(){return config;}} application;
 Application *App(){return &application;}
+QString testService;
+// Supplement the unchanged live-Keychain acceptance with a fully offline run.
+class MemoryStore final : public pixelview::ReceiveCredentialStore {
+ static inline QString origin, session, revision, password;
+public:
+ Result load(const QString &o,const QString &s,const QString &r) override {
+  return !password.isEmpty() && o==origin && s==session && r==revision ? Result{State::Found,password} : Result{State::Missing,{}};
+ }
+ bool save(const QString &o,const QString &s,const QString &r,const QString &p) override {
+  origin=o; session=s; revision=r; password=p; return true;
+ }
+ bool clear() override { password.clear(); return true; }
+};
+static std::unique_ptr<pixelview::ReceiveCredentialStore> fixtureStore(const QString &service) {
+ if(qEnvironmentVariableIsSet("PIXELVIEW_RECEIVE_OFFLINE")) return std::make_unique<MemoryStore>();
+ return pixelview::makeReceiveCredentialStore(service);
+}
+class FaultStore final : public pixelview::ReceiveCredentialStore {
+public:
+ Result load(const QString &,const QString &,const QString &) override { return {State::Error,{}}; }
+ bool save(const QString &,const QString &,const QString &,const QString &) override { return false; }
+ bool clear() override { return false; }
+};
 class OBSBasic : public QMainWindow {
 public:
 // DECLARATIONS
+ OBSBasic() { pixelviewReceiveStore=fixtureStore(testService); }
  void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
  QWidget *controlsDock=nullptr;
  QComboBox *pixelviewDevices=nullptr;
@@ -46,10 +76,87 @@ public:
  void OpenPreviewProjector(){}
  template<class T> static void AddProjectorMenuMonitors(QMenu*,T*,void(T::*)()){}
 };
+// Deterministic reset seam for UI-only tests (real reset/readback tested separately).
+static obs_video_info fixtureVideo = {};
+static bool fixtureGetVideo(obs_video_info *v) { *v=fixtureVideo; return true; }
+static int fixtureResetVideo(obs_video_info *v) { fixtureVideo=*v; return OBS_VIDEO_SUCCESS; }
+#define obs_get_video_info fixtureGetVideo
+#define obs_reset_video fixtureResetVideo
 #include "frontend/widgets/OBSBasic_PixelviewReceive.inc"
+#undef obs_get_video_info
+#undef obs_reset_video
 #include "frontend/widgets/OBSBasic_PixelviewDeepLinks.inc"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static void assertInteractionPolicyPreserved()
+{
+ Boolean original=true;
+ assert(SecKeychainGetUserInteractionAllowed(&original)==errSecSuccess);
+ auto store=fixtureStore(testService);
+ for(Boolean allowed : {Boolean(true),Boolean(false)}) {
+  assert(SecKeychainSetUserInteractionAllowed(allowed)==errSecSuccess);
+  auto unchanged=[&] {
+   Boolean actual=!allowed;
+   assert(SecKeychainGetUserInteractionAllowed(&actual)==errSecSuccess && actual==allowed);
+  };
+  assert(store->load("https://fixture.invalid","policy","revision").state==pixelview::ReceiveCredentialStore::State::Missing);
+  unchanged();
+  assert(store->save("https://fixture.invalid","policy","revision","policy-password"));
+  unchanged();
+  assert(store->load("https://fixture.invalid","policy","revision").password=="policy-password");
+  unchanged();
+  assert(store->clear()); unchanged();
+ }
+ assert(SecKeychainSetUserInteractionAllowed(original)==errSecSuccess);
+}
+#pragma clang diagnostic pop
+static void assertDecklinkHeading(OBSBasic &w) {
+ bool heading=false;
+ for(auto *label : w.pixelviewReceivingPanel->findChildren<QLabel *>()) {
+  heading |= label->text()=="DeckLink output";
+  assert(!label->text().contains("optional",Qt::CaseInsensitive));
+  assert(!label->text().contains("canvas",Qt::CaseInsensitive));
+ }
+ assert(heading && "Hardware needs only the DeckLink output heading");
+}
+static void assertCredentials(OBSBasic &w) {
+ auto mapped=[](QWidget *widget,QWidget *root){return QRect(widget->mapTo(root,QPoint()),widget->size());};
+  auto *panel=w.pixelviewReceivingPanel;
+  const auto id=mapped(w.pixelviewReceiveId,panel), password=mapped(w.pixelviewReceivePassword,panel);
+  assert(id.top()==password.top() && "Credentials must share one compact row");
+  assert(id.right()<password.left() && qAbs(id.width()-password.width())<=1);
+  auto *group=panel->findChild<QWidget *>("pixelviewReceiveConnection");
+  assert(group && "Credentials/status/transport need one connection group");
+  assert(id.left()>=12 && id.left()<=13 && password.right()==panel->width()-id.left()-1);
+  assert(w.pixelviewReceiveName->width()>=panel->width()-28);
+  const auto status=mapped(w.pixelviewReceiveStatus,panel), transport=mapped(w.pixelviewReceiveButton,panel);
+  auto *hardware=panel->findChild<QPushButton *>("pixelviewDecklinkOutputSettings");
+  assert(w.pixelviewReceiveButton->parentWidget()==group);
+  assert(status.bottom()<transport.top());
+  if(w.pixelviewReceiveStorageStatus->isHidden()) assert(transport.top()-status.bottom()<=12);
+  assert(transport.height()>=32 && transport.height()<=36);
+  assert(transport.left()==id.left() && transport.right()==password.right());
+  assert(mapped(group,panel).bottom()<mapped(hardware,panel).top());
+  assert(mapped(hardware,panel).bottom()<panel->height());
+  auto *rows=qobject_cast<QVBoxLayout *>(panel->layout());
+  assert(rows->itemAt(rows->count()-1)->spacerItem());
+  for(auto entry : {qMakePair(QStringLiteral("Session ID"),w.pixelviewReceiveId),
+                    qMakePair(QStringLiteral("Password"),w.pixelviewReceivePassword)}) {
+   QLabel *label=nullptr;
+   for(auto *candidate : panel->findChildren<QLabel *>())
+    if(candidate->text()==entry.first) label=candidate;
+   assert(label && label->isVisible());
+   const auto caption=mapped(label,panel), field=mapped(entry.second,panel);
+   assert(caption.left()==field.left() && caption.bottom()<field.top());
+   assert(field.top()-caption.bottom()<=12 && "Labels stay close above their fields");
+  }
+  assert(w.pixelviewReceivePassword->echoMode()==QLineEdit::Password);
+ }
 int main(int argc,char **argv) {
- QApplication app(argc,argv); assert(argc==2);
+ QApplication app(argc,argv); assert(argc==3 || argc==4);
+ testService=QString::fromUtf8(argv[2]);
+ assert(testService.startsWith("com.pixelview.test.receiver."));
+ if(argc==3 && !qEnvironmentVariableIsSet("PIXELVIEW_RECEIVE_OFFLINE")) assertInteractionPolicyPreserved();
  // Reproduce the native style's size-hint-only form fields, even offscreen.
  class NativeFormStyle : public QProxyStyle { public:
   int styleHint(StyleHint hint,const QStyleOption *option=nullptr,const QWidget *widget=nullptr,QStyleHintReturn *data=nullptr) const override {
@@ -60,6 +167,189 @@ int main(int argc,char **argv) {
  app.setStyle(new NativeFormStyle);
  assert(config_open(&application.config,argv[1],CONFIG_OPEN_ALWAYS)==CONFIG_SUCCESS);
  assert(obs_startup("en-US",nullptr,nullptr));
+ if(argc==4 && QString::fromUtf8(argv[3])=="credential-error") {
+  // Error is an unreadable existing record, not an operator-requested deletion.
+  for(const QString action : {"name", "start", "config-failure", "password", "clear", "session", "link", "link-clear"}) {
+   const QString origin="https://fixture.invalid", session="SavedSession", revision="saved-revision";
+   auto store=std::make_unique<MemoryStore>();
+   assert(store->save(origin,session,revision,"old-secret"));
+   config_set_string(application.config,"PixelviewReceive","SessionId",session.toUtf8().constData());
+   config_set_string(application.config,"PixelviewReceive","Name","Saved receiver");
+   config_set_string(application.config,"PixelviewReceive","CredentialRevision",revision.toUtf8().constData());
+   assert(config_save_safe(application.config,"tmp",nullptr)==CONFIG_SUCCESS);
+   OBSBasic w;
+   w.pixelviewReceiveStore=std::make_unique<FaultStore>();
+   w.controlsDock=new QWidget(&w);
+   (new QPushButton("Start sending",w.controlsDock))->setObjectName("streamButton");
+   w.storage.menuTools=new QMenu(&w); w.storage.preview=&w.preview;
+   w.InitSidebar();
+   assert(w.pixelviewReceivePassword->text().isEmpty());
+   assert(!w.pixelviewReceiveStorageStatus->isHidden());
+   const QString readWarning=w.pixelviewReceiveStorageStatus->text();
+   w.pixelviewReceiveStore=std::move(store); // Keychain becomes accessible after startup.
+   if(action=="name" || action=="start" || action=="config-failure") {
+    if(action=="config-failure") assert(QDir().mkdir(QString::fromUtf8(argv[1])+".tmp"));
+    w.pixelviewReceiveName->selectAll(); w.pixelviewReceiveName->insert("Renamed receiver");
+    if(action=="config-failure") {
+     assert(!w.pixelviewReceiveStorageStatus->isHidden());
+     assert(w.pixelviewReceiveStore->load(origin,session,revision).password=="old-secret");
+     assert(QDir().rmdir(QString::fromUtf8(argv[1])+".tmp"));
+     w.SavePixelviewReceive();
+    }
+    if(action=="start") { w.SelectPixelviewMode(1); w.StartPixelviewReceive(); w.StopPixelviewReceive(true); }
+    QMetaObject::invokeMethod(w.pixelviewReceivePassword,"editingFinished");
+    assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"))==revision && "Unrelated edits must preserve unavailable credential revision");
+    assert(w.pixelviewReceiveStore->load(origin,session,revision).password=="old-secret");
+    assert(w.pixelviewReceiveStorageStatus->text()==readWarning && !w.pixelviewReceiveStorageStatus->isHidden());
+    config_close(application.config);
+    assert(config_open(&application.config,argv[1],CONFIG_OPEN_EXISTING)==CONFIG_SUCCESS);
+    assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","Name"))=="Renamed receiver");
+    assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"))==revision);
+    OBSBasic recovered;
+    recovered.controlsDock=new QWidget(&recovered);
+    (new QPushButton("Start sending",recovered.controlsDock))->setObjectName("streamButton");
+    recovered.storage.menuTools=new QMenu(&recovered); recovered.storage.preview=&recovered.preview;
+    recovered.InitSidebar();
+    assert(recovered.pixelviewReceivePassword->text()=="old-secret" && "Recovered startup must still load the original secret");
+    assert(recovered.pixelviewReceiveStorageStatus->isHidden());
+    recovered.StopPixelviewReceive();
+   } else {
+    if(action=="password" || action=="clear") {
+     w.pixelviewReceivePassword->insert("replacement-secret");
+     if(action=="clear") { w.pixelviewReceivePassword->selectAll(); w.pixelviewReceivePassword->backspace(); }
+     QMetaObject::invokeMethod(w.pixelviewReceivePassword,"editingFinished");
+    } else if(action=="session") {
+     w.pixelviewReceiveId->selectAll(); w.pixelviewReceiveId->insert("OtherSession");
+    } else {
+     pixelview::DeepLinkInbox inbox(&app);
+     inbox.attach(&w,[&](const auto &link){w.ApplyPixelviewDeepLink(link);}); inbox.ready();
+     w.SetPixelviewReceiveStatus("Previous error",OBSBasic::ReceiveStatusTone::Error);
+     inbox.submit(action=="link" ? "pixelview://play/SavedSession?token=cmVwbGFjZW1lbnQtc2VjcmV0" : "pixelview://play/SavedSession");
+     w.pixelviewReceiveStatus->ensurePolished(); app.processEvents();
+     assert(w.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==w.palette().color(QPalette::WindowText) && "Accepted idle link must clear the previous error tone");
+    }
+    const QString updated=QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"));
+    assert(updated!=revision);
+    assert(w.pixelviewReceiveStore->load(origin,session,revision).state==pixelview::ReceiveCredentialStore::State::Missing);
+    const auto loaded=w.pixelviewReceiveStore->load(origin,w.pixelviewReceiveId->text(),updated);
+    if(action=="password" || action=="link") assert(loaded.password=="replacement-secret");
+    else assert(loaded.state==pixelview::ReceiveCredentialStore::State::Missing);
+    assert(w.pixelviewReceiveStorageStatus->isHidden());
+   }
+   w.StopPixelviewReceive(); w.StopPixelviewReceive();
+   if(action=="name" || action=="start" || action=="config-failure") assert(w.pixelviewReceiveStore->load(origin,session,revision).password=="old-secret");
+  }
+  obs_shutdown(); config_close(application.config); return 0;
+ }
+ if(argc==4 && QString::fromUtf8(argv[3])=="layout") {
+  {
+   OBSBasic layout;
+   layout.pixelviewReceiveStore=std::make_unique<FaultStore>();
+   layout.controlsDock=new QWidget(&layout);
+   (new QPushButton("Start sending",layout.controlsDock))->setObjectName("streamButton");
+   layout.storage.menuTools=new QMenu(&layout); layout.storage.preview=&layout.preview;
+   layout.InitSidebar(); layout.SelectPixelviewMode(1); layout.show();
+   QPalette dark=app.palette();
+   dark.setColor(QPalette::Window,QColor("#212127")); dark.setColor(QPalette::WindowText,QColor("#dddddf"));
+   dark.setColor(QPalette::Base,QColor("#18181d")); dark.setColor(QPalette::Text,QColor("#dddddf"));
+   dark.setColor(QPalette::Button,QColor("#34343c")); dark.setColor(QPalette::ButtonText,QColor("#dddddf"));
+   dark.setColor(QPalette::Mid,QColor("#46464e")); dark.setColor(QPalette::Light,QColor("#626270"));
+   layout.setPalette(dark);
+   app.setPalette(dark);
+   for(auto *widget : layout.findChildren<QWidget *>()) widget->setPalette(dark);
+   // Re-polish palette-based styles after the explicit offline theme change.
+   for(auto *widget : layout.findChildren<QWidget *>()) { widget->style()->unpolish(widget); widget->style()->polish(widget); }
+   for(auto size : {QSize(900,600),QSize(1000,800),QSize(1200,900)}) {
+    layout.resize(size); app.processEvents(); assertCredentials(layout); assertDecklinkHeading(layout);
+   }
+   // Synthetic native source reports the production get_status schema.
+   static const char *mediaState="playing";
+   static int64_t frames=0;
+   obs_source_info media={}; media.id="pixelview_whep_source"; media.type=OBS_SOURCE_TYPE_INPUT;
+   media.get_name=[](void*){return "Offline media telemetry";};
+   media.create=[](obs_data_t*,obs_source_t *source)->void* {
+    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames)",
+     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames);},nullptr);
+    return source;
+   };
+   media.destroy=[](void*){}; obs_register_source(&media);
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true;
+   auto poll=[&]{QMetaObject::invokeMethod(layout.pixelviewReceiveTimer,"timeout"); app.processEvents();};
+   auto green=[&]{return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#55b879");};
+   poll(); assert(!green() && layout.pixelviewReceiveStatus->text()!="Receiving");
+   frames=10; poll(); assert(green() && layout.pixelviewReceiveStatus->text()=="Receiving");
+   if(!qEnvironmentVariableIsEmpty("PIXELVIEW_RECEIVE_SCREENSHOT")) {
+    layout.pixelviewReceiveId->setText("offline-demo"); layout.pixelviewReceivePassword->setText("synthetic-only");
+    layout.pixelviewReceiveName->setText("Preview receiver"); layout.pixelviewReceiveStorageStatus->hide();
+    layout.RefreshPixelviewModes();
+    auto *canvas=new QLabel(&layout); canvas->setAlignment(Qt::AlignCenter);
+    QPixmap bars(720,405); bars.fill(QColor("#101014"));
+    {
+     QPainter painter(&bars);
+     const QColor colors[]={QColor("#bdbdbd"),QColor("#bdbd35"),QColor("#35bdbd"),QColor("#35bd35"),QColor("#bd35bd"),QColor("#bd3535"),QColor("#3535bd")};
+     for(int i=0;i<7;++i) painter.fillRect(i*103,0,103,300,colors[i]);
+     painter.setPen(Qt::white); painter.setFont(QFont("Helvetica",16,QFont::DemiBold));
+     painter.drawText(QRect(0,305,720,90),Qt::AlignCenter,"OFFLINE SYNTHETIC UI FIXTURE\nNo network, decoded media or DeckLink hardware");
+    }
+    canvas->setPixmap(bars); layout.setCentralWidget(canvas); layout.resize(1100,720); app.processEvents();
+    assertCredentials(layout);
+    assert(layout.grab().save(qEnvironmentVariable("PIXELVIEW_RECEIVE_SCREENSHOT")));
+   }
+   poll(); assert(!green() && layout.pixelviewReceiveStatus->text()!="Receiving"); // retained frame is not live
+   frames=20; poll(); assert(green());
+   frames=0; poll(); assert(!green()); // Counter resets are not arriving frames.
+   frames=1; poll(); assert(green());
+   mediaState="connecting"; poll(); assert(!green());
+   mediaState="playing"; frames=30; poll(); assert(green());
+   mediaState="error"; poll(); assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed"));
+   layout.StopPixelviewReceive(true); app.processEvents(); assert(!green());
+   assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==app.palette().color(QPalette::WindowText));
+   auto red=[&]{app.processEvents(); return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585");};
+   auto amber=[&]{app.processEvents(); return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#d8ad55");};
+   layout.pixelviewReceiveId->clear(); layout.StartPixelviewReceive(); assert(!green() && red());
+   layout.pixelviewReceiveId->setText("offline-session"); layout.pixelviewReceivePassword->setText("synthetic-password");
+   layout.pixelviewReceiveName->setText("Offline receiver");
+   layout.pixelviewOrigin=QUrl("http://invalid.example"); layout.StartPixelviewReceive();
+   assert(red() && layout.pixelviewReceiveStatus->text()=="Invalid backend origin.");
+   layout.pixelviewOrigin=QUrl("https://fixture.invalid");
+   layout.StartPixelviewReceive(); assert(amber() && layout.pixelviewReceiveStatus->text().contains("Authenticating"));
+   pixelview::Offline::events.closed(0);
+   assert(amber() && layout.pixelviewReceiveStatus->text().contains("Reconnecting"));
+   poll(); assert(amber() && layout.pixelviewReceiveStatus->text().contains("Reconnecting"));
+   layout.StopPixelviewReceive(true); layout.StartPixelviewReceive();
+   pixelview::Offline::events.login(401,R"({"detail":"Session archived"})");
+   assert(red() && layout.pixelviewReceiveStatus->text().contains("ended"));
+   layout.StopPixelviewReceive(true); layout.StartPixelviewReceive();
+   pixelview::Offline::events.login(200,R"({"player":"WHEP","client_token":"offline","stream_url":"https://fixture.invalid/whep"})");
+   assert(amber() && layout.pixelviewReceiveStatus->text().contains("Registering"));
+   pixelview::Offline::events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
+   assert(red() && layout.pixelviewReceiveStatus->text()=="Native receive connection unavailable."); // Fixture has no connect proc.
+   layout.StopPixelviewReceive();
+  }
+  obs_shutdown(); config_close(application.config); return 0;
+ }
+ if(argc==4) {
+  const QString mode=QString::fromUtf8(argv[3]);
+  if(mode=="missing") assert(fixtureStore(testService)->clear());
+  {
+   OBSBasic restored;
+   restored.controlsDock=new QWidget(&restored);
+   (new QPushButton("Start sending",restored.controlsDock))->setObjectName("streamButton");
+   restored.storage.menuTools=new QMenu(&restored); restored.storage.preview=&restored.preview;
+   restored.pixelviewOrigin=QUrl();
+   if(mode=="other-origin") restored.pixelviewOrigin=QUrl("https://other.invalid");
+   restored.InitSidebar();
+   assert(restored.pixelviewReceiveId->text()=="restart-session");
+   assert(restored.pixelviewReceiveName->text()=="Restart receiver");
+   if(mode=="restore") assert(restored.pixelviewReceivePassword->text()=="restart-password");
+   else assert(restored.pixelviewReceivePassword->text().isEmpty());
+   assert(restored.pixelviewReceiveStorageStatus->isHidden() == (mode!="corrupt" && mode!="denied"));
+   assert(pixelview::Offline::logins==0 && !restored.pixelviewReceiveIntent);
+   restored.StopPixelviewReceive();
+  }
+  obs_shutdown(); config_close(application.config); return 0;
+ }
  // Isolated registered fixture, NOT the DeckLink plugin: no card or audio opens.
  obs_source_info fixture = {};
  fixture.id="decklink-input"; fixture.type=OBS_SOURCE_TYPE_INPUT;
@@ -86,16 +376,65 @@ int main(int argc,char **argv) {
  assert(w.pixelviewReceiving && w.pixelviewReceiveScene && w.pixelviewReceiveId->text()=="ColdSession");
  assert(w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
  assert(w.pixelviewReceivePassword->echoMode()==QLineEdit::Password && pixelview::Offline::logins==0);
+ w.pixelviewReceiveId->selectAll(); w.pixelviewReceiveId->insert("EditedSession");
+ assert(w.pixelviewReceivePassword->text().isEmpty() && "Editing the session must clear its old password");
+ bool mixedCredentials=false;
+ auto observePair=[&] {
+  mixedCredentials |= w.pixelviewReceiveId->text()=="ColdSession" && w.pixelviewReceivePassword->text().isEmpty();
+ };
+ auto idObserver=QObject::connect(w.pixelviewReceiveId,&QLineEdit::textChanged,&w,observePair);
+ auto passwordObserver=QObject::connect(w.pixelviewReceivePassword,&QLineEdit::textChanged,&w,observePair);
+ inbox.submit("pixelview://play/ColdSession?token=cMOkc3M");
+ assert(!mixedCredentials && "Deep links must replace credentials atomically");
+ QObject::disconnect(idObserver); QObject::disconnect(passwordObserver);
+ assert(w.pixelviewReceiveId->text()=="ColdSession" && w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
+ assert(pixelview::Offline::logins==0);
  const char *savedSession=config_get_string(application.config,"PixelviewReceive","SessionId");
- assert(!savedSession || !*savedSession);
+ assert(QString::fromUtf8(savedSession)=="ColdSession" && "Session links must persist before Start");
+ config_close(application.config);
+ assert(config_open(&application.config,argv[1],CONFIG_OPEN_EXISTING)==CONFIG_SUCCESS);
+ {
+  OBSBasic restored;
+  restored.controlsDock=new QWidget(&restored);
+  (new QPushButton("Start sending",restored.controlsDock))->setObjectName("streamButton");
+  restored.storage.menuTools=new QMenu(&restored); restored.storage.preview=&restored.preview;
+  restored.InitSidebar();
+  assert(restored.pixelviewReceiveId->text()=="ColdSession");
+  assert(restored.pixelviewReceivePassword->text()==QString::fromUtf8("päss") && "Password must survive a fresh UI and config reload");
+  assert(restored.pixelviewReceiveStorageStatus->isHidden());
+ }
+ auto initialRevision=QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"));
+ assert(w.pixelviewReceiveStore->load("https://other.invalid","ColdSession",initialRevision).state==pixelview::ReceiveCredentialStore::State::Missing);
+ assert(w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"OtherSession",initialRevision).state==pixelview::ReceiveCredentialStore::State::Missing);
  for(bool *busy : {&w.nativeBusy,&w.pixelviewReceiveIntent,&w.pixelviewLease.intent,&w.pixelviewLease.pending,
                   &w.pixelviewLease.leased,&w.pixelviewStopPending,&w.pixelviewUnpairPending,&w.desktop.exchanging,
                   &w.closing,&w.pixelviewShutdownPending}) {
   *busy=true; inbox.submit("pixelview://play/Rejected?token=Zg");
   assert(w.pixelviewReceiveId->text()=="ColdSession" && w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
   assert(pixelview::Offline::logins==0); *busy=false;
+  assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"))==initialRevision);
  }
  inbox.submit("pixelview://play/NoPassword"); assert(w.pixelviewReceivePassword->text().isEmpty());
+ w.pixelviewReceiveName->selectAll(); w.pixelviewReceiveName->insert("Edited receiver");
+ QMetaObject::invokeMethod(w.pixelviewReceiveName,"editingFinished");
+ w.pixelviewReceivePassword->insert("edited-password");
+ QMetaObject::invokeMethod(w.pixelviewReceivePassword,"editingFinished");
+ config_close(application.config);
+ assert(config_open(&application.config,argv[1],CONFIG_OPEN_EXISTING)==CONFIG_SUCCESS);
+ assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","Name"))=="Edited receiver");
+ auto revision=QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"));
+ auto loaded=w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"NoPassword",revision);
+ assert(loaded.state==pixelview::ReceiveCredentialStore::State::Found && loaded.password=="edited-password");
+ w.pixelviewReceiveId->selectAll(); w.pixelviewReceiveId->insert("OperatorSession");
+ assert(w.pixelviewReceivePassword->text().isEmpty());
+ assert(w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"NoPassword",revision).state==pixelview::ReceiveCredentialStore::State::Missing);
+ assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","SessionId"))=="OperatorSession");
+ inbox.submit("pixelview://play/ColdSession?token=cMOkc3M");
+ revision=QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"));
+ inbox.submit("pixelview://play/ColdSession");
+ assert(w.pixelviewReceivePassword->text().isEmpty());
+ assert(w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"ColdSession",revision).state==pixelview::ReceiveCredentialStore::State::Missing);
+ w.pixelviewReceiveName->setText(QSysInfo::machineHostName());
  inbox.shutdown(); w.SelectPixelviewMode(0); w.pixelviewReceiveId->clear();
 
  auto *sidebar=w.findChild<QWidget *>("pixelviewSidebar"); assert(sidebar);
@@ -121,19 +460,16 @@ int main(int argc,char **argv) {
  }
  w.SelectPixelviewMode(1); assert(w.pixelviewReceiving && w.pixelviewReceiveScene);
  app.processEvents();
- for(auto *field : {w.pixelviewReceiveId,w.pixelviewReceivePassword,w.pixelviewReceiveName})
-  assert(field->width() >= w.pixelviewReceivingPanel->width()-4);
+
+ assertCredentials(w);
  assert(w.preview.Locked());
- // Native hardware settings live in each mode's configuration area. Only the
- // active transport may occupy the footer; fullscreen belongs to native View.
+ // Native hardware settings live in each mode's configuration area. Receiving
+ // keeps transport in its connection group; Sending retains its native footer.
  QPushButton *decklink=nullptr;
  for(auto *button : sidebar->findChildren<QPushButton *>())
   if(button->text().startsWith("DeckLink output")) decklink=button;
  assert(decklink && decklink->parentWidget()==w.pixelviewReceivingPanel && "Optional output settings belong inside Receiving, not the shared footer");
- bool canvasOnly=false;
- for(auto *label : w.pixelviewReceivingPanel->findChildren<QLabel *>())
-  canvasOnly |= label->text().contains("canvas",Qt::CaseInsensitive) && label->text().contains("optional",Qt::CaseInsensitive);
- assert(canvasOnly);
+ assertDecklinkHeading(w);
  for(auto *button : sidebar->findChildren<QPushButton *>()) assert(!button->text().contains("Fullscreen"));
  auto *view=w.menuBar()->actions().last()->menu(); assert(view && view->title()=="View");
  assert(view->actions().first()->menu()->title()=="Fullscreen canvas");
@@ -141,6 +477,7 @@ int main(int argc,char **argv) {
   w.resize(size);
   for(int mode : {0,1}) {
    w.SelectPixelviewMode(mode); app.processEvents();
+   if(mode) assertCredentials(w);
    QWidget *panel=mode ? w.pixelviewReceivingPanel : w.pixelviewSendingPanel;
    auto *rows=qobject_cast<QVBoxLayout *>(panel->layout()); assert(rows);
    auto *transport=mode ? w.pixelviewReceiveButton : nativeSend;
@@ -148,12 +485,18 @@ int main(int argc,char **argv) {
    int stretch=-1;
    for(int i=0;i<rows->count();++i)
     if(rows->itemAt(i)->spacerItem() && rows->stretch(i)>0) stretch=i;
-   assert(stretch>=0 && rows->count()==stretch+3); // stretch, separator, native transport
-   assert(rows->itemAt(rows->count()-1)->widget()==transport);
+   assert(stretch>=0);
+   if(mode) {
+    assert(rows->count()==stretch+1); // Receiving's group precedes hardware and the bottom stretch.
+    assert(mapped(transport,panel).bottom()<mapped(hardware,panel).top());
+   } else {
+    assert(rows->count()==stretch+3); // Sending retains stretch, separator, native transport.
+    assert(rows->itemAt(rows->count()-1)->widget()==transport);
+    assert(mapped(transport,sidebar).bottom()==sidebar->height()-outer->contentsMargins().bottom()-1);
+   }
    assert(mapped(hardware,panel).bottom()<rows->itemAt(stretch)->geometry().top());
    assert(mapped(hardware,sidebar).left()==tabs.left());
    assert(mapped(panel,sidebar).top()>mapped(w.pixelviewModeTabs,sidebar).bottom());
-   assert(mapped(transport,sidebar).bottom()==sidebar->height()-outer->contentsMargins().bottom()-1);
    assert(transport->isVisible() && !(mode ? nativeSend : w.pixelviewReceiveButton)->isVisible());
    const QRect footer(0,mapped(transport,sidebar).top(),sidebar->width(),transport->height());
    for(auto *button : sidebar->findChildren<QPushButton *>())
@@ -168,15 +511,74 @@ int main(int argc,char **argv) {
  w.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("decklink-input","Offline receiver fixture",nullptr));
  assert(w.PixelviewManagedSource()==w.pixelviewReceiveSource && w.PixelviewManagedSource()!=capture);
  w.pixelviewReceiveSource=nullptr;
- w.pixelviewReceiveId->setText("test-session"); w.pixelviewReceivePassword->setText("never-persist-me");
  w.pixelviewOrigin=QUrl(); // Unpaired installations still receive using controller's production origin.
+ w.pixelviewReceivePasswordOrigin=w.PixelviewReceiveOrigin();
+ w.pixelviewReceiveId->setText("test-session"); w.pixelviewReceivePassword->setText("never-persist-me");
  w.StartPixelviewReceive(); assert(w.pixelviewReceiveIntent && pixelview::Offline::logins==1);
- assert(w.pixelviewReceivePassword->text().isEmpty());
+ assert(w.pixelviewReceivePassword->text()=="never-persist-me" && "Start must retain the masked form password");
  assert(!w.pixelviewModeTabs->isEnabled() && !w.pixelviewReceiveId->isEnabled());
  w.SelectPixelviewMode(0); assert(w.pixelviewReceiving);
  w.StopPixelviewReceive(true); assert(!w.pixelviewReceiveIntent);
  assert(w.preview.Locked() && w.pixelviewReceiving);
  assert(w.pixelviewReceiver->state()==pixelview::PixelviewReceiver::State::Idle);
+ auto retainedPassword=[&] {
+  assert(w.pixelviewReceivePassword->text()=="never-persist-me" && "Stop/failure must retain form password");
+  assert(w.pixelviewReceivePassword->echoMode()==QLineEdit::Password);
+  assert(!w.pixelviewReceivePassword->displayText().contains("never-persist-me"));
+ };
+ retainedPassword();
+ assert(w.pixelviewReceivePassword->isEnabled() && w.pixelviewReceiveId->isEnabled());
+ w.StartPixelviewReceive(); assert(pixelview::Offline::logins==2);
+ assert(pixelview::Offline::lastLogin["password"]=="never-persist-me");
+ assert(!w.pixelviewReceivePassword->isEnabled() && !w.pixelviewReceiveId->isEnabled());
+ retainedPassword();
+ auto login=pixelview::Offline::events.login; login(401,"{}");
+ assert(w.pixelviewReceiver->state()==pixelview::PixelviewReceiver::State::Error && !w.pixelviewReceiveIntent);
+ retainedPassword();
+ assert(w.pixelviewReceivePassword->isEnabled() && !w.pixelviewReceivePassword->isReadOnly());
+ assert(w.pixelviewReceiveId->isEnabled());
+ w.pixelviewReceivePassword->selectAll(); w.pixelviewReceivePassword->insert("corrected-password");
+ w.StartPixelviewReceive(); assert(pixelview::Offline::logins==3);
+ assert(pixelview::Offline::lastLogin["password"]=="corrected-password");
+ pixelview::Offline::events.login(401,"{}");
+ assert(w.pixelviewReceiver->state()==pixelview::PixelviewReceiver::State::Error);
+ // A failed secure replacement must not resurrect the old same-session secret.
+ const QString loginError=w.pixelviewReceiveStatus->text();
+ w.pixelviewReceiveStore=std::make_unique<FaultStore>();
+ w.pixelviewReceivePassword->selectAll(); w.pixelviewReceivePassword->insert("failed-password");
+ QMetaObject::invokeMethod(w.pixelviewReceivePassword,"editingFinished");
+ assert(!w.pixelviewReceiveStorageStatus->isHidden());
+ assert(w.pixelviewReceiveStatus->text()==loginError);
+ w.StartPixelviewReceive(); // Current input remains usable despite denied persistence.
+ assert(pixelview::Offline::lastLogin["password"]=="failed-password");
+ pixelview::Offline::events.login(401,"{}");
+ assert(w.pixelviewReceiveStatus->text()==loginError && !w.pixelviewReceiveStorageStatus->isHidden());
+ assert(w.pixelviewReceivePassword->isEnabled());
+ revision=QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","CredentialRevision"));
+ auto realStore=fixtureStore(testService);
+ assert(realStore->load(w.PixelviewReceiveOrigin(),"test-session",revision).state==pixelview::ReceiveCredentialStore::State::Missing);
+ {
+  OBSBasic unavailable;
+  unavailable.pixelviewReceiveStore=std::make_unique<FaultStore>();
+  unavailable.controlsDock=new QWidget(&unavailable);
+  (new QPushButton("Start sending",unavailable.controlsDock))->setObjectName("streamButton");
+  unavailable.storage.menuTools=new QMenu(&unavailable); unavailable.storage.preview=&unavailable.preview;
+  unavailable.InitSidebar();
+  assert(unavailable.pixelviewReceivePassword->text().isEmpty());
+  assert(!unavailable.pixelviewReceiveStorageStatus->isHidden());
+ }
+ w.pixelviewReceiveStore=std::move(realStore);
+ // Real native config safe-save failure (isolated temp directory only).
+ assert(QDir().mkdir(QString::fromUtf8(argv[1])+".tmp"));
+ assert(!w.SavePixelviewReceive() && !w.pixelviewReceiveStorageStatus->isHidden());
+ assert(w.pixelviewReceivePassword->text()=="failed-password");
+ assert(QDir().rmdir(QString::fromUtf8(argv[1])+".tmp"));
+ assert(w.SavePixelviewReceive() && w.pixelviewReceiveStorageStatus->isHidden());
+ w.pixelviewOrigin=QUrl("https://other.invalid");
+ const int beforeOriginChange=pixelview::Offline::logins;
+ w.StartPixelviewReceive();
+ assert(w.pixelviewReceivePassword->text().isEmpty() && pixelview::Offline::logins==beforeOriginChange);
+ w.pixelviewOrigin=QUrl();
  w.SelectPixelviewMode(0); assert(!w.pixelviewReceiving);
  assert(w.PixelviewManagedSource()==capture);
  assert(!w.preview.Locked());
@@ -187,6 +589,7 @@ int main(int argc,char **argv) {
   w.SelectPixelviewMode(0); assert(w.preview.Locked()==locked);
   w.SelectPixelviewMode(1); assert(w.preview.Locked());
   w.StopPixelviewReceive(); // The shutdown entrypoint restores sending output/lock.
+  assert(w.pixelviewReceivePassword->text().isEmpty());
   assert(!w.pixelviewReceiving && w.preview.Locked()==locked);
   active=obs_get_output_source(0); assert(active==capture); active=nullptr;
   w.StopPixelviewReceive(); assert(w.preview.Locked()==locked);
@@ -195,6 +598,11 @@ int main(int argc,char **argv) {
  obs_set_output_source(0, nullptr);
  QFile saved(argv[1]); assert(saved.open(QIODevice::ReadOnly)); auto bytes=saved.readAll();
  assert(bytes.contains("test-session") && !bytes.contains("never-persist-me") && !bytes.contains("Password") && !bytes.contains("endpoint"));
+ w.pixelviewReceiveId->selectAll(); w.pixelviewReceiveId->insert("restart-session");
+ w.pixelviewReceiveName->selectAll(); w.pixelviewReceiveName->insert("Restart receiver");
+ w.pixelviewReceivePassword->insert("restart-password");
+ // Quit with focus still in the edited password: no focus-out signal first.
+ w.StopPixelviewReceive();
  }
  obs_shutdown(); config_close(application.config);
 }

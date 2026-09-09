@@ -6,15 +6,18 @@
 static GstElement *test_parse(const char *, GError **);
 static GstStateChangeReturn test_set_state(GstElement *, GstState);
 static void test_video(obs_source_t *, const struct obs_source_frame *);
+static void test_video2(obs_source_t *, const struct obs_source_frame2 *);
 static void test_audio(obs_source_t *, const struct obs_source_audio *);
 #define gst_parse_launch test_parse
 #define gst_element_set_state test_set_state
 #define obs_source_output_video test_video
+#define obs_source_output_video2 test_video2
 #define obs_source_output_audio test_audio
 #include "../pixelview-whep.c"
 #undef gst_parse_launch
 #undef gst_element_set_state
 #undef obs_source_output_video
+#undef obs_source_output_video2
 #undef obs_source_output_audio
 static struct receiver *cancel_during_build;
 static bool replace_during_build;
@@ -23,6 +26,9 @@ static gint obsolete_starts, delivered_video, delivered_audio;
 static GstElement *test_parse(const char *spec, GError **error)
 {
  GstElement *pipe = gst_parse_launch(spec, error);
+
+ GstElement *rx=pipe?gst_bin_get_by_name(GST_BIN(pipe),"rx"):NULL;
+ if(rx) {g_object_set(rx,"stun-server",NULL,NULL);gst_object_unref(rx);}
  if (cancel_during_build) {
   cancelled_pipeline = pipe;
   disconnect_proc(cancel_during_build, NULL);
@@ -48,6 +54,11 @@ static void test_video(obs_source_t *source, const struct obs_source_frame *fram
  if (source) obs_source_output_video(source, frame);
  else if (frame) g_atomic_int_inc(&delivered_video);
 }
+static void test_video2(obs_source_t *source, const struct obs_source_frame2 *frame)
+{
+ if (source) obs_source_output_video2(source,frame);
+ else if (frame) g_atomic_int_inc(&delivered_video);
+}
 static void test_audio(obs_source_t *source, const struct obs_source_audio *audio)
 {
  if (source) obs_source_output_audio(source, audio);
@@ -64,6 +75,7 @@ static void cancellation_during_build(bool replace)
  g_mutex_lock(&r.lock); r.quit=true; g_cond_signal(&r.wake); g_mutex_unlock(&r.lock);
  g_thread_join(r.thread);
  assert(g_atomic_int_get(&obsolete_starts) == 0);
+
  assert(!strcmp(r.state, replace ? "playing" : "idle"));
  if (replace) assert(r.frames > 0 && r.audio_frames > 0);
  g_cond_clear(&r.wake); g_mutex_clear(&r.lock); g_rec_mutex_clear(&r.delivery);
@@ -93,6 +105,7 @@ static void cancelled_media_is_not_delivered(void)
 int main(void)
 {
  gst_init(NULL, NULL);
+ struct pixelview_receive_capabilities caps;assert(pixelview_capability_probe_get(&caps,NULL,NULL));assert(caps.profiles);
  cancellation_during_build(false);
  cancellation_during_build(true);
  cancelled_media_is_not_delivered();
@@ -127,7 +140,8 @@ int main(void)
  GstElement *rtc = gst_element_factory_make("webrtcbin", NULL);
  assert(rtc);
  struct receiver latency_test = {.latency = 50, .active_latency = 50};
- webrtc_ready(NULL, "test", rtc, &latency_test);
+ struct receive_attempt *latency_attempt=attempt_new(&latency_test);
+ webrtc_ready(NULL, "test", rtc, latency_attempt);attempt_unref(latency_attempt,NULL);
  guint latency=0; g_object_get(rtc,"latency",&latency,NULL);
  assert(latency == 50); gst_object_unref(rtc);
  for (int n=0;n<20;n++) {

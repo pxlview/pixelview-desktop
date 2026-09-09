@@ -22,8 +22,8 @@ class AppBranding(unittest.TestCase):
 
     def test_macos_bundle_display_and_native_icon_keep_identity(self):
         cmake = source('cmake/macos/helpers.cmake').split('if(target STREQUAL obs-studio)', 1)[1].split('get_property(obs_dependencies', 1)[0]
-        self.assertIn('OUTPUT_NAME Pixelview', cmake)
-        self.assertIn('PRODUCT_NAME Pixelview', cmake)
+        self.assertIn('OUTPUT_NAME "Pixelview Desktop"', cmake)
+        self.assertIn('PRODUCT_NAME "Pixelview Desktop"', cmake)
         self.assertIn('PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop', cmake)
         self.assertIn('INFOPLIST_KEY_CFBundleDisplayName "Pixelview Desktop"', cmake)
         self.assertIn('INFOPLIST_KEY_CFBundleName "Pixelview Desktop"', cmake)
@@ -78,7 +78,14 @@ class AppBranding(unittest.TestCase):
                 'string(TIMESTAMP CURRENT_YEAR "%Y")\n'
                 'function(set_target_xcode_properties target)\n' + xcode_function + 'endfunction()\n'
                 'add_executable(obs-studio main.c)\n'
-                'set(target obs-studio)\n' + branding
+                'set(target obs-studio)\n' + branding +
+                '\nadd_library(branding-probe MODULE main.c)\n'
+                'set_target_properties(branding-probe PROPERTIES BUNDLE TRUE BUNDLE_EXTENSION plugin)\n'
+                'set(obs_module_list branding-probe)\n' +
+                helper.split('if(num_modules GREATER 0)', 1)[1].split('foreach(module', 1)[0] +
+                '\nfile(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/paths-$<CONFIG>.txt" '
+                'CONTENT "$<TARGET_BUNDLE_DIR:obs-studio>\\n$<TARGET_FILE:obs-studio>\\n")\n'
+                'install(TARGETS obs-studio BUNDLE DESTINATION .)\n'
             )
             build = fixture / 'build'
             compiler = subprocess.run(
@@ -105,12 +112,28 @@ class AppBranding(unittest.TestCase):
             for command in commands:
                 result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=120)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            app = build / 'Debug/Pixelview.app'
+            app = build / 'Debug/Pixelview Desktop.app'
+            self.assertTrue(app.is_dir(), 'CMake must build the actual Pixelview Desktop.app bundle')
+            self.assertFalse((build / 'Debug/Pixelview.app').exists())
             plist = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
             self.assertEqual(plist['CFBundleName'], 'Pixelview Desktop')
             self.assertEqual(plist['CFBundleDisplayName'], 'Pixelview Desktop')
-            self.assertEqual(plist['CFBundleExecutable'], 'Pixelview')
-            self.assertTrue((app / 'Contents/MacOS/Pixelview').is_file())
+            self.assertEqual(plist['CFBundleExecutable'], 'Pixelview Desktop')
+            self.assertTrue((app / 'Contents/MacOS/Pixelview Desktop').is_file())
+            self.assertEqual((build / 'paths-Debug.txt').read_text().splitlines(),
+                             [str(app), str(app / 'Contents/MacOS/Pixelview Desktop')])
+            installed = fixture / 'installed'
+            result = subprocess.run(['cmake', '--install', str(build), '--config', 'Debug',
+                                     '--prefix', str(installed)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            installed_app = installed / 'Pixelview Desktop.app'
+            plugin_relative = 'Contents/PlugIns/branding-probe.plugin/Contents/MacOS/branding-probe'
+            self.assertTrue((app / plugin_relative).is_file())
+            self.assertTrue((installed_app / plugin_relative).is_file())
+            self.assertTrue((installed_app / 'Contents/MacOS/Pixelview Desktop').is_file())
+            self.assertFalse((installed / 'Pixelview.app').exists())
+            result = subprocess.run([str(installed_app / 'Contents/MacOS/Pixelview Desktop')])
+            self.assertEqual(result.returncode, 0)
             self.assertEqual(plist['CFBundleIdentifier'], 'com.pixelview.desktop')
             self.assertEqual(plist['CFBundleVersion'], '1')
             self.assertEqual(plist['CFBundleShortVersionString'], '0.0.1')

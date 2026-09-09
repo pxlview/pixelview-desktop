@@ -76,7 +76,13 @@ int main(int argc, char **argv) {
 class OBSBasic : public QMainWindow { public:
  QLineEdit id, password; QLabel status; bool busy=false, pixelviewReceiving=false, closing=false, pixelviewShutdownPending=false;
  QLineEdit *pixelviewReceiveId=&id, *pixelviewReceivePassword=&password; QLabel *pixelviewReceiveStatus=&status;
- int switches=0;
+ int switches=0, saves=0;
+ QString pixelviewReceivePasswordOrigin;
+ bool pixelviewReceiveCredentialUnavailable=true;
+ enum class ReceiveStatusTone { Idle };
+ void SetPixelviewReceiveStatus(const QString &text, ReceiveStatusTone) { status.setText(text); } // Rendered tone covered by full native receive test.
+ QString PixelviewReceiveOrigin() const { return "https://fixture.invalid"; }
+ bool SavePixelviewReceive() { ++saves; return true; } // Secure store covered by full native receive test.
  bool PixelviewModeBusy() const { return busy || closing || pixelviewShutdownPending; }
  bool isClosing() const { return closing; }
  void SelectPixelviewMode(int i) { ++switches; pixelviewReceiving=i==1; }
@@ -89,15 +95,18 @@ int main(int argc,char **argv) {
  w.ApplyPixelviewDeepLink(link);
  assert(w.pixelviewReceiving && w.id.text()=="MySession" && w.password.text()==QString::fromUtf8("päss"));
  assert(w.password.echoMode()==QLineEdit::Password);
+ assert(w.saves==1);
  for (bool *flag : {&w.busy,&w.closing,&w.pixelviewShutdownPending}) {
   *flag=true; int switches=w.switches;
   w.ApplyPixelviewDeepLink(pixelview::parseDeepLink("pixelview://play/other?token=Zg"));
   assert(w.id.text()=="MySession" && w.password.text()==QString::fromUtf8("päss") && w.switches==switches);
+  assert(w.saves==1);
   *flag=false;
  }
  w.ApplyPixelviewDeepLink(std::nullopt); assert(w.id.text()=="MySession");
  w.ApplyPixelviewDeepLink(pixelview::parseDeepLink("pixelview://play/empty"));
  assert(w.id.text()=="empty" && w.password.text().isEmpty());
+ assert(w.saves==2);
 }''')
 
     def test_native_activity_preserves_delegate(self):

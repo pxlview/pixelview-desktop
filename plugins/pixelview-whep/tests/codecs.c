@@ -8,13 +8,14 @@
 static void check_codec(obs_source_t *source, const char *codec, bool audio)
 {
  char spec[1024];
- snprintf(spec,sizeof(spec),"appsrc name=input format=time ! %s ! %s ! appsink name=output sync=false",
- audio ? "audio/x-raw,format=F32LE,rate=48000,channels=2,layout=interleaved" : "video/x-raw,format=NV12,width=320,height=180,framerate=30/1",
+ snprintf(spec,sizeof(spec),"appsrc name=input format=time ! %s ! %s ! %s ! appsink name=output sync=false",
+ audio ? "audio/x-raw,format=F32LE,rate=48000,channels=2,layout=interleaved" : "video/x-raw,format=NV12,colorimetry=bt709,width=320,height=180,framerate=30/1",
  audio ? "audioconvert ! opusenc ! opusdec ! audioconvert ! audio/x-raw,format=F32LE,layout=interleaved,channels=2" :
- !strcmp(codec,"H264") ? "vtenc_h264 realtime=true ! h264parse ! vtdec ! videoconvert ! video/x-raw,format=BGRA" :
- "vtenc_h265 realtime=true ! h265parse ! vtdec ! videoconvert ! video/x-raw,format=BGRA");
+ !strcmp(codec,"H264") ? "vtenc_h264 realtime=true ! h264parse ! vtdec" :
+ "vtenc_h265 realtime=true ! h265parse ! vtdec",
+ audio ? "identity" : g_getenv("PIXELVIEW_TEST_P010") ? PIXELVIEW_RECEIVE_RAW_CAPS : "video/x-raw,format=NV12");
  GError *error=NULL;
- struct receiver r={.source=source,.accept_samples=true}; g_mutex_init(&r.lock);
+ struct receiver r={.source=source,.accept_samples=true}; g_mutex_init(&r.lock); g_rec_mutex_init(&r.delivery);
  r.pipe=gst_parse_launch(spec,&error); assert(r.pipe && !error);
  GstElement *input=gst_bin_get_by_name(GST_BIN(r.pipe),"input");
  GstElement *output=gst_bin_get_by_name(GST_BIN(r.pipe),"output");
@@ -36,7 +37,7 @@ static void check_codec(obs_source_t *source, const char *codec, bool audio)
  gst_element_set_state(r.pipe,GST_STATE_NULL);
  printf("PASS bundled %s encode/decode -> native OBS raw path: video=%llu audio=%llu\n",codec,(unsigned long long)r.frames,(unsigned long long)r.audio_frames);
  assert(audio?r.audio_frames>0:r.frames>0);
- gst_message_unref(msg);gst_object_unref(bus);gst_object_unref(input);gst_object_unref(output);gst_object_unref(r.pipe);g_mutex_clear(&r.lock);
+ gst_message_unref(msg);gst_object_unref(bus);gst_object_unref(input);gst_object_unref(output);gst_object_unref(r.pipe);g_mutex_clear(&r.lock); g_rec_mutex_clear(&r.delivery);
 }
 int main(void)
 {

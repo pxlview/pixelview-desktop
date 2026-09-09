@@ -53,6 +53,7 @@ class ColorSelect;
 class OBSAbout;
 #include <utility/PixelviewDesktopConnection.hpp>
 #include <utility/PixelviewReceiver.hpp>
+#include <utility/PixelviewReceiveCredentialStore.hpp>
 #include <utility/PixelviewDeepLink.hpp>
 class QTabBar;
 class QLineEdit;
@@ -293,17 +294,33 @@ private:
 	bool PixelviewModeBusy() const;
 	void SelectPixelviewMode(int index);
 	void StartPixelviewReceive();
+	bool SavePixelviewReceive();
+	QString PixelviewReceiveOrigin() const;
+	std::unique_ptr<pixelview::ReceiveCredentialStore> pixelviewReceiveStore;
+	QString pixelviewReceivePasswordOrigin;
+	bool pixelviewReceiveCredentialsDirty = false;
+	// A blank field after a failed load is not an explicit credential deletion.
+	bool pixelviewReceiveCredentialUnavailable = false;
 	void StopPixelviewReceive(bool keepReceiving = false);
 	void DisconnectPixelviewReceiveMedia();
+	enum class ReceiveStatusTone { Idle, Connecting, Receiving, Error };
+	void SetPixelviewReceiveStatus(const QString &text, ReceiveStatusTone tone);
+	int64_t pixelviewReceiveFrames = 0;
 	OBSSource PixelviewManagedSource();
 	std::unique_ptr<pixelview::PixelviewReceiver> pixelviewReceiver;
 	bool pixelviewReceiving = false, pixelviewReceiveIntent = false;
 	bool pixelviewSendPreviewLocked = false;
+	bool PixelviewReceiveVideoBusy() const;
+	bool SetPixelviewReceivePrecision(bool enabled);
+	bool pixelviewReceivePrecision = false, pixelviewReceivePrecisionFault = false;
+	obs_video_info pixelviewSendVideo = {};
+	std::string pixelviewSendRenderModule;
 	QTabBar *pixelviewModeTabs = nullptr;
 	QWidget *pixelviewSendingPanel = nullptr, *pixelviewReceivingPanel = nullptr;
 	QLineEdit *pixelviewReceiveId = nullptr, *pixelviewReceivePassword = nullptr, *pixelviewReceiveName = nullptr;
 	QPushButton *pixelviewReceiveButton = nullptr;
 	QLabel *pixelviewReceiveStatus = nullptr;
+	QLabel *pixelviewReceiveStorageStatus = nullptr;
 	OBSSource pixelviewReceiveSource, pixelviewSendOutput;
 	OBSScene pixelviewReceiveScene;
 	QTimer *pixelviewReceiveTimer = nullptr;

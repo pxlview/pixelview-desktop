@@ -18,8 +18,16 @@ void OBSBasic::ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &
 		statusBar()->showMessage(QStringLiteral("Could not open the receiving form."), 10000);
 		return;
 	}
-	pixelviewReceiveId->setText(link->session);
-	pixelviewReceivePassword->setText(link->password);
-	pixelviewReceiveStatus->setText(QStringLiteral("Session link filled. Check receiver name, then click Start receiving."));
+	{
+		// Do not expose an intermediate session/password pair to form observers.
+		const QSignalBlocker idBlocker(pixelviewReceiveId);
+		const QSignalBlocker passwordBlocker(pixelviewReceivePassword);
+		pixelviewReceiveId->setText(link->session);
+		pixelviewReceivePassword->setText(link->password);
+		pixelviewReceivePasswordOrigin = PixelviewReceiveOrigin();
+		pixelviewReceiveCredentialUnavailable = false;
+	}
+	SetPixelviewReceiveStatus(QStringLiteral("Session link filled. Check receiver name, then click Start receiving."), ReceiveStatusTone::Idle);
+	SavePixelviewReceive();
 	show(); raise(); activateWindow();
 }

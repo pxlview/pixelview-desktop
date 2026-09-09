@@ -1,0 +1,25 @@
+{
+  "vpx": {
+    "path": ".deps/gstreamer-upstream-1.28.3/sdk/lib/gstreamer-1.0/libgstvpx.dylib",
+    "sha256": "8a880c5e11391b7856cf759d6ff553ad56e522fc2937d9ffc673d254f0f07665",
+    "linkage": "/Users/max/src/pixelview-desktop/.deps/gstreamer-upstream-1.28.3/sdk/lib/gstreamer-1.0/libgstvpx.dylib:\n\t@rpath/libgstvpx.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t@rpath/libgstreamer-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgobject-2.0.0.dylib (compatibility version 8201.0.0, current version 8201.4.0)\n\t@rpath/libglib-2.0.0.dylib (compatibility version 8201.0.0, current version 8201.4.0)\n\t@rpath/libgsttag-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgstvideo-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libvpx.9.dylib (compatibility version 9.0.0, current version 9.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n",
+    "relevant_strings": [
+      "../ext/vpx/gstvp9dec.c",
+      "LGPL",
+      "video/x-raw, format = (string) { I420, YV12, Y42B, Y444, GBR, I420_10LE, I420_12LE, I422_10LE, I422_12LE, Y444_10LE, Y444_12LE, GBR_10LE, GBR_12LE}, width = (int) [ 1, max ], height = (int) [ 1, max ], framerate = (fraction) [ 0, max ]",
+      "video/x-raw, format = (string) { I420, YV12, Y444, I420_10LE, I420_12LE, I422_10LE, I422_12LE, Y444_10LE, Y444_12LE}, width = (int) [ 1, max ], height = (int) [ 1, max ], framerate = (fraction) [ 0, max ]",
+      "vp9dec"
+    ]
+  },
+  "libav": {
+    "path": ".deps/gstreamer-upstream-1.28.3/sdk/lib/gstreamer-1.0/libgstlibav.dylib",
+    "sha256": "a1bfd5f72f3dcd7dafc0c77e918f75367ead22aa6fc6f777c1adac977c4d8087",
+    "linkage": "/Users/max/src/pixelview-desktop/.deps/gstreamer-upstream-1.28.3/sdk/lib/gstreamer-1.0/libgstlibav.dylib:\n\t@rpath/libgstlibav.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t@rpath/libavcodec.61.dylib (compatibility version 61.0.0, current version 61.0.0)\n\t@rpath/libavfilter.10.dylib (compatibility version 10.0.0, current version 10.0.0)\n\t@rpath/libavformat.61.dylib (compatibility version 61.0.0, current version 61.0.0)\n\t@rpath/libavutil.59.dylib (compatibility version 59.0.0, current version 59.0.0)\n\t@rpath/libgstreamer-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgobject-2.0.0.dylib (compatibility version 8201.0.0, current version 8201.4.0)\n\t@rpath/libglib-2.0.0.dylib (compatibility version 8201.0.0, current version 8201.4.0)\n\t@rpath/libgstbase-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgstvideo-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgstaudio-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t@rpath/libgstpbutils-1.0.0.dylib (compatibility version 2804.0.0, current version 2804.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n",
+    "relevant_strings": [
+      "LGPL",
+      "avdec_%s",
+      "avdec_%s: Failed to open libav codec",
+      "avdec_%s: input format was not set before data start"
+    ]
+  }
+}

@@ -11,7 +11,9 @@ if(NOT EXISTS "${PIXELVIEW_GST_RUNTIME}/sbom.json")
   message(FATAL_ERROR "Missing bundled WHEP runtime. Run python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer (pixelview-build.sh does this automatically).")
 endif()
 
-add_library(pixelview-whep MODULE pixelview-whep.c runtime.h)
+add_library(pixelview-whep MODULE pixelview-whep.c runtime.h
+ video-format.c video-format.h profile-offer.c profile-offer.h
+ capability-probe.c capability-probe.h capability-fixtures.h)
 add_library(OBS::pixelview-whep ALIAS pixelview-whep)
 target_include_directories(pixelview-whep PRIVATE
  "${PIXELVIEW_GST_SDK}/include/gstreamer-1.0"

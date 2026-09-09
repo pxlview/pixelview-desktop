@@ -1,0 +1,249 @@
+[
+  {
+    "name": "h264",
+    "result": [
+      "LOOPBACK_RESULT frames=30 audio=92160 jitter=50 audited=30 codes=183 energy=718.425 negative=0 passed=1"
+    ],
+    "passed": true,
+    "bound": {
+      "audio": {
+        "MimeType": "audio/OPUS",
+        "ClockRate": 48000,
+        "Channels": 2,
+        "SDPFmtpLine": "",
+        "RTCPFeedback": [
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 99
+      },
+      "selected": "h264-8bit-420",
+      "video": {
+        "MimeType": "video/H264",
+        "ClockRate": 90000,
+        "Channels": 0,
+        "SDPFmtpLine": "profile-level-id=42c02a;packetization-mode=1",
+        "RTCPFeedback": [
+          {
+            "Type": "ccm",
+            "Parameter": "fir"
+          },
+          {
+            "Type": "nack",
+            "Parameter": ""
+          },
+          {
+            "Type": "nack",
+            "Parameter": "pli"
+          },
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 97
+      }
+    }
+  },
+  {
+    "name": "main",
+    "result": [
+      "LOOPBACK_RESULT frames=31 audio=95040 jitter=50 audited=31 codes=183 energy=740.858 negative=0 passed=1"
+    ],
+    "passed": true,
+    "bound": {
+      "audio": {
+        "MimeType": "audio/OPUS",
+        "ClockRate": 48000,
+        "Channels": 2,
+        "SDPFmtpLine": "",
+        "RTCPFeedback": [
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 99
+      },
+      "selected": "hevc-8bit-420",
+      "video": {
+        "MimeType": "video/H265",
+        "ClockRate": 90000,
+        "Channels": 0,
+        "SDPFmtpLine": "level-id=123;profile-id=1;tier-flag=0;tx-mode=SRST",
+        "RTCPFeedback": [
+          {
+            "Type": "ccm",
+            "Parameter": "fir"
+          },
+          {
+            "Type": "nack",
+            "Parameter": ""
+          },
+          {
+            "Type": "nack",
+            "Parameter": "pli"
+          },
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 96
+      }
+    }
+  },
+  {
+    "name": "main10",
+    "result": [
+      "LOOPBACK_RESULT frames=32 audio=96000 jitter=50 audited=32 codes=876 energy=748.478 negative=0 passed=1"
+    ],
+    "passed": true,
+    "bound": {
+      "audio": {
+        "MimeType": "audio/OPUS",
+        "ClockRate": 48000,
+        "Channels": 2,
+        "SDPFmtpLine": "",
+        "RTCPFeedback": [
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 99
+      },
+      "selected": "hevc-10bit-420",
+      "video": {
+        "MimeType": "video/H265",
+        "ClockRate": 90000,
+        "Channels": 0,
+        "SDPFmtpLine": "level-id=123;profile-id=2;tier-flag=0;tx-mode=SRST",
+        "RTCPFeedback": [
+          {
+            "Type": "ccm",
+            "Parameter": "fir"
+          },
+          {
+            "Type": "nack",
+            "Parameter": ""
+          },
+          {
+            "Type": "nack",
+            "Parameter": "pli"
+          },
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 120
+      }
+    }
+  },
+  {
+    "name": "vp9_0",
+    "result": [
+      "LOOPBACK_RESULT frames=31 audio=87360 jitter=50 audited=31 codes=183 energy=680.946 negative=0 passed=1"
+    ],
+    "passed": true,
+    "bound": {
+      "audio": {
+        "MimeType": "audio/OPUS",
+        "ClockRate": 48000,
+        "Channels": 2,
+        "SDPFmtpLine": "",
+        "RTCPFeedback": [
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 99
+      },
+      "selected": "vp9-8bit-420",
+      "video": {
+        "MimeType": "video/VP9",
+        "ClockRate": 90000,
+        "Channels": 0,
+        "SDPFmtpLine": "profile-id=0",
+        "RTCPFeedback": [
+          {
+            "Type": "ccm",
+            "Parameter": "fir"
+          },
+          {
+            "Type": "nack",
+            "Parameter": ""
+          },
+          {
+            "Type": "nack",
+            "Parameter": "pli"
+          },
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 98
+      }
+    }
+  },
+  {
+    "name": "vp9_2",
+    "result": [
+      "LOOPBACK_RESULT frames=33 audio=91200 jitter=50 audited=33 codes=876 energy=710.999 negative=0 passed=1"
+    ],
+    "passed": true,
+    "bound": {
+      "audio": {
+        "MimeType": "audio/OPUS",
+        "ClockRate": 48000,
+        "Channels": 2,
+        "SDPFmtpLine": "",
+        "RTCPFeedback": [
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 99
+      },
+      "selected": "vp9-10bit-420",
+      "video": {
+        "MimeType": "video/VP9",
+        "ClockRate": 90000,
+        "Channels": 0,
+        "SDPFmtpLine": "profile-id=2",
+        "RTCPFeedback": [
+          {
+            "Type": "ccm",
+            "Parameter": "fir"
+          },
+          {
+            "Type": "nack",
+            "Parameter": ""
+          },
+          {
+            "Type": "nack",
+            "Parameter": "pli"
+          },
+          {
+            "Type": "transport-cc",
+            "Parameter": ""
+          }
+        ],
+        "PayloadType": 121
+      }
+    }
+  },
+  {
+    "name": "negative",
+    "result": [
+      "LOOPBACK_RESULT frames=0 audio=0 jitter=50 audited=0 codes=0 energy=0 negative=1 passed=1"
+    ],
+    "passed": true
+  }
+]

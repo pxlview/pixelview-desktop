@@ -82,6 +82,19 @@ int main(int argc,char **argv){
  r.start("s","p","n"); f->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a?"})");
  r.onStopped=[&]{r.stop();}; f->events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
  assert(!endpoint.contains("??"));f->events.closed(1006);assert(r.state()==PixelviewReceiver::State::Idle);
+ // Existing token-expiry/control rejection mapping remains distinct from login.
+ for(const auto &kind : {"SOCKET_TOKEN_EXPIRED", "SOCKET_TOKEN_INVALID"}) {
+  r.start("s","p","n");
+  f->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a"})");
+  f->events.message(QJsonDocument(QJsonObject{{"mutation",kind}}).toJson());
+  assert(r.state()==PixelviewReceiver::State::Error);
+  assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
+ }
+ for(int code : {1008,4401,4403,4001}) {
+  r.start("s","p","n"); f->events.closed(code);
+  assert(r.state()==PixelviewReceiver::State::Error);
+  assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
+ }
  r.onStopped={};
  std::cout<<"receiver native basic, recovery and security passed\n";
 }

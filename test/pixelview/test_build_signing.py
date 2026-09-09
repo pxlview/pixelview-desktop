@@ -15,18 +15,21 @@ class BuildSigningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             cmake = tmp / "cmake"
-            cmake.write_text('#!/usr/bin/env python3\nimport json, os, sys\nwith open(os.environ["CMAKE_CALLS"], "a") as f:\n    f.write(json.dumps(sys.argv[1:]) + "\\n")\n')
+            cmake.write_text(f'#!{sys.executable}\n' + 'import json, os, sys\nwith open(os.environ["CMAKE_CALLS"], "a") as f:\n    f.write(json.dumps(sys.argv[1:]) + "\\n")\n')
             cmake.chmod(0o755)
             # Packaging has its own native/closure tests. This shell-policy fixture
-            # must not rewrite the shared staged runtime or depend on Homebrew.
+            # must not download/rebuild the SDK, rewrite the shared staged runtime,
+            # or depend on Homebrew. Fail closed on future unlisted Python helpers.
             python = tmp / "python3"
             python.write_text(f'#!{sys.executable}\nimport os, sys\n'
-                              'if len(sys.argv) > 1 and sys.argv[1].endswith("build-rswebrtc.py"):\n'
+                              'if len(sys.argv) > 1 and sys.argv[1].endswith(("fetch-gstreamer.py", "build-rswebrtc.py")):\n'
                               '    assert len(sys.argv) == 2\n'
                               '    sys.exit(0)\n'
                               'if len(sys.argv) > 1 and sys.argv[1].endswith("bundle-runtime.py"):\n'
                               '    assert sys.argv[2:] == ["stage", ".deps/pixelview-gstreamer"]\n'
                               '    sys.exit(0)\n'
+                              'if len(sys.argv) > 1 and sys.argv[1] != "-":\n'
+                              '    sys.exit("Unstubbed build script: " + sys.argv[1])\n'
                               f'os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n')
             python.chmod(0o755)
             env = {k: v for k, v in os.environ.items() if not k.startswith("PIXELVIEW_")}

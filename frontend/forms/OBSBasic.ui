@@ -242,6 +242,25 @@
               <addaction name="actionRemoveSource"/>
              </widget>
             </item>
+            <item row="2" column="0">
+             <widget class="QPushButton" name="previewFullscreenButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="text">
+               <string notr="true">Fullscreen</string>
+              </property>
+              <property name="toolTip">
+               <string notr="true">Fullscreen canvas · Esc to exit</string>
+              </property>
+              <property name="accessibleName">
+               <string notr="true">Fullscreen canvas</string>
+              </property>
+             </widget>
+            </item>
             <item row="2" column="1">
              <widget class="QWidget" name="previewXContainer">
               <layout class="QHBoxLayout" name="horizontalLayout_7">

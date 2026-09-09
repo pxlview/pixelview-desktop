@@ -457,6 +457,15 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	connect(ui->previewZoomInButton, &QPushButton::clicked, ui->preview, &OBSBasicPreview::increaseScalingLevel);
 	connect(ui->previewZoomOutButton, &QPushButton::clicked, ui->preview, &OBSBasicPreview::decreaseScalingLevel);
 
+	// Shared canvas control, independent of sender configuration/zoom locking.
+	// Reuse the native Preview projector and its existing Escape action.
+	auto *canvasFullscreenMenu = new QMenu(ui->previewFullscreenButton);
+	connect(canvasFullscreenMenu, &QMenu::aboutToShow, this, [this, canvasFullscreenMenu] {
+		canvasFullscreenMenu->clear();
+		AddProjectorMenuMonitors(canvasFullscreenMenu, this, &OBSBasic::OpenPreviewProjector);
+	});
+	ui->previewFullscreenButton->setMenu(canvasFullscreenMenu);
+
 	/* Preview Actions */
 	connect(ui->actionScaleWindow, &QAction::triggered, this, &OBSBasic::setPreviewScalingWindow);
 	connect(ui->actionScaleCanvas, &QAction::triggered, this, &OBSBasic::setPreviewScalingCanvas);
@@ -1855,10 +1864,13 @@ void OBSBasic::RefreshPixelviewDevices()
 	pixelviewDevices->setEnabled(!busy && !devices.empty() && !properties);
 	pixelviewSettings->setEnabled(!busy && source && list);
 	pixelviewFit->setEnabled(!busy && source != nullptr);
-	// Disable input, not the OBS display/render callback or saved item transforms.
+	// Keep source-edit/context-menu input disabled: GetCurrentScene is still
+	// the sender. Only local viewport controls bypass the receiver's
+	// configuration lock; they never change source/program framing.
 	ui->preview->setEnabled(!busy);
-	ui->previewXContainer->setEnabled(!busy);
-	ui->previewYScrollBar->setEnabled(!busy);
+	const bool viewportControlsEnabled = pixelviewReceiving || !busy;
+	ui->previewXContainer->setEnabled(viewportControlsEnabled);
+	ui->previewYScrollBar->setEnabled(viewportControlsEnabled);
 	if (properties) properties->setEnabled(!busy);
 	QString captureHelp;
 	using pixelview::CaptureStatus;
@@ -2159,6 +2171,8 @@ static inline enum video_colorspace GetVideoColorSpaceFromName(const char *name)
 
 int OBSBasic::ResetVideo()
 {
+	// Receive precision is an in-memory transaction, never a sender profile edit.
+	if (pixelviewReceivePrecision || pixelviewReceivePrecisionFault) return OBS_VIDEO_CURRENTLY_ACTIVE;
 	if (outputHandler && outputHandler->Active()) {
 		return OBS_VIDEO_CURRENTLY_ACTIVE;
 	}

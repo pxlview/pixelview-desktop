@@ -107,7 +107,7 @@ assert(!pixelviewWhipSameOrigin("https://example.com/a","https://example.com/b#x
             frameworks=ROOT/'build_macos/libobs/RelWithDebInfo'
             deps=ROOT/'.deps/obs-deps-2026-08-26-universal'
             subprocess.run(['clang++','-std=c++17','-I'+str(ROOT/'libobs'),'-I'+str(ROOT/'build_macos/config'),'-I'+str(ROOT/'build_macos/libobs'),'-I'+str(deps/'include'),str(ROOT/'test/pixelview/desktop_whip_native.cpp'),'-F'+str(frameworks),'-framework','libobs','-Wl,-rpath,'+str(frameworks),'-Wl,-rpath,'+str(deps/'lib'),'-o',tmp+'/test'],check=True)
-            plugin=ROOT/'build_macos/frontend/RelWithDebInfo/Pixelview.app/Contents/PlugIns/obs-webrtc.plugin/Contents/MacOS/obs-webrtc'
+            plugin=ROOT/'build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app/Contents/PlugIns/obs-webrtc.plugin/Contents/MacOS/obs-webrtc'
             subprocess.run([tmp+'/test',str(plugin),str(ROOT/'plugins/obs-webrtc/data')],check=True,timeout=8)
     def test_native_protocol(self):
         header = ROOT / 'frontend/utility/PixelviewDesktop.hpp'

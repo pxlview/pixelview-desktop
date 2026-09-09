@@ -17,17 +17,14 @@ DecklinkOutputUI *doUI;
 bool shutting_down = false;
 
 bool main_output_running = false;
-bool preview_output_running = false;
 
 constexpr size_t STAGE_BUFFER_COUNT = 3;
 
 struct decklink_ui_output {
 	bool enabled;
-	obs_source_t *current_source;
 	obs_output_t *output;
 
 	video_t *video_queue;
-	gs_texrender_t *texrender_premultiplied;
 	gs_texrender_t *texrender;
 	gs_stagesurf_t *stagesurfaces[STAGE_BUFFER_COUNT];
 	bool surf_written[STAGE_BUFFER_COUNT];
@@ -39,7 +36,6 @@ struct decklink_ui_output {
 };
 
 static struct decklink_ui_output context = {0};
-static struct decklink_ui_output context_preview = {0};
 
 OBSData load_settings()
 {
@@ -102,7 +98,6 @@ void output_start()
 			const uint32_t height = conversion->height;
 
 			obs_enter_graphics();
-			context.texrender_premultiplied = nullptr;
 			context.texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
 			for (gs_stagesurf_t *&surf : context.stagesurfaces) {
 				surf = gs_stagesurface_create(width, height, GS_BGRA);
@@ -128,7 +123,6 @@ void output_start()
 
 			video_output_open(&context.video_queue, &vi);
 
-			context.current_source = nullptr;
 			obs_add_main_rendered_callback(decklink_ui_render, &context);
 
 			obs_output_set_media(context.output, context.video_queue, obs_get_audio());
@@ -158,164 +152,12 @@ void output_toggle()
 	}
 }
 
-OBSData load_preview_settings()
-{
-	BPtr<char> path = obs_module_get_config_path(obs_current_module(), "decklinkPreviewOutputProps.json");
-	BPtr<char> jsonData = os_quick_read_utf8_file(path);
-	if (!!jsonData) {
-		obs_data_t *data = obs_data_create_from_json(jsonData);
-		OBSData dataRet(data);
-		obs_data_release(data);
-
-		return dataRet;
-	}
-
-	return nullptr;
-}
-
-void on_preview_scene_changed(enum obs_frontend_event event, void *param);
-
 static void decklink_ui_tick(void *param, float /* sec */)
 {
 	auto ctx = (struct decklink_ui_output *)param;
 
-	if (ctx->texrender_premultiplied) {
-		gs_texrender_reset(ctx->texrender_premultiplied);
-	}
 	if (ctx->texrender) {
 		gs_texrender_reset(ctx->texrender);
-	}
-}
-
-void preview_output_stop()
-{
-	obs_remove_main_rendered_callback(decklink_ui_render, &context_preview);
-	obs_frontend_remove_event_callback(on_preview_scene_changed, &context_preview);
-
-	obs_output_stop(context_preview.output);
-	obs_output_release(context_preview.output);
-
-	obs_source_release(context_preview.current_source);
-
-	obs_enter_graphics();
-	for (gs_stagesurf_t *&surf : context_preview.stagesurfaces) {
-		gs_stagesurface_destroy(surf);
-		surf = nullptr;
-	}
-	gs_texrender_destroy(context_preview.texrender);
-	context_preview.texrender = nullptr;
-	gs_texrender_destroy(context_preview.texrender_premultiplied);
-	context_preview.texrender_premultiplied = nullptr;
-	obs_leave_graphics();
-
-	video_output_close(context_preview.video_queue);
-	obs_remove_tick_callback(decklink_ui_tick, &context_preview);
-
-	preview_output_running = false;
-
-	if (!shutting_down) {
-		doUI->PreviewOutputStateChanged(false);
-	}
-}
-
-void preview_output_start()
-{
-	OBSData settings = load_preview_settings();
-
-	if (settings != nullptr) {
-		obs_output_t *const output = obs_output_create("decklink_output", "decklink_output", settings, NULL);
-		const struct video_scale_info *const conversion = obs_output_get_video_conversion(output);
-		if (conversion != nullptr) {
-			context_preview.output = output;
-			obs_add_tick_callback(decklink_ui_tick, &context_preview);
-
-			obs_get_video_info(&context_preview.ovi);
-
-			const uint32_t width = conversion->width;
-			const uint32_t height = conversion->height;
-
-			obs_enter_graphics();
-			context_preview.texrender_premultiplied = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
-			context_preview.texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
-			for (gs_stagesurf_t *&surf : context_preview.stagesurfaces) {
-				surf = gs_stagesurface_create(width, height, GS_BGRA);
-			}
-			obs_leave_graphics();
-
-			for (bool &written : context_preview.surf_written) {
-				written = false;
-			}
-
-			context_preview.stage_index = 0;
-
-			video_output_info vi = {0};
-			vi.format = VIDEO_FORMAT_BGRA;
-			vi.width = width;
-			vi.height = height;
-			vi.fps_den = context_preview.ovi.fps_den;
-			vi.fps_num = context_preview.ovi.fps_num;
-			vi.cache_size = 16;
-			vi.colorspace = VIDEO_CS_DEFAULT;
-			vi.range = VIDEO_RANGE_FULL;
-			vi.name = "decklink_preview_output";
-
-			video_output_open(&context_preview.video_queue, &vi);
-
-			obs_frontend_add_event_callback(on_preview_scene_changed, &context_preview);
-			if (obs_frontend_preview_program_mode_active()) {
-				context_preview.current_source = obs_frontend_get_current_preview_scene();
-			} else {
-				context_preview.current_source = obs_frontend_get_current_scene();
-			}
-			obs_add_main_rendered_callback(decklink_ui_render, &context_preview);
-
-			obs_output_set_media(context_preview.output, context_preview.video_queue, obs_get_audio());
-			bool started = obs_output_start(context_preview.output);
-
-			preview_output_running = started;
-			if (!shutting_down) {
-				doUI->PreviewOutputStateChanged(started);
-			}
-
-			if (!started) {
-				preview_output_stop();
-			}
-		} else {
-			obs_output_release(output);
-		}
-	}
-}
-
-void preview_output_toggle()
-{
-	if (preview_output_running) {
-		preview_output_stop();
-	} else {
-		preview_output_start();
-	}
-}
-
-void on_preview_scene_changed(enum obs_frontend_event event, void *param)
-{
-	auto ctx = (struct decklink_ui_output *)param;
-	switch (event) {
-	case OBS_FRONTEND_EVENT_STUDIO_MODE_ENABLED:
-	case OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED:
-		obs_source_release(ctx->current_source);
-		ctx->current_source = obs_frontend_get_current_preview_scene();
-		break;
-	case OBS_FRONTEND_EVENT_STUDIO_MODE_DISABLED:
-		obs_source_release(ctx->current_source);
-		ctx->current_source = obs_frontend_get_current_scene();
-		break;
-	case OBS_FRONTEND_EVENT_SCENE_CHANGED:
-		if (!obs_frontend_preview_program_mode_active()) {
-			obs_source_release(ctx->current_source);
-			ctx->current_source = obs_frontend_get_current_scene();
-		}
-		break;
-	default:
-		break;
 	}
 }
 
@@ -323,8 +165,6 @@ static void decklink_ui_render(void *param)
 {
 	auto *const ctx = (struct decklink_ui_output *)param;
 
-	uint32_t width = 0;
-	uint32_t height = 0;
 	gs_texture_t *tex = nullptr;
 
 	if (ctx == &context) {
@@ -336,41 +176,6 @@ static void decklink_ui_render(void *param)
 		if (!tex) {
 			return;
 		}
-
-		width = gs_texture_get_width(tex);
-		height = gs_texture_get_height(tex);
-	} else if (ctx == &context_preview) {
-		if (!preview_output_running) {
-			return;
-		}
-
-		if (!ctx->current_source) {
-			return;
-		}
-
-		width = obs_source_get_base_width(ctx->current_source);
-		height = obs_source_get_base_height(ctx->current_source);
-
-		gs_texrender_t *const texrender_premultiplied = ctx->texrender_premultiplied;
-		if (!gs_texrender_begin(texrender_premultiplied, width, height)) {
-			return;
-		}
-
-		struct vec4 background;
-		vec4_zero(&background);
-
-		gs_clear(GS_CLEAR_COLOR, &background, 0.0f, 0);
-		gs_ortho(0.0f, (float)width, 0.0f, (float)height, -100.0f, 100.0f);
-
-		gs_blend_state_push();
-		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
-
-		obs_source_video_render(ctx->current_source);
-
-		gs_blend_state_pop();
-		gs_texrender_end(texrender_premultiplied);
-
-		tex = gs_texrender_get_texture(texrender_premultiplied);
 	} else {
 		return;
 	}
@@ -459,17 +264,10 @@ static void OBSEvent(enum obs_frontend_event event, void *)
 			output_start();
 		}
 
-		OBSData previewSettings = load_preview_settings();
-
-		if (previewSettings && obs_data_get_bool(previewSettings, "auto_start")) {
-			preview_output_start();
-		}
+		// Pixelview exposes program output only. Never load legacy Preview
+		// settings here: a saved auto_start must not open an invisible output.
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		shutting_down = true;
-
-		if (preview_output_running) {
-			preview_output_stop();
-		}
 
 		if (main_output_running) {
 			output_stop();
@@ -485,10 +283,6 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
 	shutting_down = true;
-
-	if (preview_output_running) {
-		preview_output_stop();
-	}
 
 	if (main_output_running) {
 		output_stop();

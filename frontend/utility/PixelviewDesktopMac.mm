@@ -1,4 +1,5 @@
 #include "PixelviewDesktopConnection.hpp"
+#include "PixelviewNoninteractiveKeychain.hpp"
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #include <QtCore/QPointer>
@@ -69,6 +70,8 @@ static NSMutableDictionary *query(const QString &origin) {
   (__bridge id)kSecAttrSynchronizable:@NO} mutableCopy];
 }
 bool saveDevice(const QString &origin,const QString &token) {
+ NoninteractiveKeychain interaction;
+ if(!interaction.ready) return false;
  auto q=query(origin);
  NSData *data=[token.toNSString() dataUsingEncoding:NSUTF8StringEncoding];
  OSStatus result=SecItemUpdate((__bridge CFDictionaryRef)q,(__bridge CFDictionaryRef)@{(__bridge id)kSecValueData:data});
@@ -80,6 +83,8 @@ bool saveDevice(const QString &origin,const QString &token) {
  return result==errSecSuccess && loadDevice(origin)==token;
 }
 QString loadDevice(const QString &origin) {
+ NoninteractiveKeychain interaction;
+ if(!interaction.ready) return {};
  auto q=query(origin); q[(__bridge id)kSecReturnData]=@YES;
  CFTypeRef value=nullptr;
  if(SecItemCopyMatching((__bridge CFDictionaryRef)q,&value)!=errSecSuccess) return {};
@@ -87,6 +92,8 @@ QString loadDevice(const QString &origin) {
  return QString::fromUtf8(static_cast<const char *>(data.bytes),data.length);
 }
 bool removeDevice(const QString &origin) {
+ NoninteractiveKeychain interaction;
+ if(!interaction.ready) return false;
  auto status=SecItemDelete((__bridge CFDictionaryRef)query(origin));
  return (status==errSecSuccess || status==errSecItemNotFound) && loadDevice(origin).isEmpty();
 }

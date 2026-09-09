@@ -43,7 +43,7 @@ function(set_target_properties_obs target)
       set_target_properties(
         ${target}
         PROPERTIES
-          OUTPUT_NAME Pixelview
+          OUTPUT_NAME "Pixelview Desktop"
           MACOSX_BUNDLE TRUE
           MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Info.plist.in"
           XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
@@ -55,7 +55,7 @@ function(set_target_properties_obs target)
       set_target_xcode_properties(
         ${target}
         PROPERTIES PRODUCT_BUNDLE_IDENTIFIER com.pixelview.desktop
-                   PRODUCT_NAME Pixelview
+                   PRODUCT_NAME "Pixelview Desktop"
                    CURRENT_PROJECT_VERSION ${PIXELVIEW_BUILD_NUMBER}
                    MARKETING_VERSION ${PIXELVIEW_VERSION}
                    # Xcode's generated defaults overwrite CFBundleName with PRODUCT_NAME.

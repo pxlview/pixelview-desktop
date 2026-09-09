@@ -2,7 +2,7 @@
 
 Coordinated fallback: `pixelview://play/<sessionID>?token=<original encoded token>`.
 Universal Link: `https://play.pixelview.io/<sessionID>?token=<original encoded token>`.
-Missing token is allowed: prefill session and clear password. This is **prefill only**, never start/login.
+Missing token is allowed: prefill session and clear the form and stored password, including links for the same session ID. Session and password are replaced atomically, without intermediate field-change notifications, and saved without requiring Start. Operator session-ID edits clear the old password; programmatic link prefill does not discard the new one. This is **prefill only**, never start/login. The masked form password remains across Start/Stop/retry or login failure and is restored across application launches using macOS Keychain. Passwords never enter plaintext configuration, scene data or logs.
 
 Public bundle ID: `com.pixelview.desktop`. Public Apple team: `MA47F3M8W9`
 (from `release/macos.env`); AASA appID: `MA47F3M8W9.com.pixelview.desktop`.
@@ -20,9 +20,34 @@ are ignored. URL bound 8192 characters, decoded password bound 4096 UTF-8 bytes.
 Idle links select Receiving and fill the existing masked password/session controls.
 Busy sending/receiving/preparing/stopping/recovery/pairing or shutdown rejects without
 changing mode/credentials or interrupting output. Cold delivery has one memory-only
-pending slot (latest link wins) until UI startup completes. No URL/token/password logs
-or persistence; no automatic retry of busy links. Session ID is saved only by the existing
-explicit Start receiving action, never by link prefill.
+pending slot (latest link wins) until UI startup completes. Raw links and encoded tokens
+are never logged or persisted; no automatic retry of busy links. Accepted link prefill
+saves the session ID/name in user configuration and its decoded password only in Keychain.
+
+## Receive credential persistence
+
+The latest session ID and edited receiver name persist immediately on operator edits;
+the hostname is the default name only when no name was saved. Password edits persist on
+editingFinished, Start, accepted link delivery, and clean shutdown with an unfinished edit.
+Stopping receive retains the masked form. Shutdown clears process copies without deleting
+the saved password and never autostarts reception on the next launch.
+
+The dedicated generic-password service is `com.pixelview.desktop.receiver`, account
+`latest-session`, separate from sender/device pairing. It is non-synchronizable and
+device-only. A single Keychain record contains the exact session ID, backend origin,
+non-secret revision and decoded password. Configuration contains only ID/name/revision.
+Load requires all bindings to match, so another session/backend never inherits a password.
+Each replacement writes a new configuration revision before updating the Keychain item;
+a failed same-session replacement cannot restore the previous revision's password.
+The configuration file and Keychain are not a cross-store transaction: interrupted or
+failed saves fail closed to a missing credential, rather than mixing credential pairs.
+
+Keychain save/read/delete operations are read back, do not prompt, and have no plaintext
+fallback. Storage failures use a separate visible warning, preserving authentication/media
+errors and editable current input. Unlock Keychain and edit the password or click Start to
+retry. If configuration itself cannot be saved, previous settings may remain; a best-effort
+Keychain removal prevents stale credentials being reused when possible. Both stores failing
+cannot guarantee removal of a previously saved item.
 
 ## macOS signing opt-in
 
@@ -58,11 +83,17 @@ and website AASA deployment remain operator work, not completed by the local tes
   wiring, profile authorization and real tiny CMake ad-hoc/opt-in behavior.
 - `test_receive_ui.py` compiles the full production receive include with real Qt/libobs,
   tests link prefill through the inbox, every native busy flag, normal masked controls,
-  no login/autostart, and no session persistence before explicit Start. Hardware/network
+  no login/autostart, edit/link persistence before Start, and actual Keychain reload in a
+  separate process. Its unique test-only Keychain service is removed and read back absent
+  even after test failure; sender pairing is never accessed. Missing/corrupt items,
+  session/origin mismatch, injected storage denial, actual config-save failure, login-error
+  preservation and plaintext/log non-disclosure are covered. Hardware/network
   boundaries are offline fixtures, not claims of full application or Apple OS dispatch QA.
 - Standalone tests may emit expected offscreen Qt/font and graphics-context fixture
   warnings. The complete app builds successfully and passes deep/strict signature
-  verification. The complete frontend regression suite passes 156 tests.
+  verification in the earlier link acceptance run (156 tests). The newer persistence change
+  is verified by the compiled native offscreen harness; full-app build/relaunch acceptance
+  remains a separate gate.
 - Real LaunchServices cold and warm custom-scheme delivery passed in an isolated,
   ad-hoc-signed app copy with a unique test bundle ID and private HOME. A nonshipping
   inspector confirmed exact session and decoded Unicode password equality, masked

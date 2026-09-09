@@ -1,5 +1,12 @@
 find_package(Qt6 REQUIRED Widgets Network Svg Xml)
 
+if(APPLE AND Qt6_VERSION VERSION_EQUAL "6.10.3")
+  target_compile_options(
+    obs-studio PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/utility/PixelviewQtArmCompat.hpp>"
+  )
+endif()
+
 if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
   find_package(Qt6 REQUIRED Gui DBus)
 endif()

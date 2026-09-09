@@ -1,7 +1,7 @@
 """Build isolated production worker with test-only private bus ERROR probe."""
-import pathlib, subprocess, shlex, shutil
+import os, pathlib, subprocess, shutil
 root=pathlib.Path(__file__).resolve().parents[1];repo=root.parents[1]
-app=pathlib.Path('/Users/max/src/pixelview-whep-spike/runtime/PixelviewReceiveFinal.app')
+app=pathlib.Path(os.environ.get('PIXELVIEW_TEST_APP',str(repo/'build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app')))
 out=root/'.test-build/controller-media';contents=out/'Probe.plugin/Contents'
 (contents/'MacOS').mkdir(parents=True,exist_ok=True);(contents/'Resources').mkdir(exist_ok=True)
 runtime=contents/'Resources/GStreamer'
@@ -16,6 +16,8 @@ source=source.replace('   if (msg) gst_message_unref(msg);','''   if (msg && GST
 source='#include <stdio.h>\n'+source
 (out/'probe.c').write_text(source)
 deps=sorted((repo/'.deps').glob('obs-deps-*/include/simde'))[-1].parents[1]
-flags=shlex.split(subprocess.check_output(['/opt/homebrew/bin/pkg-config','--cflags','gstreamer-app-1.0','gstreamer-video-1.0','gstreamer-audio-1.0'],text=True))
-subprocess.run(['clang','-dynamiclib','-mmacosx-version-min=14.0','-I'+str(repo/'libobs'),'-I'+str(repo/'build_macos/config'),'-I'+str(deps/'include'),'-F'+str(app/'Contents/Frameworks'),'-framework','libobs',*flags,str(out/'probe.c'),'-o',str(contents/'MacOS/probe'),'-L'+str(runtime/'lib'),'-lgstapp-1.0.0','-lgstvideo-1.0.0','-lgstaudio-1.0.0','-lgstreamer-1.0.0','-lgobject-2.0.0','-lglib-2.0.0','-Wl,-rpath,'+str(runtime/'lib')],check=True)
+sdk=repo/'.deps/gstreamer-upstream-1.28.3/sdk'
+flags=['-I'+str(sdk/p) for p in ('include/gstreamer-1.0','include/glib-2.0','lib/glib-2.0/include')]
+helpers=[str(root/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')]
+subprocess.run(['clang','-dynamiclib','-mmacosx-version-min=14.0','-I'+str(root),'-I'+str(repo/'libobs'),'-I'+str(repo/'build_macos/config'),'-I'+str(deps/'include'),'-F'+str(app/'Contents/Frameworks'),'-framework','libobs',*flags,*helpers,str(out/'probe.c'),'-o',str(contents/'MacOS/probe'),'-L'+str(runtime/'lib'),'-lgstapp-1.0.0','-lgstvideo-1.0.0','-lgstaudio-1.0.0','-lgstbase-1.0.0','-lgstreamer-1.0.0','-lgobject-2.0.0','-lglib-2.0.0','-Wl,-rpath,'+str(runtime/'lib')],check=True)
 print('Isolated test-only worker probe built')

@@ -22,6 +22,14 @@ The repository now contains a local-only Apple Silicon release pipeline for Pixe
 
 The device protocol does not provision engines, change billing, implement remote playout, or provide engine-enforced fencing. Non-macOS credential/transport implementations remain out of scope. Production notarization and clean-Mac release acceptance remain pending until the operator deliberately starts the documented release flow. Do not invent backend endpoints or reuse Uplink/node passwords; follow the authoritative `docs/desktop-protocol.md` in backend PR207.
 
+## Current receiver checkpoint
+
+The current development checkpoint adds compact side-by-side receive credentials, dedicated receiver Keychain persistence and noninteractive credential access, clearer login errors, shared fullscreen controls, preview zoom fixes, and program-only DeckLink settings with the keyer UI hidden. macOS packaging uses `Pixelview Desktop.app` and a Qt compatibility pin.
+
+WHEP now probes native decoder capabilities and offers explicit H264, HEVC Main/Main10 and VP9 profiles0/2 alternatives with Opus. Limited-range BT709 ten-bit reception preserves precision through the main GPU texture, with transactional sender-canvas restoration and active-output guards. Full native build/signature checks and focused native tests passed. Full regression/release/GUI/hardware acceptance is not complete; see `plugins/pixelview-whep/tests/integration-status.md`.
+
+Known limitation: pinned VideoToolbox/GStreamer EOS draining can intermittently withhold a supported profile during the cached startup probe. A repeat loopback run consequently failed its fixed payload assertion; the isolated decoder patch was rejected and is not bundled. Main42210 reception and faithful ten-bit422 DeckLink playout are NOT implemented in this checkpoint. Native422 decoding and v210 packing investigations are isolated outside the repository. No production release is implied by this checkpoint.
+
 ## Repository status discipline
 
 Update this file in every commit that changes Pixelview Desktop’s delivered features, verification status, or known limitations. Keep the **Current first draft** section accurate: state what has been added, what has been verified, and what remains intentionally out of scope. Do not present planned Pixelview backend, authentication, or remote-control work as implemented.

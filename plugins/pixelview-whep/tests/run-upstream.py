@@ -39,14 +39,18 @@ def main():
     includes = ['-I'+str(pack.GST/p) for p in ['include/gstreamer-1.0', 'include/glib-2.0', 'lib/glib-2.0/include']]
     libs = ['-L'+str(stage/'lib'), '-Wl,-rpath,'+str(stage/'lib')]+['-l'+x for x in
             ['gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0']]
+    helpers = [str(ROOT/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')]
     binary = contents/'MacOS/pixelview-whep'
-    subprocess.run(base+includes+['-bundle', str(ROOT/'pixelview-whep.c'), '-o', str(binary)]+libs, check=True)
+    subprocess.run(base+includes+helpers+['-bundle', str(ROOT/'pixelview-whep.c'), '-o', str(binary)]+libs, check=True)
     pack.embed(stage, contents, binary, '-')
     subprocess.run(['codesign','--force','--sign','-',str(binary)],check=True)
     subprocess.run(['codesign','--verify','--strict',str(binary)],check=True)
     env = {k:v for k,v in os.environ.items() if not k.startswith(('GST_','DYLD_'))}
     module = work/'module'
     subprocess.run(base+[str(ROOT/'tests/module.c'),'-o',str(module)],check=True)
+    hook=work/'deny-pin.dylib'
+    subprocess.run(['clang','-Wall','-Wextra','-Werror','-dynamiclib',str(ROOT/'tests/deny-pin.c'),'-o',str(hook)],check=True)
+    subprocess.run([str(module),str(binary),'pin-denied'],env={**env,'DYLD_INSERT_LIBRARIES':str(hook)},check=True)
     subprocess.run([str(module),str(binary)],env=env,check=True)
     # The codec executable and its linked runtime must be the same single copy.
     codec = work/'Codec.plugin/Contents'
@@ -56,11 +60,11 @@ def main():
     if link.is_symlink(): link.unlink()
     link.symlink_to(stage)
     executable=codec/'MacOS/codecs'
-    subprocess.run(base+includes+[str(ROOT/'tests/codecs.c'),'-o',str(executable)]+libs,check=True)
+    subprocess.run(base+includes+helpers+[str(ROOT/'tests/codecs.c'),'-o',str(executable)]+libs,check=True)
     subprocess.run([str(executable)],env=env,check=True)
     print('PASS official runtime: real production module, jitter50, H264, HEVC, Opus; no app rebuild')
     live = codec/'MacOS/live-source'
-    subprocess.run(base+includes+[str(ROOT/'tests/live-source.c'),'-o',str(live)]+libs,check=True)
+    subprocess.run(base+includes+helpers+[str(ROOT/'tests/live-source.c'),'-o',str(live)]+libs,check=True)
     if args.live:
         endpoint = sys.stdin.readline().strip()
         if not endpoint:

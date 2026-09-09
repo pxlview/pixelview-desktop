@@ -95,6 +95,12 @@ function(_check_dependencies)
 
     string(JSON data GET ${dependency_data} ${dependency})
     string(JSON version GET ${data} version)
+    # Allow a platform-only rollback (macOS Qt 6.11.1 releases a CGColorSpace
+    # before QImage::toCGImage uses it). Other platforms keep their own pin.
+    string(JSON platform_version ERROR_VARIABLE platform_version_error GET ${data} platformVersions ${platform})
+    if(NOT platform_version_error)
+      set(version "${platform_version}")
+    endif()
     string(JSON hash GET ${data} hashes ${platform})
     string(JSON url GET ${data} baseUrl)
     string(JSON label GET ${data} label)
@@ -114,6 +120,20 @@ function(_check_dependencies)
     else()
       string(REPLACE "_REVISION" "" file "${file}")
       string(REPLACE "-REVISION" "" file "${file}")
+    endif()
+
+    # A platform override is an exact pin, including in an existing build tree.
+    # Otherwise CMake's cached Qt component directories can keep the bad SDK.
+    if(dependency STREQUAL qt6 AND NOT platform_version_error)
+      set(qt_prefix "${dependencies_dir}/${destination}")
+      list(FILTER CMAKE_PREFIX_PATH EXCLUDE REGEX "/obs-deps-qt6-[^/]+$")
+      list(PREPEND CMAKE_PREFIX_PATH "${qt_prefix}")
+      get_cmake_property(cache_variables CACHE_VARIABLES)
+      foreach(cache_variable IN LISTS cache_variables)
+        if(cache_variable MATCHES "^Qt6.*_DIR$" AND NOT "${${cache_variable}}" MATCHES "^${qt_prefix}/")
+          unset(${cache_variable} CACHE)
+        endif()
+      endforeach()
     endif()
 
     if(EXISTS "${dependencies_dir}/.dependency_${dependency}_${arch}.sha256")

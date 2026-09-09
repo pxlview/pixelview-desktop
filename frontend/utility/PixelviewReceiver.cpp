@@ -65,13 +65,26 @@ void PixelviewReceiver::loginFinished(int code,const QByteArray &body)
 {
  if(current!=State::Authenticating) return;
  if(code==0 || code==408 || code==429 || code==502 || code==503 || code==504) {disconnected(0);return;}
- if(code!=200) {fail("Receiver login rejected. Check session and password."); return;}
  if(body.size()>262144) {fail("Invalid receiver login response.");return;}
  auto o=QJsonDocument::fromJson(body).object();
+ if(code!=200) {
+  // Only allowlisted backend details become UI text; never echo a response,
+  // credential, endpoint or validation payload. Missing sessions and wrong
+  // passwords intentionally share Unauthorized in /login/player.
+  const auto detail=o["detail"].toString();
+  if(code==401 && detail=="Unauthorized")
+   fail("Wrong session ID or password. Please try again. If the session was deleted, ask your host for a new link.");
+  else if(code==401 && detail=="Viewers limit reached")
+   fail("Maximum viewers limit reached. Contact your host for more information.");
+  else if(code==401 && detail=="Session archived")
+   fail("The stream has ended. Thanks for watching! Ask your host for a new session link.");
+  else fail("Receiver login is unavailable. Please try again later or contact your host.");
+  return;
+ }
  QUrl url(o["stream_url"].toString(),QUrl::StrictMode);
  const auto token=o["client_token"].toString();
  if(o["player"].toString()!="WHEP" || token.isEmpty() || token.size()>8192 || !safeUrl(url,development) ||
-    o["stream_url"].toString().size()>16384 || QUrlQuery(url).hasQueryItem("viewer_id")) {fail("Invalid or unsupported receiver login response."); return;}
+    o["stream_url"].toString().size()>16384 || QUrlQuery(url).hasQueryItem("viewer_id")) {fail("Invalid or unsupported receiver login response. Please try again later or contact your host."); return;}
  // Preserve server-provided path, token and all existing query bytes.
  auto encoded=url.toEncoded(); if(!url.hasQuery()) encoded+='?'; else if(!url.query().isEmpty()) encoded+='&';
  encoded += "viewer_id="+QUrl::toPercentEncoding(viewerId); endpoint=QString::fromUtf8(encoded);
