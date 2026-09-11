@@ -216,7 +216,7 @@ static obs_properties_t *decklink_get_properties(void *data)
 		obs_properties_add_list(props, DEVICE_HASH, TEXT_DEVICE, OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_set_modified_callback(list, decklink_device_changed);
 
-	fill_out_devices(list);
+	fill_out_devices(list, true);
 
 	obs_properties_add_list(props, VIDEO_CONNECTION, TEXT_VIDEO_CONNECTION, OBS_COMBO_TYPE_LIST,
 				OBS_COMBO_FORMAT_INT);

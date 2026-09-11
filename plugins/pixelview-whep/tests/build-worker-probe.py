@@ -18,6 +18,7 @@ source='#include <stdio.h>\n'+source
 deps=sorted((repo/'.deps').glob('obs-deps-*/include/simde'))[-1].parents[1]
 sdk=repo/'.deps/gstreamer-upstream-1.28.3/sdk'
 flags=['-I'+str(sdk/p) for p in ('include/gstreamer-1.0','include/glib-2.0','lib/glib-2.0/include')]
-helpers=[str(root/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')]
+import native422_build
+helpers=[str(root/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')] + native422_build.flags(root)
 subprocess.run(['clang','-dynamiclib','-mmacosx-version-min=14.0','-I'+str(root),'-I'+str(repo/'libobs'),'-I'+str(repo/'build_macos/config'),'-I'+str(deps/'include'),'-F'+str(app/'Contents/Frameworks'),'-framework','libobs',*flags,*helpers,str(out/'probe.c'),'-o',str(contents/'MacOS/probe'),'-L'+str(runtime/'lib'),'-lgstapp-1.0.0','-lgstvideo-1.0.0','-lgstaudio-1.0.0','-lgstbase-1.0.0','-lgstreamer-1.0.0','-lgobject-2.0.0','-lglib-2.0.0','-Wl,-rpath,'+str(runtime/'lib')],check=True)
 print('Isolated test-only worker probe built')

@@ -1702,6 +1702,11 @@ vector<pair<string, string>> GetLocaleNames()
 
 int GetAppConfigPath(char *path, size_t size, const char *name)
 {
+	if (!pixelview::appConfigRoot.empty()) {
+		const int length = snprintf(path, size, "%s", pixelview::configOverridePath(name).c_str());
+		// Callers reject nonpositive results; never use a truncated alternate root.
+		return length < 0 || static_cast<size_t>(length) >= size ? -1 : length;
+	}
 	const std::string isolatedName = pixelview::configName(name);
 	name = isolatedName.c_str();
 #if ALLOW_PORTABLE_MODE
@@ -1721,6 +1726,8 @@ int GetAppConfigPath(char *path, size_t size, const char *name)
 
 char *GetAppConfigPathPtr(const char *name)
 {
+	if (!pixelview::appConfigRoot.empty())
+		return bstrdup(pixelview::configOverridePath(name).c_str());
 	const std::string isolatedName = pixelview::configName(name);
 	name = isolatedName.c_str();
 #if ALLOW_PORTABLE_MODE

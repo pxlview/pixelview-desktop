@@ -31,7 +31,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
  pixelviewConnectionStatus=new QLabel(QStringLiteral("Not paired"),sidebar);
  pixelviewConnectionStatus->setWordWrap(true); sidebar->layout()->addWidget(pixelviewConnectionStatus);
  connect(pair,&QPushButton::clicked,this,&OBSBasic::PairPixelviewDesktop);
- pixelviewDesktop->status=[this](QString message){pixelviewConnectionStatus->setText(message);};
+ pixelviewDesktop->status=[this](QString message){if(!isClosing() && !pixelviewShutdownPending) pixelviewConnectionStatus->setText(message);};
  pixelviewLease.error=[this](QString message){pixelviewConnectionStatus->setText(message);RefreshPixelviewReconnect();};
  pixelviewLease.send=[this](QJsonObject o){pixelviewDesktop->sendSocket(QJsonDocument(o).toJson(QJsonDocument::Compact));};
  pixelviewLease.halt=[this]{
@@ -85,7 +85,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   if(!wasReady && pixelviewLease.ready) {
    pixelviewIdentity=candidate;
    pixelviewPairingDurable=SavePixelviewIdentity();
-   if(!pixelviewPairingDurable) {pixelviewUnpairRetry=true;pixelviewLease.fail("Could not save pairing identity. Retry cleanup, then pair again.");return;}
+   if(!pixelviewPairingDurable) {pixelviewUnpairRetry=true;pixelviewLease.fail("Could not save pairing identity. Click Unpair before pairing again.");return;}
    pixelviewExpectedIdentity.clear();pixelviewUnpairRetry=false;
    pixelviewAuthDeadline=0; pixelviewReconnectAt=0;
    pixelviewBackoff=1000;
@@ -102,7 +102,12 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   if(pixelviewClosingSocket && transient) return;
   pixelviewLease.fail(code==4401 ? "Device revoked. Pair again in Pixelview admin." : "Pixelview control disconnected. Stream stopped.",transient);
 
-  if(code==4401) {pixelviewUnpairPending=true;pixelviewIdentity.clear();SavePixelviewIdentity();pixelviewReconnectAt=0;}
+  if(code==4401) {
+   // Revocation is not permission to delete a local credential or display UI.
+   pixelviewDesktop->authorizedToken.clear();
+   config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
+   pixelviewPairingDurable=false; pixelviewUnpairRetry=true; SavePixelviewIdentity(); pixelviewReconnectAt=0;
+  }
  };
  pixelviewDesktop->paired=[this]{
   if(isClosing() || pixelviewShutdownPending) return;
@@ -171,16 +176,20 @@ void OBSBasic::RefreshPixelviewPairing()
  const bool paired=pixelviewPairingDurable;
  const bool busy=PixelviewPairingBusy();
  pixelviewPairingHeading->setVisible(!paired);
- pixelviewPair->setVisible(!paired);
- pixelviewPair->setEnabled(!paired && !busy && !pixelviewUnpairRetry);
+ pixelviewPair->setText(QStringLiteral("Pair with Pixelview"));
+ pixelviewPair->setToolTip(paired ? QStringLiteral("Reconnect this saved pairing. macOS may request authorization; no new pairing code is needed.") : QString());
+ pixelviewPair->setVisible((!paired && !pixelviewUnpairRetry) ||
+  (paired && !pixelviewLease.ready && pixelviewDesktop && pixelviewDesktop->authorizedToken.isEmpty()));
+ pixelviewPair->setEnabled(!busy && !pixelviewUnpairRetry);
  pixelviewUnpair->setVisible(paired || pixelviewUnpairRetry);
- pixelviewUnpair->setText(pixelviewUnpairRetry ? QStringLiteral("Retry cleanup") : QStringLiteral("Unpair"));
+ pixelviewUnpair->setText(QStringLiteral("Unpair"));
  pixelviewUnpair->setEnabled(!busy);
  const bool ordinaryConnected=pixelviewLease.ready && !pixelviewLease.pending && (!pixelviewLease.intent || pixelviewActualStreaming);
  pixelviewConnectionStatus->setVisible(!paired || !ordinaryConnected);
  pixelviewIdentityStatus->setToolTip(pixelviewConnectionStatus->text());
  pixelviewIdentityStatus->setText(paired ? QStringLiteral("Node %1 · %2").arg(pixelviewIdentity.nodeId,
   pixelviewLease.ready ? QStringLiteral("Connected") : pixelviewLease.intent ? QStringLiteral("Reconnecting…") : QStringLiteral("Offline")) :
+  pixelviewUnpairRetry ? QStringLiteral("Unpair required before pairing again.") :
   QStringLiteral("Pair first to unlock capture, audio and stream settings."));
  // Mid is a background/shading role (equal to Window in Yami), not readable text.
  pixelviewIdentityStatus->setStyleSheet(paired && pixelviewLease.ready ? QStringLiteral("color: #68b984;") : QStringLiteral("color: palette(window-text);"));
@@ -188,7 +197,21 @@ void OBSBasic::RefreshPixelviewPairing()
 
 void OBSBasic::PairPixelviewDesktop()
 {
- if(pixelviewPairingDurable || pixelviewUnpairRetry || PixelviewPairingBusy()) return;
+ if(PixelviewPairingBusy()) return;
+ if(pixelviewPairingDurable) {
+  const auto origin=pixelviewOrigin;
+  pixelviewDesktop->exchanging=true;
+  RefreshPixelviewPairing();
+  pixelview::runKeychainUserAction(this,[origin]{return pixelview::loadDevice(origin.toString());},[this,origin](QString token){
+   pixelviewDesktop->exchanging=false;
+   if(isClosing() || pixelviewShutdownPending || origin!=pixelviewOrigin) return;
+   if(token.isEmpty()) {pixelviewConnectionStatus->setText(QStringLiteral("Keychain access was canceled or failed. Saved pairing has not been removed. Click Pair with Pixelview to reconnect without a new code."));RefreshPixelviewPairing();return;}
+   pixelviewDesktop->authorizedToken=token;
+   ConnectPixelviewDesktop(); RefreshPixelviewPairing();
+  });
+  return;
+ }
+ if(pixelviewUnpairRetry) return;
  QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Pair with Pixelview"));
  QFormLayout form(&dialog);
  QLineEdit origin(pixelviewOrigin.toString(),&dialog); origin.setPlaceholderText(QStringLiteral("https://your-backend-origin"));
@@ -208,12 +231,18 @@ void OBSBasic::PairPixelviewDesktop()
 }
 void OBSBasic::ConnectPixelviewDesktop()
 {
- if(isClosing() || pixelviewShutdownPending || pixelviewStopPending || pixelviewClosingSocket || pixelviewUnpairPending || config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled") || !pixelview::Desktop::validOrigin(pixelviewOrigin,pixelviewDev)) return;
- QString token=pixelview::loadDevice(pixelviewOrigin.toString());
+ if(!pixelviewDesktop || pixelviewDesktop->exchanging || isClosing() || pixelviewShutdownPending || pixelviewStopPending || pixelviewClosingSocket || pixelviewUnpairPending || config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled") || !pixelview::Desktop::validOrigin(pixelviewOrigin,pixelviewDev)) return;
+ // Keep a process-only credential for this pairing; transport reconnect is not
+ // a credential mutation and must not consume successful native authorization.
+ QString token=pixelviewDesktop->authorizedToken;
+ if(token.isEmpty()) {
+  token=pixelview::loadDevice(pixelviewOrigin.toString());
+  if(!token.isEmpty()) pixelviewDesktop->authorizedToken=token;
+ }
  if(token.isEmpty()) {
   // An inaccessible Keychain is not evidence of an unpaired installation.
   // Preserve durable identity and credentials; never reset them on read failure.
-  pixelviewLease.fail("Pairing credential unavailable in Keychain. Connection disabled; saved pairing has not been removed.");
+  pixelviewLease.fail("Pairing credential unavailable. Retrying without prompts; saved pairing has not been removed. Click Pair with Pixelview to authorize access without a new code.",pixelviewPairingDurable);
   return;
  }
  pixelviewLease.ready=false;pixelviewLease.pending=false;pixelviewLease.leased=false;pixelviewLease.stopping=false;pixelviewLease.heartbeatRequest=-1;pixelviewLease.development=pixelviewDev;
@@ -319,19 +348,26 @@ void OBSBasic::FinishPixelviewUnpair()
 {
  pixelviewHeartbeat->stop();pixelviewReconnectAt=0;pixelviewAuthDeadline=0;
  pixelviewDesktop->closeSocket();pixelviewLease.ready=false;
+ pixelviewDesktop->authorizedToken.clear();
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
- pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();
- bool removed=pixelview::removeDevice(pixelviewOrigin.toString());
+ // Persist reconnect-disabled intent, but retain identity on Cancel/denial.
+ pixelviewPairingDurable=false;
+ SavePixelviewIdentity();
+ const auto origin=pixelviewOrigin;
+ pixelview::runKeychainUserAction(this,[origin]{return pixelview::removeDevice(origin.toString());},[this](bool removed){
+ if(isClosing() || pixelviewShutdownPending) return;
+ if(removed) {pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();}
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",removed);
  bool saved=SavePixelviewIdentity();
  pixelviewUnpairRetry=!saved || !removed;
  if(!saved) {
   pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: identity could not be saved. Do not restart; retry Unpair."));
  } else if(!removed) {
-  pixelviewConnectionStatus->setText(QStringLiteral("Keychain removal failed. Unlock Keychain and retry Unpair."));
+  pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: Keychain removal failed. Check Keychain access, then click Unpair again. Connection remains disabled."));
  } else pixelviewConnectionStatus->setText(QStringLiteral("Not paired. This installation only; admin registration is not revoked."));
  pixelviewUnpairPending=false;
  RefreshPixelviewPairing();
+ });
 }
 QJsonObject OBSBasic::PixelviewReportedSettings()
 {

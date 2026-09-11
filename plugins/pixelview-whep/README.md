@@ -2,17 +2,30 @@
 
 Source ID: **`pixelview_whep_source`**. Native GStreamer WHEP receive input, not a browser source, pipeline editor, encoder, filter, or general-purpose GStreamer plugin. Based on the proven raw appsink/OBS integration pattern from Florian Zwoch's GPL-2.0-or-later obs-gstreamer; source attribution retained.
 
+## Native422 diagnostic checkpoint
+
+`get_status` additionally returns `native422_diagnostic`: empty until a known
+native422 finite refusal, then bounded canonical reason/uint64 data for the
+current generation. The first snapshot survives error teardown; connect and
+disconnect clear it. Arbitrary Gst errors/debug/URLs are never copied into this
+field or the production terminal warning. Main422 is enabled in normal builds for the user-authorized strict1080p25 hardware test (not certified); see
+[the bounded campaign and unresolved acceptance gate](../../docs/pixelview-422-diagnostic-results.md).
+
 ## Frontend API
 
 Create the source with empty settings. Obtain `obs_source_get_proc_handler(source)` and use `proc_handler_call` with calldata:
 
 | Proc | Calldata |
 |---|---|
-| `connect` | `endpoint` string; `latency` int (default **50**, accepted 0–2000 ms) |
+| `connect` | `endpoint` string; `latency` int (default **100**, accepted 0–2000 ms) |
 | `disconnect` | no arguments |
-| `get_status` | outputs `state` string, `frames` int, `audio_frames` int, `latency` int, `jitter_latency` int |
+| `get_status` | outputs `state` string, `frames` int, `audio_frames` int, `latency` int, `jitter_latency` int, `native422_frames` int |
 
-States: `idle`, `connecting`, `playing` (decoded video observed), `error`, `ended`. `frames` counts video buffers; `audio_frames` counts decoded PCM sample frames. Counters reset on connect. `latency` is requested milliseconds; `jitter_latency` is **-1 until internal webrtcbin exists**, then the property's actual readback. The `webrtcbin-ready` signaller callback sets it in-process before negotiation; tests prove 50 rather than the upstream 200 default. This is a jitter-buffer target, **not a promise of 50 ms end-to-end latency**.
+States: `idle`, `connecting`, `playing` (decoded video observed), `error`, `ended`. `frames` counts video buffers; `audio_frames` counts decoded PCM sample frames. Counters reset on connect. `latency` is requested milliseconds; `jitter_latency` is **-1 until internal webrtcbin exists**, then the property's actual readback. The `webrtcbin-ready` signaller callback sets it in-process before negotiation. The default and Desktop frontend request are now **100 ms**, not the upstream 200 ms. This is a jitter-buffer target, **not a promise of 100 ms end-to-end latency**.
+
+The 50→100 ms adjustment adds 50 ms of nominal jitter buffering for all Desktop WHEP receive codecs, including Main42210 and Opus, before native DeckLink/preview routing. It may tolerate more arrival jitter but is not a demonstrated glitch fix. Native DeckLink preroll remains `max(3, device minimum)` frames (at least120 ms at25fps); finite-rate, discontinuity, freshness and acquisition limits are unchanged. Historical jitter50 results and explicit50 test fixtures remain historical/override evidence, not verification of the new default. `tests/run-production-offer.py --deterministic-only` checks the production default/connect validation and actual `webrtcbin.latency` readback at100, plus explicit overrides, without media or hardware.
+
+No saved-source migration is needed for the Desktop UI: `OBSBasic_PixelviewReceive.inc` creates private source `Pixelview Receive` (`pixelview_whep_source`) with null settings in private scene `Pixelview Receive Canvas`, and explicitly sends `connect.latency=100` on each endpoint callback. Neither private object is loaded from scene JSON. The plugin's `create` does not consume saved `settings.latency`; connection calldata selects runtime latency. External callers explicitly requesting50 still get50. The running app remains unchanged until rebuilt and relaunched; no config file edit or scene recreation is required afterward.
 
 Connect copies the URL into private worker memory; caller can immediately free calldata. Endpoint is never interpolated into pipeline text, logged, returned by telemetry, or used as a scene-setting transport. `endpoint` and legacy `pipeline` settings are erased on create/update/save; nothing starts from serialized settings. HTTPS required; loopback HTTP allowed for development. Embedded userinfo, fragment, overlong URL and invalid latency fail safely. The caller must never put credentials into source name/other arbitrary settings.
 
@@ -20,11 +33,12 @@ Control procs are thread-safe and asynchronous. Source destruction joins the med
 
 ## Media path
 
-- `whepclientsrc`: H264/H265/Opus; decoded dynamic raw pads connect through permanent static queues.
-- Video: bounded leaky video queue → videoconvert → **BGRA 8-bit** → appsink → `obs_source_output_video`.
+- `whepclientsrc`: probed H264, HEVC Main/Main10, VP9 profiles0/2 and Opus; decoded dynamic raw pads connect through permanent static queues.
+- Preview video: bounded leaky video queue → P010 limited709 policy → appsink → `obs_source_output_video2`. Eight-bit encoded sources are upconverted, not original ten-bit information.
 - Audio: bounded queue → audioconvert/audioresample → interleaved stereo F32/48 kHz → appsink → `obs_source_output_audio`.
 - Both branches use pipeline running-time PTS plus a common base clock; synchronized sinks preserve A/V timing. This is a CPU raw-frame path, not zero-copy.
-- **SDR path only:** this integration does not preserve HDR/10-bit/4:2:2 output. H264/HEVC decoding is via Apple's OS-provided VideoToolbox; Opus is bundled libopus. No proprietary codec binary or gst-libav/x264/x265/FDK plugin is shipped by this runtime packager.
+- **Limited709 SDR only:** ten-bit420 preview precision is documented in `tests/video-precision.md`; native422 work and incomplete DeckLink acceptance are documented in `../../docs/pixelview-422-implementation-status.md`. Main422 is enabled in normal builds for the user-authorized strict1080p25 hardware test (not certified). A new production `request-encoded-filter` tap can decode admitted Main42210 to public native x422 and exactly packed v210, exposing a version2 route-bound (early native PCM versus clocked rendered PCM) source-bound `native422_feed(ptr request, out int version)` pull API with owned bounded video/source-only audio queues and explicit attach/reset/detach (see `source-feed.h`). No consumer callback runs under decoder/lifecycle locks. There is no DeckLink consumer/synchronized card scheduler yet; this API is not an enabled hardware-output feature. Consumers own destination buffers and retain the exact OBS source for each synchronous proc call; reset requires flushing card A/V and fresh route admission.
+- H264/HEVC/VP9 decoding uses Apple's OS-provided VideoToolbox; Opus is bundled libopus. No proprietary codec binary or gst-libav/x264/x265/FDK plugin is shipped by this runtime packager. FFmpeg/x265 in native422 tests are independent test tooling only.
 
 ## Build and bundle
 

@@ -296,7 +296,8 @@ private:
 	void StartPixelviewReceive();
 	bool SavePixelviewReceive();
 	QString PixelviewReceiveOrigin() const;
-	std::unique_ptr<pixelview::ReceiveCredentialStore> pixelviewReceiveStore;
+	std::shared_ptr<pixelview::ReceiveCredentialStore> pixelviewReceiveStore;
+	bool pixelviewReceiveCredentialBusy = false;
 	QString pixelviewReceivePasswordOrigin;
 	bool pixelviewReceiveCredentialsDirty = false;
 	// A blank field after a failed load is not an explicit credential deletion.
@@ -357,6 +358,7 @@ private:
 	void InitPixelviewStreaming(QWidget *sidebar);
 	bool PixelviewSettingsBusy() const;
 	bool pixelviewStreamingBusy = false;
+	bool pixelviewCaptureAutoSelectPending = false;
 	void RefreshPixelviewDevices();
 	void SelectPixelviewDevice(int index, bool initializing = false);
 	void FitPixelviewCapture(bool initializing = false);

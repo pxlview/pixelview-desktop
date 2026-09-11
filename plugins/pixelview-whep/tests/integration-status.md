@@ -1,5 +1,23 @@
 # Local receive integration status
 
+**Current policy:** Main422 is enabled directly in normal builds for the user-authorized 1080p25 limited709 hardware test, without compile/environment opt-ins. Strict native25/range/PTL admission remains intact. Full incremental build, deep/strict signature, production SDP hook and ordinary profile regressions pass. Physical playout is not certified. Historical Main422-off checkpoints below are superseded only as policy.
+
+Latest native422 checkpoint: safe typed production first-failure reporting,
+expanded sanitized timing/boundary tests, and one declared baseline-plus-bounded-
+reference-load four-rate campaign pass. Historical701ms cause and stable admission
+remain unresolved; Main422 is off. See [exact results](../../../docs/pixelview-422-diagnostic-results.md).
+The source-only statements below describe earlier checkpoints, not the current
+whole-owner software fixture; physical output remains unverified.
+
+
+Native422 implementation progress (separate from the checkpoint results below):
+[`docs/pixelview-422-implementation-status.md`](../../../docs/pixelview-422-implementation-status.md).
+The production encoded tap/native decoder/versioned v210 and source-only audio
+pull feed has offline tests and an isolated full signed build, but no native
+DeckLink consumer/synchronized A/V
+scheduler or Main422 WHEP admission. Main422 remains unadvertised. Do not confuse
+the fake byte-sink tests with a fake DeckLink SDK integration or physical playout.
+
 ## Verified
 
 - Final full native application build succeeded; deep strict code-signature verification passed.

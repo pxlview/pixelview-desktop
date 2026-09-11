@@ -125,6 +125,7 @@ static void actual_graph(void)
   }
  }
  unsigned expected_hevc=!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN)+!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN10);
+ expected_hevc += expected_hevc != 0; /* Explicit Main422 policy, not another probe bit. */
  unsigned expected_vp9=!!(r.active_caps.profiles&PV_PROFILE_VP9_0)+!!(r.active_caps.profiles&PV_PROFILE_VP9_2);
  g_assert_cmpuint(h265,==,expected_hevc);g_assert_cmpuint(vp9,==,expected_vp9);g_assert_cmpint(r.jitter_latency,==,50);
  /* No credentials; still avoid printing host candidates. */
@@ -133,9 +134,67 @@ static void actual_graph(void)
  g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
  printf("PASS production raw graph offer: actual probe mask=%u level=%u exact profile gates + envelope, H264mode1 Opus stereo unique BUNDLE PTs jitter50\n",r.active_caps.profiles,r.active_caps.hevc_level_id);
 }
+static void main422_offer(void)
+{
+ struct receiver r={.active_latency=50,.active_caps={PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,123}};
+ g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
+ struct receive_attempt *a=attempt_new(&r);
+ GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);
+ webrtc_ready(NULL,NULL,rtc,a);
+ GstCaps *input=gst_caps_from_string(video_caps);
+ GstWebRTCRTPTransceiver *trans=NULL;
+ g_signal_emit_by_name(rtc,"add-transceiver",GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY,input,&trans);
+ gst_element_set_state(rtc,GST_STATE_READY);
+ GstPromise *promise=gst_promise_new();g_signal_emit_by_name(rtc,"create-offer",NULL,promise);
+ g_assert_cmpint(gst_promise_wait(promise),==,GST_PROMISE_RESULT_REPLIED);
+ GstWebRTCSessionDescription *offer=NULL;
+ g_assert_true(gst_structure_get(gst_promise_get_reply(promise),"offer",GST_TYPE_WEBRTC_SESSION_DESCRIPTION,&offer,NULL));
+ char *sdp=gst_sdp_message_as_text(offer->sdp);
+ /* Normal policy deliberately offers Main422; ordinary probe bits stay truthful. */
+ g_assert_nonnull(strstr(sdp,"level-id=120;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000"));
+ g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=1"));
+ g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=2"));
+ puts(sdp);
+ puts("PASS normal-build Main422 25p policy: profile4 level120 constrained SDP via production hook; ordinary Main/Main10 unchanged");
+ g_free(sdp);gst_webrtc_session_description_free(offer);gst_promise_unref(promise);
+ gst_element_set_state(rtc,GST_STATE_NULL);r.attempt=a;stop_pipeline(&r);
+ gst_object_unref(trans);gst_object_unref(rtc);gst_caps_unref(input);
+ g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
+}
+/* Exercise production configuration and actual GObject jitter readback without
+ * starting a receiver worker, decoder, network session or DeckLink device. */
+static void latency_contract(void)
+{
+ obs_data_t *settings=obs_data_create();defaults(settings);
+ g_assert_cmpint(obs_data_get_int(settings,"latency"),==,100);
+ obs_data_release(settings);
+ const int requests[]={-999,0,50,100,2000,-1,2001}; /* -999: omitted argument */
+ for(unsigned i=0;i<G_N_ELEMENTS(requests);i++) {
+  struct receiver r={0};g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);g_cond_init(&r.wake);
+  calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint","https://example.invalid/whep");
+  if(requests[i]!=-999)calldata_set_int(&cd,"latency",requests[i]);
+  connect_proc(&r,&cd);
+  bool valid=requests[i]==-999 || (requests[i]>=0 && requests[i]<=2000);
+  unsigned expected=requests[i]==-999 || !valid ? 100 : (unsigned)requests[i];
+  g_assert_cmpstr(r.state,==,valid?"connecting":"error");g_assert_cmpuint(r.latency,==,expected);
+  /* Same requested->active snapshot used by the production worker. */
+  r.active_latency=r.latency;r.active_generation=r.generation;r.changed=false;
+  struct receive_attempt *a=attempt_new(&r);
+  GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);g_assert_nonnull(rtc);
+  webrtc_ready(NULL,NULL,rtc,a);
+  guint actual=0;g_object_get(rtc,"latency",&actual,NULL);
+  g_assert_cmpuint(actual,==,expected);g_assert_cmpint(r.jitter_latency,==,(int)expected);
+  r.attempt=a;stop_pipeline(&r);gst_object_unref(rtc);wipe(&r.endpoint);calldata_free(&cd);
+  g_cond_clear(&r.wake);g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
+ }
+ puts("PASS production latency contract: default100ms, explicit0/50/100/2000 preserved, invalid rejected; actual webrtcbin readback");
+}
 int main(int argc,char **argv)
 {
  setbuf(stdout,NULL);gst_init(&argc,&argv);
+ latency_contract();
+ if(argc>1 && !strcmp(argv[1],"--main422-only")) { main422_offer(); return 0; }
+ main422_offer();
  negative_hook(false,false);negative_hook(true,false);negative_hook(false,true);
  admitted_envelope(PV_PROFILE_VP9_0,0,60);
  admitted_envelope(PV_PROFILE_H264,0,60);

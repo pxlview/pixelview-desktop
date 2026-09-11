@@ -10,7 +10,7 @@ https://downloads.pixelview.io/desktop/macos/appcast-arm64.xml
 
 The first product version is `0.0.1`, build `1`. `version.json` is the product-version source of truth and separately pins the OBS base version and commit. The app bundle embeds all four values plus its exact Pixelview source commit/tag in `Info.plist`.
 
-Development builds keep Sparkle disabled. A release build enables Sparkle only when CMake receives the exact production feed and a non-empty Pixelview public key. Release configuration fails if the target is not `arm64`, if the feed differs, or if an OBS update URL is supplied.
+Development builds keep Sparkle disabled. For a local, dirty-tree-allowed Developer ID build without notarization or publication, use the [signed-development command](pixelview-signed-development.md); this does not relax the clean-tag release requirements below. A release build enables Sparkle only when CMake receives the exact production feed and a non-empty Pixelview public key. Release configuration fails if the target is not `arm64`, if the feed differs, or if an OBS update URL is supplied.
 
 The app:
 

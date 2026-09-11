@@ -131,6 +131,8 @@ int main() {
  // Control revocation/expiry must still fail closed during a media drain.
  for(bool revoked : {false,true}) {
   OBSBasic guard;guard.bind();guard.pixelviewLease.ready=true;guard.pixelviewLease.deadline=30000;
+  guard.connection.authorizedToken="synthetic-retained-token";
+  guard.pixelviewIdentity.accept({{"node_id","retained-node"},{"desktop_id","retained-desktop"}});
   assert(guard.pixelviewLease.requestStart(0));guard.pixelviewLease.pending=false;guard.pixelviewLease.leased=true;
   guard.pixelviewNativeAttempt=true;
   std::promise<void> pending;guard.setupStreamingGuard=pending.get_future().share();
@@ -141,7 +143,15 @@ int main() {
   Timer::run();assert(guard.pixelviewStopPending && guard.connection.closes==0);
   pending.set_value();Timer::run();
   assert(!guard.pixelviewStopPending && guard.connection.closes==1 && !guard.button.enabled);
-  if(revoked) assert(guard.unpairs==1 && guard.pixelviewReconnectAt==0);
+  if(revoked) {
+   assert(guard.unpairs==0 && guard.pixelviewReconnectAt==0);
+   assert(!guard.pixelviewPairingDurable && guard.pixelviewUnpairRetry && !guard.pixelviewUnpairPending);
+   assert(config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
+   assert(guard.connection.authorizedToken.isEmpty());
+   assert(guard.pixelviewIdentity.nodeId=="retained-node" && guard.pixelviewIdentity.desktopId=="retained-desktop");
+   guard.ConnectPixelviewDesktop();assert(guard.authentications==0);
+   application.config.booleans.clear(); // Remaining scenarios are independent installations.
+  } else assert(guard.connection.authorizedToken=="synthetic-retained-token" && guard.pixelviewPairingDurable);
  }
  // A synchronous stop ACK observes cleared authority, not a still-leased session.
  pixelview::Desktop ack;ack.ready=true;ack.deadline=30000;

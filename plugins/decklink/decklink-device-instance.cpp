@@ -11,6 +11,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <memory>
 
 #include "OBSVideoFrame.h"
 
@@ -49,7 +50,10 @@ template<typename T> ULONG RenderDelegate<T>::Release()
 template<typename T>
 HRESULT RenderDelegate<T>::ScheduledFrameCompleted(IDeckLinkVideoFrame *completedFrame, BMDOutputFrameCompletionResult)
 {
-	m_pOwner->ScheduleVideoFrame(completedFrame);
+	std::lock_guard<std::recursive_mutex> lock(gate);
+	if (m_pOwner) {
+		m_pOwner->ScheduleVideoFrame(completedFrame);
+	}
 	return S_OK;
 }
 
@@ -115,6 +119,7 @@ DeckLinkDeviceInstance::DeckLinkDeviceInstance(DecklinkBase *decklink_, DeckLink
 	  decklink(decklink_),
 	  device(device_)
 {
+	device->AddRef();
 	currentPacket.samples_per_sec = 48000;
 	currentPacket.speakers = SPEAKERS_STEREO;
 	currentPacket.format = AUDIO_FORMAT_16BIT;
@@ -122,6 +127,11 @@ DeckLinkDeviceInstance::DeckLinkDeviceInstance(DecklinkBase *decklink_, DeckLink
 
 DeckLinkDeviceInstance::~DeckLinkDeviceInstance()
 {
+	if (receive) {
+		StopOutput();
+	}
+	device->ReleaseOwner(this);
+	device->Release();
 	if (convertFrame) {
 		delete convertFrame;
 	}
@@ -350,6 +360,7 @@ void DeckLinkDeviceInstance::FinalizeStream()
 	}
 
 	mode = nullptr;
+	device->ReleaseOwner(this);
 }
 
 //#define LOG_SETUP_VIDEO_FORMAT 1
@@ -409,8 +420,22 @@ void DeckLinkDeviceInstance::SetupVideoFormat(DeckLinkDeviceMode *mode_)
 #endif
 }
 
-bool DeckLinkDeviceInstance::StartCapture(DeckLinkDeviceMode *mode_, bool allow10Bit_,
-					  BMDVideoConnection bmdVideoConnection, BMDAudioConnection bmdAudioConnection)
+bool DeckLinkDeviceInstance::StartCapture(DeckLinkDeviceMode *m, bool tenBit, BMDVideoConnection v,
+					  BMDAudioConnection a)
+{
+	if (!device->TryAcquire(this)) {
+		return false;
+	}
+	if (StartCaptureInternal(m, tenBit, v, a)) {
+		return true;
+	}
+	device->ReleaseOwner(this);
+	return false;
+}
+
+bool DeckLinkDeviceInstance::StartCaptureInternal(DeckLinkDeviceMode *mode_, bool allow10Bit_,
+						  BMDVideoConnection bmdVideoConnection,
+						  BMDAudioConnection bmdAudioConnection)
 {
 	if (mode != nullptr) {
 		return false;
@@ -530,7 +555,19 @@ bool DeckLinkDeviceInstance::StopCapture(void)
 	return true;
 }
 
-bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *mode_)
+bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *m)
+{
+	if (!device->TryAcquire(this)) {
+		return false;
+	}
+	if (StartOutputInternal(m)) {
+		return true;
+	}
+	device->ReleaseOwner(this);
+	return false;
+}
+
+bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 {
 	if (mode != nullptr) {
 		return false;
@@ -551,12 +588,34 @@ bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *mode_)
 		return false;
 	}
 
+	bool videoEnabled = false, audioEnabled = false;
+	// Non-owning scope guard; output_ retains the SDK reference until rollback.
+	auto cleanup = [&](IDeckLinkOutput *sdk) {
+		if (renderDelegate) {
+			renderDelegate->Detach();
+		}
+		sdk->SetScheduledFrameCompletionCallback(nullptr);
+		if (videoEnabled) {
+			sdk->StopScheduledPlayback(0, nullptr, frameTimescale > 0 ? frameTimescale : 1);
+		}
+		if (audioEnabled) {
+			sdk->DisableAudioOutput();
+		}
+		if (videoEnabled) {
+			sdk->DisableVideoOutput();
+		}
+		renderDelegate.Clear();
+		output.Clear();
+		mode = nullptr;
+	};
+	std::unique_ptr<IDeckLinkOutput, decltype(cleanup)> rollback(output_.Get(), cleanup);
 	const HRESULT videoResult = output_->EnableVideoOutput(mode_->GetDisplayMode(), bmdVideoOutputFlagDefault);
 	if (videoResult != S_OK) {
 		LOG(LOG_ERROR, "Failed to enable video output");
 		return false;
 	}
 
+	videoEnabled = true;
 	const HRESULT audioResult = output_->EnableAudioOutput(bmdAudioSampleRate48kHz, bmdAudioSampleType16bitInteger,
 							       2, bmdAudioOutputStreamTimestamped);
 	if (audioResult != S_OK) {
@@ -564,6 +623,7 @@ bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *mode_)
 		return false;
 	}
 
+	audioEnabled = true;
 	if (!mode_->GetFrameRate(&frameDuration, &frameTimescale)) {
 		LOG(LOG_ERROR, "Failed to get frame rate");
 		return false;
@@ -616,6 +676,12 @@ bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *mode_)
 			theFrame = decklinkOutputHDRFrame.Get();
 		}
 
+		void *initialBytes = nullptr;
+		if (theFrame->GetRowBytes() != rowSize || theFrame->GetHeight() != decklinkOutput->GetHeight() ||
+		    theFrame->GetBytes(&initialBytes) != S_OK || !initialBytes) {
+			return false;
+		}
+		memset(initialBytes, 0, size_t(rowSize) * decklinkOutput->GetHeight());
 		result = output_->ScheduleVideoFrame(theFrame, i * frameDuration, frameDuration, frameTimescale);
 		if (result != S_OK) {
 			blog(LOG_ERROR, "failed to schedule video frame for preroll 0x%X", result);
@@ -625,28 +691,86 @@ bool DeckLinkDeviceInstance::StartOutput(DeckLinkDeviceMode *mode_)
 	totalFramesScheduled = minimumPrerollFrames;
 
 	*renderDelegate.Assign() = new RenderDelegate<DeckLinkDeviceInstance>(this);
-	output_->SetScheduledFrameCompletionCallback(renderDelegate);
+	if (output_->SetScheduledFrameCompletionCallback(renderDelegate) != S_OK) {
+		return false;
+	}
 
-	output_->StartScheduledPlayback(0, 100, 1.0);
-
+	// Install state before the SDK can synchronously invoke its first callback.
 	mode = mode_;
-	output = std::move(output_);
+	output = output_;
+	if (output_->StartScheduledPlayback(0, frameTimescale, 1.0) != S_OK) {
+		return false;
+	}
+	rollback.release();
 
+	return true;
+}
+
+bool DeckLinkDeviceInstance::StartNativeOutput(DeckLinkDeviceMode *mode_, obs_source_t *source)
+{
+	if (mode || receive || !mode_ || !source) {
+		return false;
+	}
+	ComPtr<IDeckLinkOutput> sdk;
+	if (!device->TryAcquire(this)) {
+		return false;
+	}
+	if (!device->GetOutput(&sdk)) {
+		device->ReleaseOwner(this);
+		return false;
+	}
+	*receive.Assign() = new (std::nothrow) DeckLinkReceive;
+	if (!receive) { device->ReleaseOwner(this); return false; }
+	ComPtr<IDeckLinkKeyer> keyer;
+	device->GetKeyer(&keyer);
+	bool started = false;
+	try {
+		started = receive->Start(sdk, mode_, source, device->GetMinimumPrerollFrames(), keyer);
+	} catch (const std::bad_alloc &) {
+		LOG(LOG_ERROR, "Receive output allocation failed");
+	}
+	if (!started) {
+		if (!receive->Stop()) {
+			device->MarkRemoved();
+		}
+		receive.Clear();
+		device->ReleaseOwner(this);
+		return false;
+	}
+	mode = mode_;
+	pixelFormat = bmdFormat10BitYUV;
 	return true;
 }
 
 bool DeckLinkDeviceInstance::StopOutput()
 {
+	if (receive) {
+		const bool stopped = receive->Stop();
+		if (!stopped) {
+			device->MarkRemoved();
+			LOG(LOG_ERROR, "Receive output cleanup failed; device quarantined until rediscovery");
+		}
+		receive.Clear();
+		mode = nullptr;
+		device->ReleaseOwner(this);
+		return stopped;
+	}
 	if (mode == nullptr || output == nullptr) {
 		return false;
 	}
 
 	LOG(LOG_INFO, "Stopping output of '%s'...", GetDevice()->GetDisplayName().c_str());
 
+	if (renderDelegate) {
+		renderDelegate->Detach();
+	}
 	output->SetScheduledFrameCompletionCallback(NULL);
+	output->StopScheduledPlayback(0, nullptr, frameTimescale);
 	output->DisableVideoOutput();
 	output->DisableAudioOutput();
 	output.Clear();
+	mode = nullptr;
+	device->ReleaseOwner(this);
 	renderDelegate.Clear();
 	frameQueueDecklinkToObs.reset();
 	frameQueueObsToDecklink.reset();
@@ -661,9 +785,15 @@ void DeckLinkDeviceInstance::UpdateVideoFrame(video_data *frame)
 		return;
 	}
 
+	const size_t rowBytes = size_t(decklinkOutput->GetWidth()) * 4;
+	if (!frame || !frame->data[0] || frame->linesize[0] < rowBytes) {
+		return;
+	}
 	uint8_t *const blob = frameQueueDecklinkToObs.pop();
 	if (blob) {
-		memcpy(blob, frame->data[0], frame->linesize[0] * decklinkOutput->GetHeight());
+		for (int y = 0; y < decklinkOutput->GetHeight(); ++y) {
+			memcpy(blob + size_t(y) * rowBytes, frame->data[0] + size_t(y) * frame->linesize[0], rowBytes);
+		}
 		frameQueueObsToDecklink.push(blob);
 	}
 }

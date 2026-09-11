@@ -1,5 +1,6 @@
 #pragma once
 #include "PixelviewDesktop.hpp"
+#include "PixelviewKeychainTask.hpp"
 #include <QtCore/QObject>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSysInfo>
@@ -16,6 +17,7 @@ public:
  DesktopIdentity identity;
  bool development=false;
  bool exchanging=false;
+ QString authorizedToken; // Process-held pairing credential; reused on reconnect, cleared on Unpair/revocation.
  std::function<void()> paired=[]{};
  std::function<void(QString)> status=[](QString){};
  std::function<void(QByteArray)> message=[](QByteArray){};
@@ -46,9 +48,17 @@ public:
    bool ok=reply->error()==QNetworkReply::NoError && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()==200 && body.size()<=16384;
    reply->deleteLater();
    if(!ok || object["desktop_id"].toString().isEmpty() || object["node_id"].toString().isEmpty() || object["device_token"].toString().isEmpty()) {status("Pairing failed. Create a new code in Pixelview admin.");return;}
-   if(!saveDevice(requestOrigin.toString(),object["device_token"].toString())) {status("Keychain save failed. Pair again after unlocking the Keychain.");return;}
-   identity.clear(); identity.accept(object);
-   paired();
+   exchanging=true; // Includes the native Keychain prompt, not just HTTP.
+   status("Allow Pixelview to save its credential in the macOS Keychain.");
+   const QString token=object["device_token"].toString();
+   runKeychainUserAction(this,[requestOrigin,token]{return saveDevice(requestOrigin.toString(),token);},
+    [this,object,token](bool saved){
+     exchanging=false;
+     if(!saved) {status("Pairing incomplete: Keychain access was canceled or failed. Saved credentials were not removed. Pair with a new admin code to retry.");return;}
+     authorizedToken=token;
+     identity.clear(); identity.accept(object);
+     paired();
+    });
   });
  }
 };

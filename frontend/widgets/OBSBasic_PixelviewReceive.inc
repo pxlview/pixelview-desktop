@@ -3,7 +3,17 @@
 #include <QLineEdit>
 #include <QSysInfo>
 #include <QUuid>
+#include <utility/PixelviewKeychainTask.hpp>
 #include <obs-module.h>
+
+// In-memory exact-source binding; no source UUID or receive authority is saved.
+static void PixelviewBindDeckLinkReceive(obs_source_t *source, bool receiving)
+{
+ calldata_t cd; calldata_init(&cd);
+ calldata_set_ptr(&cd,"source",source); calldata_set_bool(&cd,"receiving",receiving);
+ proc_handler_call(obs_get_proc_handler(),"pixelview_decklink_receive",&cd);
+ calldata_free(&cd);
+}
 
 bool OBSBasic::PixelviewReceiveVideoBusy() const
 {
@@ -50,7 +60,7 @@ bool OBSBasic::SetPixelviewReceivePrecision(bool enabled)
 
 bool OBSBasic::PixelviewModeBusy() const
 {
-	return isClosing() || pixelviewShutdownPending || pixelviewReceivePrecisionFault || pixelviewReceiveIntent || PixelviewSettingsBusy() ||
+	return isClosing() || pixelviewShutdownPending || pixelviewReceiveCredentialBusy || pixelviewReceivePrecisionFault || pixelviewReceiveIntent || PixelviewSettingsBusy() ||
 	       pixelviewLease.intent || pixelviewLease.pending || pixelviewLease.leased || pixelviewStopPending ||
 	       pixelviewUnpairPending || (pixelviewDesktop && pixelviewDesktop->exchanging);
 }
@@ -155,7 +165,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	if (credential.state == pixelview::ReceiveCredentialStore::State::Found) pixelviewReceivePassword->setText(credential.password);
 	else if (credential.state == pixelview::ReceiveCredentialStore::State::Error) {
 		pixelviewReceiveCredentialUnavailable = true;
-		pixelviewReceiveStorageStatus->setText(QStringLiteral("Could not read the receiver password from Keychain. Re-enter it or unlock Keychain and reopen the app."));
+		pixelviewReceiveStorageStatus->setText(QStringLiteral("Could not read the saved receiver password. Click Start receiving to retry with macOS authorization, or re-enter it."));
 		pixelviewReceiveStorageStatus->show();
 	}
 	// Save edits without requiring Start. Deep links use a signal-blocked pair
@@ -231,8 +241,9 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		}
 		if (!pixelviewReceiveSource) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native WHEP receive module unavailable."), ReceiveStatusTone::Error); return; }
 		calldata_t data; calldata_init(&data);
+		PixelviewBindDeckLinkReceive(pixelviewReceiveSource, true);
 		calldata_set_string(&data, "endpoint", endpoint.toUtf8().constData());
-		calldata_set_int(&data, "latency", 50);
+		calldata_set_int(&data, "latency", 100);
 		const bool accepted = proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "connect", &data);
 		calldata_free(&data);
 		if (!accepted) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native receive connection unavailable."), ReceiveStatusTone::Error); return; }
@@ -246,7 +257,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		if (proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "get_status", &data)) {
 			// Only fixed local labels: never render plugin errors or credential-bearing URLs.
 			const char *state = calldata_string(&data, "state");
-			const int64_t frames = calldata_int(&data, "frames");
+			const int64_t nativeFrames = calldata_int(&data, "native422_frames");
+			const int64_t frames = nativeFrames ? nativeFrames : calldata_int(&data, "frames");
 			const bool fresh = frames > pixelviewReceiveFrames;
 			pixelviewReceiveFrames = frames;
 			if (state && (strcmp(state, "error") == 0 || strcmp(state, "ended") == 0)) {
@@ -309,6 +321,7 @@ void OBSBasic::SelectPixelviewMode(int index)
 		ui->preview->SetLocked(pixelviewSendPreviewLocked);
 	}
 	pixelviewReceiving = index == 1;
+	PixelviewBindDeckLinkReceive(pixelviewReceiveSource, pixelviewReceiving);
 	RefreshPixelviewDevices();
 }
 
@@ -321,6 +334,7 @@ QString OBSBasic::PixelviewReceiveOrigin() const
 
 bool OBSBasic::SavePixelviewReceive()
 {
+	if (pixelviewReceiveCredentialBusy) return false;
 	const QString origin = PixelviewReceiveOrigin();
 	if (pixelviewReceivePasswordOrigin != origin) {
 		pixelviewReceivePassword->clear();
@@ -335,7 +349,7 @@ bool OBSBasic::SavePixelviewReceive()
 		const bool saved = config_save_safe(config, "tmp", nullptr) == CONFIG_SUCCESS;
 		pixelviewReceiveCredentialsDirty = !saved;
 		pixelviewReceiveStorageStatus->setText(saved ?
-			QStringLiteral("Could not read the receiver password from Keychain. Re-enter it or unlock Keychain and reopen the app.") :
+			QStringLiteral("Could not read the saved receiver password. Click Start receiving to retry with macOS authorization, or re-enter it.") :
 			QStringLiteral("Receiver changes could not be saved. Check configuration permissions; previous settings may remain after reopening. The saved receiver password is still unavailable."));
 		pixelviewReceiveStorageStatus->show();
 		return saved;
@@ -352,7 +366,7 @@ bool OBSBasic::SavePixelviewReceive()
 	pixelviewReceiveCredentialsDirty = !saved;
 	pixelviewReceiveStorageStatus->setText(saved ? QString() : !configSaved ?
 		QStringLiteral("Receiver changes could not be saved. Check configuration permissions; previous settings may remain after reopening.") :
-		QStringLiteral("Receiver password could not be saved or removed in Keychain. Changes may not survive reopening; unlock Keychain and edit the password or click Start to retry."));
+		QStringLiteral("Receiver password could not be saved. Click Start receiving to retry with macOS authorization. Changes may not survive reopening."));
 	pixelviewReceiveStorageStatus->setVisible(!saved);
 	return saved;
 }
@@ -363,15 +377,66 @@ void OBSBasic::StartPixelviewReceive()
 	const QString id = pixelviewReceiveId->text().trimmed(), name = pixelviewReceiveName->text().trimmed();
 	if (id.isEmpty() || name.isEmpty()) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Enter a session ID and receiver name."), ReceiveStatusTone::Error); return; }
 	if (!pixelviewReceiver->setOrigin(QUrl(PixelviewReceiveOrigin()), pixelviewDev)) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Invalid backend origin."), ReceiveStatusTone::Error); return; }
+	if (pixelviewReceivePasswordOrigin != PixelviewReceiveOrigin()) {
+		SavePixelviewReceive(); // Apply the existing origin-bound password reset before snapshotting work.
+		SetPixelviewReceiveStatus(QStringLiteral("Backend changed. Enter the receiver password again."), ReceiveStatusTone::Error);
+		return;
+	}
+	auto start = [this, id, name] {
+		pixelviewReceiveIntent = true;
+		QString password = pixelviewReceivePassword->text();
+		pixelviewReceiver->start(id, password, name); password.clear();
+		pixelviewReceiveTimer->start(); RefreshPixelviewModes();
+	};
+	// Authorization belongs to the ordinary Start action, never a separate
+	// Keychain control or an automatic reconnect/focus-out/polling callback.
+	if (pixelviewReceiveCredentialUnavailable || pixelviewReceiveCredentialsDirty) {
+		const bool reading = pixelviewReceiveCredentialUnavailable;
+		const QString origin = PixelviewReceiveOrigin(), session = id;
+		const QString password = pixelviewReceivePassword->text();
+		auto *config = App()->GetUserConfig();
+		QString revision = QString::fromUtf8(config_get_string(config, "PixelviewReceive", "CredentialRevision"));
+		if (!reading) {
+			revision = QUuid::createUuid().toString(QUuid::WithoutBraces);
+			config_set_string(config, "PixelviewReceive", "SessionId", session.toUtf8().constData());
+			config_set_string(config, "PixelviewReceive", "Name", name.toUtf8().constData());
+			config_set_string(config, "PixelviewReceive", "CredentialRevision", revision.toUtf8().constData());
+			if (config_save_safe(config, "tmp", nullptr) != CONFIG_SUCCESS) {
+				pixelviewReceiveStorageStatus->setText(QStringLiteral("Receiver changes could not be saved. The saved password was not changed."));
+				pixelviewReceiveStorageStatus->show(); start(); return;
+			}
+		}
+		pixelviewReceiveCredentialBusy = true; RefreshPixelviewModes();
+		const auto store = pixelviewReceiveStore;
+		pixelview::runKeychainUserAction(this, [store, reading, origin, session, revision, password] {
+			using State = pixelview::ReceiveCredentialStore::State;
+			if (reading) return store->load(origin, session, revision);
+			return pixelview::ReceiveCredentialStore::Result{store->save(origin, session, revision, password) ? State::Found : State::Error, {}};
+		}, [this, reading, origin, start](pixelview::ReceiveCredentialStore::Result result) {
+			pixelviewReceiveCredentialBusy = false;
+			if (isClosing() || pixelviewShutdownPending) return;
+			RefreshPixelviewModes();
+			if (result.state == pixelview::ReceiveCredentialStore::State::Error) {
+				pixelviewReceiveStorageStatus->setText(QStringLiteral("Password access was canceled or failed. The saved password was not removed. Click Start receiving to retry, or re-enter the password."));
+				pixelviewReceiveStorageStatus->show();
+				if (!reading) start(); // Current explicit input is still usable.
+				return;
+			}
+			if (reading) pixelviewReceivePassword->setText(result.password);
+			pixelviewReceivePasswordOrigin = origin;
+			pixelviewReceiveCredentialUnavailable = false; pixelviewReceiveCredentialsDirty = false;
+			pixelviewReceiveStorageStatus->clear(); pixelviewReceiveStorageStatus->hide();
+			start();
+		});
+		return;
+	}
 	SavePixelviewReceive(); // Storage failure is reported separately; current input remains usable.
-	pixelviewReceiveIntent = true;
-	QString password = pixelviewReceivePassword->text();
-	pixelviewReceiver->start(id, password, name); password.clear();
-	pixelviewReceiveTimer->start(); RefreshPixelviewModes();
+	start();
 }
 
 void OBSBasic::DisconnectPixelviewReceiveMedia()
 {
+	PixelviewBindDeckLinkReceive(nullptr, pixelviewReceiving);
 	pixelviewReceiveFrames = 0;
 	ClearPixelviewAudio();
 	if (!pixelviewReceiveSource) return;
@@ -408,6 +473,7 @@ void OBSBasic::StopPixelviewReceive(bool keepReceiving)
 		pixelviewSendOutput = nullptr;
 		ui->preview->SetLocked(pixelviewSendPreviewLocked);
 		pixelviewReceiving = false;
+		PixelviewBindDeckLinkReceive(nullptr, false);
 	}
 	RefreshPixelviewModes();
 	RefreshPixelviewAudio();

@@ -50,6 +50,9 @@ target_sources(
     decklink-device-discovery.hpp
     decklink-device-instance.cpp
     decklink-device-instance.hpp
+    decklink-receive.hpp
+    decklink-private-media.hpp
+    decklink-output-receive.inc
     decklink-device-mode.cpp
     decklink-device-mode.hpp
     decklink-device.cpp

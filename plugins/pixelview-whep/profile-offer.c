@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "profile-offer.h"
+#include "main422-25p.h"
 GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, unsigned level)
 {
  if (!input || gst_caps_is_any(input)) return NULL;
@@ -26,16 +27,18 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
   gboolean hevc = !g_ascii_strcasecmp(name,"H265");
   gboolean vp9 = !g_ascii_strcasecmp(name,"VP9");
   gboolean opus = !g_ascii_strcasecmp(name,"OPUS");
-  unsigned choices[2] = {0,0};
+  unsigned choices[3] = {0,0,0};
   if (h264) choices[0] = profiles & PV_PROFILE_H264;
   if (hevc && valid_level) {
    choices[0] = profiles & PV_PROFILE_HEVC_MAIN;
    choices[1] = profiles & PV_PROFILE_HEVC_MAIN10;
+   /* Explicit 25p policy, not a Main422 probe result. Preserve ordinary profiles/levels. */
+   choices[2] = (choices[0] || choices[1]) && pv_main422_25p_enabled();
   }
   if (vp9) { choices[0] = profiles & PV_PROFILE_VP9_0; choices[1] = profiles & PV_PROFILE_VP9_2; }
   if (opus) choices[0] = 1;
   gboolean first = TRUE;
-  for (unsigned j=0; j<2; j++) {
+  for (unsigned j=0; j<3; j++) {
    if (!choices[j]) continue;
    GstStructure *s = gst_structure_copy(source);
    if (!first) {
@@ -56,6 +59,8 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
     /* GstSDP serializes string fields in insertion order. Reinsert in engine order. */
     gst_structure_remove_fields(s,"level-id","profile-id","tier-flag","tx-mode",NULL);
     gst_structure_set(s,"level-id",G_TYPE_STRING,level_string,"profile-id",G_TYPE_STRING,j ? "2" : "1","tier-flag",G_TYPE_STRING,"0","tx-mode",G_TYPE_STRING,"SRST",NULL);
+    if (j == 2) gst_structure_set(s,"level-id",G_TYPE_STRING,"120",
+     "profile-id",G_TYPE_STRING,"4","interop-constraints",G_TYPE_STRING,"1d0800000000",NULL);
    }
    if (vp9) gst_structure_set(s,"profile-id",G_TYPE_STRING,j ? "2" : "0",NULL);
    gst_caps_append_structure(out,s);

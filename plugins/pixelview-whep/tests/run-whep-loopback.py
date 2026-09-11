@@ -16,7 +16,8 @@ FW=REPO/'build_macos/libobs/RelWithDebInfo';DEPS=sorted((REPO/'.deps').glob('obs
 cmd=['clang','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-mmacosx-version-min=14.0']
 cmd+=['-I'+str(p) for p in [REPO/'libobs',REPO/'build_macos/config',DEPS/'include',SDK/'include',SDK/'include/gstreamer-1.0',SDK/'include/glib-2.0',SDK/'lib/glib-2.0/include']]
 cmd+=['-F'+str(FW),'-framework','libobs','-Wl,-rpath,'+str(FW),'-Wl,-rpath,'+str(DEPS/'lib'),'-L'+str(RUNTIME/'lib'),'-Wl,-rpath,'+str(RUNTIME/'lib')]
-cmd+=[str(ROOT/p) for p in ['tests/whep-loopback.c','video-format.c','profile-offer.c','capability-probe.c']]
+import native422_build
+cmd+=[str(ROOT/p) for p in ['tests/whep-loopback.c','video-format.c','profile-offer.c','capability-probe.c']] + native422_build.flags(ROOT)
 cmd+=['-l'+x for x in ['nice.10','gstwebrtc-1.0.0','gstsdp-1.0.0','gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0']]
 subprocess.run(cmd+['-o',str(WORK/'receiver')],check=True)
 spec=importlib.util.spec_from_file_location('selection',ROOT/'tests/engine-profile-selection.py');selection=importlib.util.module_from_spec(spec);spec.loader.exec_module(selection)
@@ -27,12 +28,20 @@ source=selection.remove_logs(source).replace('codec.MatchesReceiver','MatchesRec
 binding=(ENGINE/'internal/av/whep/h264_binding.go').read_text()
 source+='\n'+selection.extract(binding,'func codecForOffer(')
 source+='\n'+binding[binding.index('// receiverBindingTrack adapts'):]
+receiver_codec=ENGINE/'internal/av/whep/receiver_codec.go'
+if receiver_codec.exists():
+    source+='\n'+selection.extract(receiver_codec.read_text(),'func receiverCodec(')
 registration=selection.extract(server,'func newWHEPMediaEngine(')
 registration=selection.remove_logs(registration).replace('newWHEPMediaEngine(codecMap *codec.Mapper','register(fixtures []Codec').replace('codecMap.Codecs','fixtures').replace('codec.MediaTypeVideo','1').replace('codec.IsABRFormat','isABR')
 source+='\n'+registration
 source=source.replace('codec.MatchesReceiver','MatchesReceiver').replace('codec.Codec','Codec').replace('codec.WebRTCConfig','WebRTCConfig')
-(WORK/'provenance.json').write_text(json.dumps({str(p.relative_to(ENGINE)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [ENGINE/'internal/av/whep/server.go',ENGINE/'internal/av/codec/mapper.go',ENGINE/'internal/av/codec/negotiation.go',ENGINE/'internal/av/whep/h264_binding.go',ENGINE/'go.mod',ENGINE/'go.sum']},indent=2))
-(WORK/'main.go').write_text((ROOT/'tests/whep-loopback.go.in').read_text()+source)
+provenance_paths=[ENGINE/'internal/av/whep/server.go',ENGINE/'internal/av/codec/mapper.go',ENGINE/'internal/av/codec/negotiation.go',ENGINE/'internal/av/whep/h264_binding.go',ENGINE/'go.mod',ENGINE/'go.sum']
+if receiver_codec.exists(): provenance_paths.append(receiver_codec)
+(WORK/'provenance.json').write_text(json.dumps({str(p.relative_to(ENGINE)):hashlib.sha256(p.read_bytes()).hexdigest() for p in provenance_paths},indent=2))
+template=(ROOT/'tests/whep-loopback.go.in').read_text()
+if 'func trackForReceiver(track webrtc.TrackLocal, c codec.Codec)' in binding:
+    template=template.replace('trackForReceiver(v,c.WebRTC)','trackForReceiver(v,c)')
+(WORK/'main.go').write_text(template+source)
 fixtures=[]
 for entry in re.split(r'FormatID:\s*"',mapper)[1:]:
     fmt=entry.split('"',1)[0];web=re.search(r'WebRTC: &WebRTCConfig\{(.*?)\n\s*\},\n\s*Type:',entry,re.S)
@@ -46,6 +55,8 @@ for entry in re.split(r'FormatID:\s*"',mapper)[1:]:
 (WORK/'fixtures.json').write_text(json.dumps(fixtures))
 (WORK/'go.mod').write_text(re.sub(r'^module .*','module loopback-acceptance',(ENGINE/'go.mod').read_text(),count=1));shutil.copyfile(ENGINE/'go.sum',WORK/'go.sum')
 subprocess.run(['go','build','-mod=mod','-o','server','.'],cwd=WORK,env=env,check=True,timeout=90)
+if os.environ.get('PV_LOOPBACK_BUILD_ONLY') == '1':
+    raise SystemExit(0)
 cases=[('h264-8bit-420','h264','8',97),('hevc-8bit-420','main','8',96),('hevc-10bit-420','main10','10',120),('vp9-8bit-420','vp9_0','8',98),('vp9-10bit-420','vp9_2','10',121),('negative','negative','negative',None)]
 results=[]
 for fmt,name,depth,pt in cases:

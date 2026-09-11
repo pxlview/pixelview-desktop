@@ -40,7 +40,12 @@ def merge_payload(payload, sdk):
             dst.parent.mkdir(parents=True, exist_ok=True)
             if dst.is_symlink():
                 raise RuntimeError(f'File collides with payload symlink: {dst}')
-            shutil.copy2(src, dst)
+            # Both trees are disposable siblings on the same filesystem. Link
+            # verified extracted bytes instead of allocating a second SDK-sized
+            # copy. Unlink collisions so later components cannot mutate earlier
+            # payload inodes; TemporaryDirectory cleanup leaves SDK links intact.
+            dst.unlink(missing_ok=True)
+            os.link(src, dst)
             if dst.suffix == '.pc':
                 text = dst.read_text()
                 text = re.sub(r'^prefix=.*$', 'prefix='+str(sdk), text, flags=re.M)

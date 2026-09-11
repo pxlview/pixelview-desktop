@@ -15,7 +15,7 @@ func(t *observedTrack)WriteRTP(p *rtp.Packet)error{return t.rtp.WriteRTP(p)}
 func(t *observedTrack)Bind(c webrtc.TrackLocalContext)(webrtc.RTPCodecParameters,error){p,e:=t.TrackLocal.Bind(c);t.bound=p;return p,e}
 func must(e error){if e!=nil{panic(e)}}
 func relay(c *net.UDPConn,t *observedTrack,done <-chan struct{}){
- b:=make([]byte,65536);for {c.SetReadDeadline(time.Now().Add(time.Second));n,_,e:=c.ReadFromUDP(b);if e!=nil{select{case <-done:return;default:continue}};p:=&rtp.Packet{};must(p.Unmarshal(b[:n]));must(t.WriteRTP(p))}
+ b:=make([]byte,65536);for {c.SetReadDeadline(time.Now().Add(time.Second));n,_,e:=c.ReadFromUDP(b);if e!=nil{select{case <-done:return;default:continue}};p:=&rtp.Packet{};must(p.Unmarshal(b[:n]));if p.Marker{fmt.Printf("RTP_MARKER %s timestamp=%d sequence=%d\n",t.bound.MimeType,p.Timestamp,p.SequenceNumber)};must(t.WriteRTP(p))}
 }
 func main(){
  data,e:=os.ReadFile("fixtures.json");must(e);var fixtures []Codec;must(json.Unmarshal(data,&fixtures));s:=Server{codecMap:Mapper{}};for _,c:=range fixtures{s.codecMap[c.FormatID]=c}

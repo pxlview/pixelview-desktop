@@ -12,6 +12,10 @@
 #include "video-format.h"
 #include "capability-probe.h"
 #include "profile-offer.h"
+#include "native-422-filter.h"
+#include "native-422-diagnostic.h"
+#include "source-feed-queue.h"
+#include <math.h>
 #ifndef PIXELVIEW_WHEP_TEST
 #include "runtime.h"
 #endif
@@ -24,11 +28,24 @@ struct receiver {
   * lock across GStreamer state changes (webrtc-ready may run synchronously). */
  GRecMutex delivery;
  uint64_t generation, active_generation;
+ struct pv422_diagnostic native422_failure; /* lock; first failure per generation */
  GCond wake;
  GThread *thread;
+ /* One source-owned preview worker: latest owned RAW sample plus one in flight.
+  * Stop invalidates pending work, never joins this worker. Destruction DOES join;
+  * a third-party blocked OBS call has no quiescence deadline. No detached thread
+  * or receiver/module unload while it runs. */
+ GThread *preview_thread;
+ GstSample *preview_sample;
+ uint64_t preview_timestamp, preview_generation;
+ bool preview_clear, preview_enabled, preview_native;
  const char *state;
  char *endpoint;
  uint64_t frames, audio_frames, last_video;
+ uint64_t native422_frames, native_audio_frames, last_native_video;
+ struct pv_feed_queue feed;
+ float source_gain; /* receiver lock protects the signal-owned control snapshot */
+ bool source_muted;
  guint latency, active_latency;
  struct pixelview_receive_capabilities active_caps;
  struct receive_attempt *attempt;
@@ -37,15 +54,86 @@ struct receiver {
  bool quit, changed, accept_samples;
  GstElement *pipe; /* worker-owned; callbacks finish before teardown */
 };
+/* libobs volume signals precede user_volume assignment; mute signals follow
+ * user_muted assignment. Read calldata, NEVER those ordinary fields on media
+ * threads. Source init sets unity/unmuted before create; scene load uses setters
+ * afterwards, and DO_NOT_DUPLICATE forbids the silent field-copy duplicate path.
+ * Subscribe during create before worker/publication. Control semantics are the
+ * source signal values (not a later third-party mutation of volume calldata).
+ * Signal dispatch holds its per-signal mutex through callbacks; disconnect waits
+ * for in-flight dispatch. Never disconnect while holding receiver/delivery locks.
+ */
+static void source_volume(void *opaque, calldata_t *cd)
+{
+ struct receiver *r=opaque;
+ g_mutex_lock(&r->lock); r->source_gain=(float)calldata_float(cd, "volume"); g_mutex_unlock(&r->lock);
+}
+static void source_mute(void *opaque, calldata_t *cd)
+{
+ struct receiver *r=opaque;
+ g_mutex_lock(&r->lock); r->source_muted=calldata_bool(cd, "muted"); g_mutex_unlock(&r->lock);
+}
+static void source_controls_init(struct receiver *r)
+{
+ r->source_gain=1.f; r->source_muted=false;
+ signal_handler_t *signals=obs_source_get_signal_handler(r->source);
+ signal_handler_connect(signals, "volume", source_volume, r);
+ signal_handler_connect(signals, "mute", source_mute, r);
+}
+static void source_controls_disconnect(struct receiver *r)
+{
+ signal_handler_t *signals=obs_source_get_signal_handler(r->source);
+ signal_handler_disconnect(signals, "volume", source_volume, r);
+ signal_handler_disconnect(signals, "mute", source_mute, r);
+}
+static void feed_proc(void *opaque, calldata_t *cd)
+{
+ struct receiver *r = opaque;
+ calldata_set_int(cd, "version", PV_FEED_VERSION);
+ struct pv_feed_request *request = calldata_ptr(cd, "request");
+ g_mutex_lock(&r->lock);
+ pv_feed_request(&r->feed, r->generation, request);
+ g_mutex_unlock(&r->lock);
+}
+static void native_preview_proc(void *opaque, calldata_t *cd)
+{
+ struct receiver *r=opaque;
+ g_mutex_lock(&r->lock);
+ r->preview_enabled=calldata_bool(cd,"enabled");
+ if (!r->preview_enabled && r->preview_native) {
+  if (r->preview_sample) { gst_sample_unref(r->preview_sample); r->preview_sample=NULL; }
+  if (r->preview_thread) r->preview_clear=true;
+ }
+ g_cond_broadcast(&r->wake); g_mutex_unlock(&r->lock);
+}
+/* Worker holds receiver lock; late old-pipeline messages cannot repopulate
+ * cancelled/new generations. No arbitrary Gst error/debug text is consumed. */
+static void native422_failure_locked(struct receiver *r,GstMessage *msg)
+{
+ if(r->quit || r->changed || r->generation!=r->active_generation || r->native422_failure.reason) return;
+ if(pv422_diagnostic_read(msg,&r->native422_failure)) {
+  char *text=pv422_diagnostic_text(&r->native422_failure,r->generation);
+  blog(LOG_WARNING,"[pixelview-whep] native422 %s",text);g_free(text);
+ }
+}
 static void status_proc(void *opaque, calldata_t *cd)
 {
  struct receiver *r = opaque;
  g_mutex_lock(&r->lock);
+ const uint64_t now = os_gettime_ns();
+ const uint64_t last = r->native422_frames ? r->last_native_video : r->last_video;
+ calldata_set_bool(cd, "ready", !r->quit && !r->changed && r->accept_samples &&
+  r->generation == r->active_generation && r->state && !strcmp(r->state, "playing") &&
+  (r->native422_frames || r->frames) && last && now >= last && now - last < 500000000ULL);
  calldata_set_string(cd, "state", r->state);
  calldata_set_int(cd, "frames", r->frames);
  calldata_set_int(cd, "audio_frames", r->audio_frames);
+ calldata_set_int(cd, "native422_frames", r->native422_frames);
+ calldata_set_int(cd, "native_audio_frames", r->native_audio_frames);
  calldata_set_int(cd, "latency", r->latency);
  calldata_set_int(cd, "jitter_latency", r->jitter_latency);
+ char *diagnostic=pv422_diagnostic_text(&r->native422_failure,r->generation);
+ calldata_set_string(cd,"native422_diagnostic",diagnostic);g_free(diagnostic);
  g_mutex_unlock(&r->lock);
 }
 static void wipe(char **text)
@@ -74,30 +162,31 @@ static void connect_proc(void *opaque, calldata_t *cd)
 {
  struct receiver *r = opaque;
  const char *endpoint = calldata_string(cd, "endpoint");
- int64_t latency = 50;
+ int64_t latency = 100;
  calldata_get_int(cd, "latency", &latency);
- g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  r->generation++;
+ r->native422_failure=(struct pv422_diagnostic){0};
+ pv_feed_reset(&r->feed);
  wipe(&r->endpoint);
  bool valid = valid_endpoint(endpoint) && latency >= 0 && latency <= 2000;
  r->endpoint = valid ? g_strdup(endpoint) : NULL;
- r->latency = valid ? (guint)latency : 50;
+ r->latency = valid ? (guint)latency : 100;
  r->state = valid ? "connecting" : "error";
  r->frames = r->audio_frames = 0; r->jitter_latency = -1;
+ r->native422_frames = r->native_audio_frames = 0;
  r->changed = true; r->accept_samples = false;
  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
- g_rec_mutex_unlock(&r->delivery);
 }
 static void disconnect_proc(void *opaque, calldata_t *cd)
 {
  (void)cd; struct receiver *r = opaque;
- g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  r->generation++;
+ r->native422_failure=(struct pv422_diagnostic){0};
+ pv_feed_reset(&r->feed);
  wipe(&r->endpoint); r->state = "idle"; r->changed = true; r->accept_samples = false;
  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
- g_rec_mutex_unlock(&r->delivery);
 }
 static uint64_t timestamp(GstSample *sample, GstElement *pipe)
 {
@@ -110,6 +199,57 @@ static uint64_t timestamp(GstSample *sample, GstElement *pipe)
   * branches use the same pipeline base, preserving relative A/V PTS. */
  return GST_CLOCK_TIME_IS_VALID(time) ? gst_element_get_base_time(pipe) + time : os_gettime_ns();
 }
+static gpointer preview_worker(gpointer opaque)
+{
+ struct receiver *r = opaque;
+ for (;;) {
+  g_mutex_lock(&r->lock);
+  while (!r->quit && !r->preview_sample && !r->preview_clear)
+   g_cond_wait_until(&r->wake, &r->lock, g_get_monotonic_time()+100000);
+  GstSample *sample = r->preview_sample; r->preview_sample = NULL;
+  uint64_t pts = r->preview_timestamp, generation = r->preview_generation;
+  bool native_preview = r->preview_native;
+  bool clear = r->preview_clear; r->preview_clear = false;
+  bool quit = r->quit;
+  bool current = !quit && (!native_preview || r->preview_enabled) && !r->changed && r->accept_samples && r->generation == generation;
+  g_mutex_unlock(&r->lock);
+  if (clear && !quit) obs_source_output_video(r->source, NULL);
+  if (sample && current) {
+   GstVideoInfo info; GstVideoFrame mapped = {0}; struct obs_source_frame2 frame;
+   if (pixelview_video_info(gst_sample_get_caps(sample), &info) &&
+       gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
+    if (pixelview_video_frame(&mapped, &frame)) {
+     frame.timestamp = pts;
+     /* Dispatch handoff linearizes under lock AFTER all preparation (including
+      * a preceding clear). Cancellation before this reservation suppresses OBS.
+      * Once reserved, exactly this one call is irrevocable: it can ENTER as well
+      * as finish after disconnect/disable returns if this thread is descheduled
+      * after unlock. This is not already-entered OBS, nor a Stop completion fence.
+      * The single worker orders its later clear/new-generation calls after it.
+      * Disconnect never waits; destruction joins through return/unmap/unref.
+      * No third-party OBS call executes with a receiver/attempt/delivery lock. */
+     g_mutex_lock(&r->lock);
+     bool dispatch = !r->quit && (!native_preview || r->preview_enabled) && !r->changed && r->accept_samples &&
+      r->generation == generation && r->active_generation == generation;
+     g_mutex_unlock(&r->lock);
+     if (dispatch) {
+      obs_source_output_video2(r->source, &frame);
+      g_mutex_lock(&r->lock);
+      if (!r->quit && (!native_preview || r->preview_enabled) && !r->changed && r->accept_samples &&
+          r->generation == generation && r->active_generation == generation) {
+       r->frames++;
+       if (!native_preview) { r->state = "playing"; r->last_video = os_gettime_ns(); }
+      }
+      g_mutex_unlock(&r->lock);
+     }
+    }
+    gst_video_frame_unmap(&mapped);
+   }
+  }
+  if (sample) gst_sample_unref(sample);
+  if (quit) return NULL;
+ }
+}
 static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
 {
  struct receiver *r = opaque;
@@ -118,13 +258,45 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  GstVideoInfo info; GstVideoFrame mapped = {0};
  /* Missing colorimetry must not become GstVideoInfo's resolution-based defaults. */
  GstCaps *caps = gst_sample_get_caps(sample);
- if (!pixelview_video_info(caps, &info) ||
-     !gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
+ gboolean native_preview = FALSE;
+ if (caps && gst_caps_is_fixed(caps)) gst_structure_get_boolean(gst_caps_get_structure(caps, 0), "pixelview-native422", &native_preview);
+ /* Once created, this worker is the ordering domain for ALL video and clears,
+  * including ordinary codec generations after native receive. The appsink has
+  * serialized video callbacks; pipeline NULL teardown drains them before a new
+  * generation starts. Never revert to direct delivery while this worker exists. */
+ g_mutex_lock(&r->lock);
+ bool async_preview = native_preview || r->preview_thread != NULL;
+ g_mutex_unlock(&r->lock);
+ if (async_preview && gst_buffer_get_size(gst_sample_get_buffer(sample)) > 1920u*1080u*(native_preview ? 3u : 4u)) {
   gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
  struct obs_source_frame2 frame;
- if (!pixelview_video_frame(&mapped, &frame)) {
-  gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_NOT_NEGOTIATED;
+ if (!pixelview_video_info(caps, &info)) { gst_sample_unref(sample); return GST_FLOW_ERROR; }
+ if (!native_preview) {
+  /* Preserve ordinary callback negotiation/error semantics before handing off
+   * owned RAW storage. The worker remaps READ-only for its own lifetime; there
+   * is no conversion or eight-bit copy of ordinary P010 here. */
+  if (!gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
+   gst_sample_unref(sample); return GST_FLOW_ERROR;
+  }
+  if (!pixelview_video_frame(&mapped, &frame)) {
+   gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_NOT_NEGOTIATED;
+  }
+ }
+ if (async_preview) {
+  if (!native_preview) gst_video_frame_unmap(&mapped);
+  uint64_t pts = timestamp(sample, r->pipe);
+  g_mutex_lock(&r->lock);
+  bool current = !r->quit && (!native_preview || r->preview_enabled) && !r->changed && r->accept_samples && r->generation == r->active_generation;
+  if (current) {
+   if (r->preview_sample) gst_sample_unref(r->preview_sample);
+   r->preview_sample = gst_sample_ref(sample); r->preview_timestamp = pts; r->preview_generation = r->generation;
+   r->preview_native = native_preview;
+   if (!r->preview_thread) r->preview_thread = g_thread_new("pixelview-preview", preview_worker, r);
+   g_cond_broadcast(&r->wake);
+  }
+  g_mutex_unlock(&r->lock);
+  gst_sample_unref(sample); return GST_FLOW_OK;
  }
  frame.timestamp = timestamp(sample, r->pipe);
  g_rec_mutex_lock(&r->delivery);
@@ -137,14 +309,81 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  gst_video_frame_unmap(&mapped); gst_sample_unref(sample);
  return GST_FLOW_OK;
 }
+static void feed_audio(struct receiver *r, GstSample *sample, const GstAudioInfo *info,
+ const GstMapInfo *mapped, float gain)
+{
+ if (!r->feed.token) return;
+ const GstSegment *segment = gst_sample_get_segment(sample);
+ GstBuffer *buffer = gst_sample_get_buffer(sample);
+ if (GST_AUDIO_INFO_FORMAT(info) != GST_AUDIO_FORMAT_F32LE || info->rate != 48000 ||
+     info->channels != 2 || info->bpf != 8 || !mapped->size || mapped->size % 8 ||
+     mapped->size > PV_FEED_MAX_AUDIO_FRAMES * 8u || !segment || segment->format != GST_FORMAT_TIME ||
+     !GST_BUFFER_PTS_IS_VALID(buffer)) { pv_feed_reset(&r->feed); return; }
+ GstClockTime running = gst_segment_to_running_time(segment, GST_FORMAT_TIME, GST_BUFFER_PTS(buffer));
+ GstClockTime base = r->pipe ? gst_element_get_base_time(r->pipe) : GST_CLOCK_TIME_NONE;
+ if (!GST_CLOCK_TIME_IS_VALID(running) || !GST_CLOCK_TIME_IS_VALID(base) ||
+     running >= GST_CLOCK_TIME_NONE - base) { pv_feed_reset(&r->feed); return; }
+ uint8_t pcm[PV_FEED_MAX_AUDIO_FRAMES * 4u];
+ for (size_t i=0; i<mapped->size/4; i++) {
+  float input; memcpy(&input, mapped->data + i*4, 4);
+  double value = (double)input * gain;
+  long rounded = !isfinite(value) ? 0 : value <= -1 ? INT16_MIN : value >= 1 ? INT16_MAX : lrint(value * 32768.0);
+  int16_t code = (int16_t)CLAMP(rounded, INT16_MIN, INT16_MAX);
+  GST_WRITE_UINT16_LE(pcm + i*2, (uint16_t)code);
+ }
+ struct pv_feed_request media = {.data=pcm, .bytes=mapped->size/2, .audio_frames=mapped->size/8,
+  .timestamp_ns=base+running, .duration_ns=gst_util_uint64_scale(mapped->size/8, GST_SECOND, 48000)};
+ pv_feed_push(&r->feed, r->active_generation, &media, true);
+}
+/* Source PCM must reach the card before synchronized preview playback. The
+ * downstream preview decoder may add latency to the whole Gst pipeline; waiting
+ * at its clocked audio sink makes otherwise valid PCM expire at the card. */
+/* A fragmented READ map may allocate/coalesce its entire input. Bound the
+ * advertised storage first; validate the resulting mapping independently. */
+static bool map_audio(struct receiver *r, GstSample *sample, GstAudioInfo *info, GstMapInfo *mapped)
+{
+ GstBuffer *buffer=gst_sample_get_buffer(sample);
+ GstCaps *caps=gst_sample_get_caps(sample);
+ if (!buffer || !caps || !gst_audio_info_from_caps(info, caps) ||
+     GST_AUDIO_INFO_FORMAT(info)!=GST_AUDIO_FORMAT_F32LE || info->rate!=48000 ||
+     info->channels!=2 || info->bpf!=8 ||
+     !gst_buffer_get_size(buffer) || gst_buffer_get_size(buffer)>PV_FEED_MAX_AUDIO_FRAMES*8u ||
+     gst_buffer_get_size(buffer)%8) goto reject;
+ if (!gst_buffer_map(buffer, mapped, GST_MAP_READ)) goto reject;
+ if (!mapped->size || mapped->size>PV_FEED_MAX_AUDIO_FRAMES*8u || mapped->size%8) {
+  gst_buffer_unmap(buffer, mapped); goto reject;
+ }
+ return true;
+reject:
+ g_mutex_lock(&r->lock); pv_feed_reset(&r->feed); g_mutex_unlock(&r->lock);
+ return false;
+}
+static GstFlowReturn native_audio_sample(GstAppSink *sink, gpointer opaque)
+{
+ struct receiver *r = opaque;
+ GstSample *sample = gst_app_sink_pull_sample(sink);
+ if (!sample) return GST_FLOW_EOS;
+ GstAudioInfo info; GstMapInfo mapped;
+ if (!map_audio(r, sample, &info, &mapped)) {
+  gst_sample_unref(sample); return GST_FLOW_ERROR;
+ }
+ g_mutex_lock(&r->lock);
+ float gain = r->source_muted ? 0.f : r->source_gain;
+ if (!r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation) {
+  r->native_audio_frames += mapped.size / info.bpf;
+  if (r->feed.route == PV_FEED_NATIVE) feed_audio(r, sample, &info, &mapped, gain);
+ }
+ g_mutex_unlock(&r->lock);
+ gst_buffer_unmap(gst_sample_get_buffer(sample), &mapped); gst_sample_unref(sample);
+ return GST_FLOW_OK;
+}
 static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
 {
  struct receiver *r = opaque;
  GstSample *sample = gst_app_sink_pull_sample(sink);
  if (!sample) return GST_FLOW_EOS;
  GstAudioInfo info; GstMapInfo mapped;
- if (!gst_audio_info_from_caps(&info, gst_sample_get_caps(sample)) ||
-     !gst_buffer_map(gst_sample_get_buffer(sample), &mapped, GST_MAP_READ)) {
+ if (!map_audio(r, sample, &info, &mapped)) {
   gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
  struct obs_source_audio audio = {0};
@@ -154,7 +393,11 @@ static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
  g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation;
- if (deliver) r->audio_frames += audio.frames;
+ if (deliver) {
+  r->audio_frames += audio.frames;
+  if (r->feed.route == PV_FEED_RENDERED)
+   feed_audio(r, sample, &info, &mapped, r->source_muted ? 0.f : r->source_gain);
+ }
  g_mutex_unlock(&r->lock);
  if (deliver) obs_source_output_audio(r->source, &audio);
  g_rec_mutex_unlock(&r->delivery);
@@ -271,17 +514,80 @@ static void webrtc_ready(GObject *signaller, const char *peer, GstElement *rtc, 
  }
  g_mutex_unlock(&a->gate);
 }
+/* Bounded source-owned copy only: no consumer code or DeckLink calls under
+ * attempt/receiver locks. Consumers pull through the versioned feed proc. */
+static gboolean native422_delivery(void *opaque, GstSample *sample, const struct pv_native422_frame *frame)
+{
+ struct receive_attempt *a = opaque;
+ const GstSegment *segment = gst_sample_get_segment(sample);
+ if (!segment || segment->format != GST_FORMAT_TIME) return FALSE;
+ GstClockTime running = gst_segment_to_running_time(segment, GST_FORMAT_TIME, frame->pts);
+ if (!GST_CLOCK_TIME_IS_VALID(running)) return FALSE;
+ g_mutex_lock(&a->gate);
+ struct receiver *r = a->receiver;
+ if (!r) { g_mutex_unlock(&a->gate); return TRUE; }
+ g_mutex_lock(&r->lock);
+ bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == a->generation;
+ GstClockTime base = r->pipe ? gst_element_get_base_time(r->pipe) : GST_CLOCK_TIME_NONE;
+ deliver = deliver && GST_CLOCK_TIME_IS_VALID(base) && running < GST_CLOCK_TIME_NONE - base;
+ if (deliver) {
+  r->native422_frames++; r->last_native_video = os_gettime_ns(); r->state = "playing";
+  int fps_n=0, fps_d=0;
+  gst_structure_get_fraction(gst_caps_get_structure(gst_sample_get_caps(sample), 0), "framerate", &fps_n, &fps_d);
+  struct pv_feed_request media = {.data=(void *)frame->v210,
+   .bytes=(size_t)frame->stride * frame->height, .width=frame->width, .height=frame->height,
+   .stride=frame->stride, .fps_num=fps_n, .fps_den=fps_d,
+   .timestamp_ns=base + running, .duration_ns=frame->duration};
+  pv_feed_push(&r->feed, a->generation, &media, false);
+ }
+ g_mutex_unlock(&r->lock); g_mutex_unlock(&a->gate);
+ return TRUE;
+}
+static void native422_attempt_release(gpointer opaque) { attempt_unref(opaque, NULL); }
+static GstElement *request_encoded_filter(GstElement *rx, const char *peer, const char *pad,
+ GstCaps *caps, gpointer opaque)
+{
+ (void)rx; (void)peer; (void)caps;
+ struct receive_attempt *a = opaque;
+ if (!pad || !g_str_has_prefix(pad, "video_")) return NULL;
+ g_mutex_lock(&a->gate);
+ gboolean current = attempt_current(a);
+ GstElement *filter = current && !a->failed ? pv_native422_filter_new(native422_delivery,
+  attempt_ref(a), native422_attempt_release) : NULL;
+ if (filter) {
+  pv_native422_filter_require_rtp(filter,rx);
+  const char *format = caps && gst_caps_get_size(caps) ? gst_structure_get_string(gst_caps_get_structure(caps, 0), "format") : NULL;
+  pv_native422_filter_preview_format(filter, !g_strcmp0(format, "NV12"));
+  /* The signal's object GValue transfers an owned reference to Rust. A floating
+   * bin would have its only reference stolen by bin.add, then unrefed again by
+   * Rust's returned Element wrapper, leaving bus messages with a dangling src. */
+  gst_object_ref_sink(filter);
+ }
+ if (current && !filter) {
+  a->failed = true;
+  struct receiver *r = a->receiver;
+  g_mutex_lock(&r->lock);
+  if (!r->quit && r->generation == a->generation) { r->offer_failed = true; r->accept_samples = false; }
+  g_mutex_unlock(&r->lock);
+  GST_ELEMENT_ERROR(rx, CORE, MISSING_PLUGIN, ("Native receive branch unavailable"), (NULL));
+ }
+ g_mutex_unlock(&a->gate);
+ return filter;
+}
 static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
 {
  /* Only fixed code is parsed; never interpolate credentials into a pipeline. */
  const char *spec =
   "whepclientsrc name=rx video-codecs=\"<H265,H264,VP9>\" audio-codecs=\"<OPUS>\" "
   "rx. ! capsfilter name=video-policy caps=\"" PIXELVIEW_RECEIVE_RAW_CAPS ",width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]\" ! queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! appsink name=video "
-  "rx. ! audio/x-raw ! queue max-size-time=200000000 max-size-bytes=0 max-size-buffers=0 ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000 ! appsink name=audio";
+  "rx. ! audio/x-raw ! queue max-size-time=200000000 max-size-bytes=0 max-size-buffers=0 ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000 ! tee name=pcm "
+  "pcm. ! queue max-size-time=200000000 max-size-bytes=0 max-size-buffers=10 ! appsink name=native-audio "
+  "pcm. ! queue max-size-time=2000000000 max-size-bytes=1048576 max-size-buffers=100 leaky=downstream ! appsink name=audio";
 #ifdef PIXELVIEW_WHEP_TEST
  if (!strcmp(endpoint,"test://synthetic")) spec =
   "videotestsrc is-live=true ! video/x-raw,format=BGRA,colorimetry=sRGB,width=64,height=64,framerate=30/1 ! appsink name=video "
-  "audiotestsrc is-live=true ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio";
+  "audiotestsrc is-live=true ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! tee name=pcm "
+  "pcm. ! queue ! appsink name=native-audio pcm. ! queue leaky=downstream ! appsink name=audio";
 #endif
  GError *error = NULL;
  /* Only the verified numeric frame-rate ceiling enters the fixed graph. */
@@ -298,16 +604,18 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
    gst_object_unref(rx); gst_object_unref(pipe); return NULL;
   }
   r->attempt = attempt_new(r);
+  g_signal_connect_data(rx, "request-encoded-filter", G_CALLBACK(request_encoded_filter),
+   attempt_ref(r->attempt), attempt_unref, 0);
   g_signal_connect_data(signaller, "webrtcbin-ready", G_CALLBACK(webrtc_ready),
    attempt_ref(r->attempt), attempt_unref, 0);
   g_object_set(signaller, "whep-endpoint", endpoint, NULL);
   g_object_unref(signaller); gst_object_unref(rx);
  }
- const char *names[] = {"video", "audio"};
- for (int i=0; i<2; i++) {
+ const char *names[] = {"video", "audio", "native-audio"};
+ for (int i=0; i<3; i++) {
   GstElement *sink = gst_bin_get_by_name(GST_BIN(pipe), names[i]);
-  g_object_set(sink, "sync", TRUE, "max-buffers", 3u, "drop", TRUE, "enable-last-sample", FALSE, NULL);
-  GstAppSinkCallbacks cb = {0}; cb.new_sample = i ? audio_sample : video_sample;
+  g_object_set(sink, "sync", i != 2, "async", i != 2, "max-buffers", 3u, "drop", i != 2, "enable-last-sample", FALSE, NULL);
+  GstAppSinkCallbacks cb = {0}; cb.new_sample = i == 2 ? native_audio_sample : i ? audio_sample : video_sample;
   gst_app_sink_set_callbacks(GST_APP_SINK(sink), &cb, r, NULL);
   gst_object_unref(sink);
  }
@@ -315,6 +623,11 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
 }
 static void stop_pipeline(struct receiver *r)
 {
+ g_mutex_lock(&r->lock); pv_feed_reset(&r->feed);
+ if (r->preview_sample) { gst_sample_unref(r->preview_sample); r->preview_sample = NULL; }
+ bool async_preview = r->preview_thread != NULL;
+ if (async_preview) { r->preview_clear = true; g_cond_broadcast(&r->wake); }
+ g_mutex_unlock(&r->lock);
  if (r->attempt) {
   g_mutex_lock(&r->attempt->gate); r->attempt->receiver = NULL; g_mutex_unlock(&r->attempt->gate);
   attempt_unref(r->attempt, NULL); r->attempt = NULL;
@@ -322,7 +635,15 @@ static void stop_pipeline(struct receiver *r)
  if (!r->pipe) return;
  gst_element_set_state(r->pipe, GST_STATE_NULL);
  gst_object_unref(r->pipe); r->pipe = NULL;
- obs_source_output_video(r->source, NULL);
+ if (!async_preview) {
+  /* The final old-pipeline callback may have created the worker during NULL
+   * teardown. Its reserved frame must still precede this clear. */
+  g_mutex_lock(&r->lock);
+  async_preview = r->preview_thread != NULL;
+  if (async_preview) { r->preview_clear = true; g_cond_broadcast(&r->wake); }
+  g_mutex_unlock(&r->lock);
+  if (!async_preview) obs_source_output_video(r->source, NULL);
+ }
 }
 struct probe_waiter { struct receiver *receiver; uint64_t generation; };
 static gboolean probe_cancelled(void *opaque)
@@ -384,7 +705,9 @@ static gpointer worker(gpointer opaque)
    GstMessage *msg = gst_bus_timed_pop_filtered(bus, 100 * GST_MSECOND, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
    gst_object_unref(bus);
    g_mutex_lock(&r->lock);
-   bool stale = os_gettime_ns() - r->last_video > 15ULL * 1000000000;
+   uint64_t last = r->native422_frames ? r->last_native_video : r->last_video;
+   native422_failure_locked(r,msg);
+   bool stale = os_gettime_ns() - last > 15ULL * 1000000000;
    if ((msg || stale) && !r->changed) {
     r->accept_samples = false;
     r->state = msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS ? "ended" : "error";
@@ -400,7 +723,7 @@ static gpointer worker(gpointer opaque)
  }
  stop_pipeline(r); return NULL;
 }
-static void defaults(obs_data_t *settings) { obs_data_set_default_int(settings, "latency", 50); }
+static void defaults(obs_data_t *settings) { obs_data_set_default_int(settings, "latency", 100); }
 static void sanitize(void *opaque, obs_data_t *settings)
 {
  (void)opaque;
@@ -410,22 +733,29 @@ static void *create(obs_data_t *settings, obs_source_t *source)
 {
  sanitize(NULL, settings);
  struct receiver *r = g_new0(struct receiver, 1);
- r->source = source; r->state = "idle"; r->jitter_latency = -1; r->latency = r->active_latency = 50;
+ r->source = source; r->state = "idle"; r->jitter_latency = -1; r->latency = r->active_latency = 100;
+ r->preview_enabled = true;
  g_mutex_init(&r->lock); g_rec_mutex_init(&r->delivery); g_cond_init(&r->wake);
+ source_controls_init(r);
  proc_handler_t *ph = obs_source_get_proc_handler(source);
+ proc_handler_add(ph, "void native422_feed(ptr request, out int version)", feed_proc, r);
+ proc_handler_add(ph, "void set_native_preview(bool enabled)", native_preview_proc, r);
  proc_handler_add(ph, "void connect(string endpoint, int latency)", connect_proc, r);
  proc_handler_add(ph, "void disconnect()", disconnect_proc, r);
- proc_handler_add(ph, "void get_status(out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency)", status_proc, r);
+ proc_handler_add(ph, "void get_status(out bool ready, out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency, out int native422_frames, out int native_audio_frames, out string native422_diagnostic)", status_proc, r);
  r->thread = g_thread_new("pixelview-whep", worker, r);
  return r;
 }
 static void destroy(void *opaque)
 {
  struct receiver *r = opaque;
+ source_controls_disconnect(r);
  g_rec_mutex_lock(&r->delivery);
- g_mutex_lock(&r->lock); r->quit = true; r->generation++; r->accept_samples = false; g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
+ g_mutex_lock(&r->lock); r->quit = true; r->generation++;
+ r->native422_failure=(struct pv422_diagnostic){0}; r->accept_samples = false; g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
  g_rec_mutex_unlock(&r->delivery);
  g_thread_join(r->thread); wipe(&r->endpoint);
+ if (r->preview_thread) g_thread_join(r->preview_thread);
  g_cond_clear(&r->wake); g_rec_mutex_clear(&r->delivery); g_mutex_clear(&r->lock); g_free(r);
 }
 static const char *source_name(void *unused) { (void)unused; return "Pixelview WHEP Receiver"; }

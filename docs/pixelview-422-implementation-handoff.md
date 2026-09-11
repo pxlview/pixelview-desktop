@@ -1,6 +1,90 @@
 # Native limited-range HEVC Main42210 reception → DeckLink
 
+## Enabled in normal builds for the user-authorized hardware test
+
+Main422 receive advertisement is enabled directly in normal code, without a
+special app, compile option or environment token. SDP adds profile4, level120,
+interop-constraints=1d0800000000; ordinary probed profiles/levels are unchanged.
+Native playout remains exactly 1080p25 limited-range Rec.709 with strict RTP,
+header/PTL, range and owner checks. This enables testing, not physical-output
+certification; the historical701ms failure remains unresolved.
+
+Full incremental Xcode26.6 build and deep/strict signature passed for
+`build_macos_native422/frontend/RelWithDebInfo/Pixelview Desktop.app`.
+Normal production-hook SDP and strict25p filter tests passed. Build completed
+before the parent relaunched the ordinary instances; no second artifact was made.
+Logs: `/tmp/pixelview-normal-25p-build.log`, `/tmp/pixelview-normal-25p-tests.log`.
+
+The checkpoints below are historical; their Main422-off policy is superseded
+by the explicit user enablement above, not by new certification evidence.
+
+## Latest diagnostic retention and declared campaign
+
+Safe typed first-failure production retention/reporting and boundary regressions
+are implemented. One predeclared four-rate baseline plus one bounded reference-load
+matrix passed944 native exact pairs/720 owner comparisons; historical701ms cause
+and stable admission remain **unresolved**, Main422 **off**. Pre-jitter versus
+ordered-marker timing identifies local native blocking in these passing cases,
+not a fix for the original failure. See [exact results and limits](pixelview-422-diagnostic-results.md)
+and [the prior declaration](pixelview-422-diagnostic-campaign.md). New independent
+review remains required. Header coverage is77 total:71 negative,6 positive;
+active-stale fixtures seed state rather than actually decoding a preceding frame.
+
+
+## Latest predicate diagnostics / bounded RCA (2026-09-10)
+
+**The original701ms first-frame failure remains unresolved; no root fix or admission change.**
+[Final-tree RCA](pixelview-422-final-tree-rca.md) records precise production
+RTP/AU refusal reasons and native session/decode/callback/pack/delivery timing.
+The old failure occurred after activation, excluding the initial3s activation
+deadline, but lacks the data to select its remaining predicate. An induced
+650ms downstream block now proves `ordered-rtp-gap` with695726000ns observed gap
+and654553000ns delivery cost; this is not the historical cold-start RCA.
+
+One new strict four-rate fresh-registry O2 diagnostic matrix passed470 native
+pairs/360 owner comparisons without reproducing the failure. **That does not
+repair or supersede the preserved red evidence or certify stable acceptance.**
+Final focused/native/77-header/whole-owner sanitizers and full build/deep strict
+signature passed. Exact new logs/hashes: `finite-rate/rca-summary.json`.
+No deadline/PTS/rate/owner policy changed; Main422 remains off. Parent independent
+correction review, original startup RCA and sustained/network acceptance remain.
+
+
+## Latest independent-review correction checkpoint (2026-09-10)
+
+**Final-tree strict HD matrix remains RED; do not use the earlier short pass below as current acceptance.** Actual-TU deadline and real-header PTL/caps regressions now pass; scanner-executable/PID isolation and exclusive evidence creation prevent inherited reference loading/clobber without filtering duplicate records. Focused sanitizers and full build/deep signature pass. The final fresh-registry run failed on24000/1001 after one native frame701ms late and finite-rate refusal; it was not retried to green. Its exact predicate/root cause, old24 empty startup, and old2997 decoder-construction failure remain unresolved (future construction failures now capture factory/topology/caps while retaining the assertion).
+
+Read [independent-review corrections](pixelview-422-independent-review-corrections.md), the newest implementation-status section, and `finite-rate/review-summary.json` before continuing. Existing multi-GB references were reused read-only with fresh independent byte verification; original evidence is intact. Parent independent review and stable HD software acceptance remain required; Main422 is still unadvertised. No user app/card/sender/engine/config/auth change or commit/push.
+
+## Current resumed checkpoint (2026-09-10)
+
+The strict **short** actual Apple-VT HD four-rate WHEP/Opus→native→whole-owner/fake-SDK matrix now passes without trace/fault flags:467 native full-byte independent-reference comparisons,934 observed locks,360 scheduled-v210 comparisons,44 distinct images in each45-slot generation. A bounded nonshipping observer replaced streaming RAW file I/O and a slow mmap reference with deferred evidence plus owned losslessly compressed references; hashes are only lookup keys, never substitutes for full memcmp. Production source hashes are unchanged.
+
+Read the newest status section and `plugins/pixelview-whep/.test-build/finite-rate/matrix-rca/resume-final-summary.json`. All prior failures/RAW bytes remain. Actual unsupported, caps-conflict, wire-rate-change and induced650ms downstream-stall negatives pass. The latter demonstrates24fps refusal through the existing500ms gap policy, but the old24 failure lacks complete contemporaneous evidence. A separate preserved early encoded-preview decoder-construction assertion is still unexplained. **Shipping remains closed** pending independent review, sustained/stress/network recovery and capability/PTL acceptance. No user app/card/sender/engine/config/auth change or commit/push.
+
+## Earlier approved finite-rate checkpoint (historical short-matrix failure)
+
+The approved specification below **supersedes the old arbitrary-rate blocker and no-whitelist warning**. Production RTP-based finite-rate admission is implemented for the explicit four-rate contract, with short actual Apple-VT HD WHEP/Opus→native→real-owner/fake-SDK reference success at every approved rate. **Shipping remains closed:** individual passes do not make a passing sustained matrix; an intermittent native stall/repeat/owner refusal still fails the strict multi-rate run. Do not attribute that new software acceptance failure to the superseded arbitrary-rational requirement.
+
+Read the leading section of `pixelview-422-implementation-status.md` and `pixelview-422-finite-rate-policy.md` for exact code, positive/negative evidence, preserved failures, final full build/signature and remaining gates. No sender/engine/header rewrite, private API, physical device or user configuration change. Main422 remains unadvertised pending stable software acceptance, complete capability/PTL coverage and independent review.
+
+## Historical arbitrary-rate checkpoint (2026-09-09; scope superseded)
+
+Read the newest section of `pixelview-422-implementation-status.md` before implementation. Fresh actual OBS/Apple VT HD Main422 captures at30/1,30000/1001 and29999/1000 all declare profile4/main-tier/level120 and limited709 ten-bit422, but no VPS/VUI timing. Actual linked WHIP conversion rounds30 and29999/1000 alike to3000 RTP ticks per frame; thus timestamps cannot establish an unambiguous exact rational from an unspecified source-rate set. Six executable counterexample checks include the exact30fps ceiling and2997 alias. Actual native-payload loopback WHEP/Opus reaches the production parser with PTS but no framerate/duration, then zero native video and the existing owner refuses Start. This is **negative HD end-to-end evidence, not working compatibility**.
+
+No production admission, sender, transport or capability change was made. The trustworthy rational is attached`video_output_info.fps_num/fps_den` → VT`CMTime` before sender quantization. The first standard metadata seam to evaluate, with explicit sender-scope approval, is`mac-videotoolbox/encoder.c:handle_keyframe`, where native VPS/SPS/PPS become keyframe/extra_data bytes. No verified public VT HEVC timing-insertion property was found; changing integer`ExpectedFrameRate` alone does not establish emitted exact timing. Do not infer a finite source-rate whitelist, inject guessed caps or silently add a protocol/bitstream rewrite. Positive VT HD native/owner fidelity, sustained run, malformed/conflicting cadence policy, complete PTL/level/cadence gate and independent review remain pending; Main422 stays unadvertised.
+
+Evidence and reproduction: `plugins/pixelview-whep/.test-build/obs-vt-cadence/`, `tests/run-obs-vt-cadence.py`, `tests/test-obs-vt-cadence.py`, and `plugins/decklink/tests/run-whep-cadence-audit.py`. Full commands, exact counts, provenance, supported-API reasoning and limits are in the status. Earlier implementation and user configuration are preserved.
+
+## Approved initial format specification
+
+The user approved **1920×1080 progressive only** at exactly **24000/1001 (23.976), 24/1, 25/1, and 30000/1001 (29.97)** for the initial native422 implementation. This is an explicit finite supported-rate contract, not arbitrary rational-rate recovery. Exclude 30p, 50p/59.94p, interlaced and PsF from this initial scope; the earlier 1080i50 discussion did not expand this approved specification.
+
+Continue implementation and testing against this set without changing stock OBS or rewriting HEVC headers. Validate observed media timing against the finite contract and exact selected DeckLink mode; document admission tolerances, observation period, ambiguity, missing/conflicting metadata, loss and discontinuity behavior. Do not claim RTP quantization can distinguish every unsupported near-rate alias. Keep exact rational arithmetic internally. Enable shipping advertisement only after appropriate production capability and software acceptance, with physical acceptance limitations explicit.
+
 ## Product contract — read first
+
+**Implementation preference:** stay as close as possible to supported native OBS, GStreamer, VideoToolbox and DeckLink APIs and existing ownership/lifecycle. Prefer minimal, justified adapters over custom replacements or fragile hooks. Do not guess cadence, silently relabel formats, or ship test-only overrides. Where a native boundary cannot meet the requirement, document the limitation and rationale before adding a workaround.
 
 Implement faithful ten-bit 4:2:2 DeckLink output from WHEP HEVC Main42210. Mac preview/fullscreen need NOT be ten-bit. Receive is limited-range only, initially BT709 SDR. Validate stream metadata; reject unsupported full range, HDR or unresolved color metadata explicitly, never relabel values as limited. Preserve existing Main/Main10/H264/VP9/Opus reception and credentials/lifecycle behavior.
 

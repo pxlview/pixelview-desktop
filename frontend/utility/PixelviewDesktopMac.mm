@@ -18,15 +18,21 @@
  dispatch_async(dispatch_get_main_queue(), ^{ if(self->owner) self->owner->disconnected((int)code); });
 }
 -(void)receive {
+ if(!owner) return;
  [self.task receiveMessageWithCompletionHandler:^(NSURLSessionWebSocketMessage *message,NSError *error){
-  if(error) { [self failed:self.task.closeCode]; return; }
-  if(message.type!=NSURLSessionWebSocketMessageTypeString) { [self failed:4400]; return; }
-  QByteArray body=QString::fromNSString(message.string).toUtf8();
-  dispatch_async(dispatch_get_main_queue(), ^{ if(self->owner) self->owner->message(body); });
-  [self receive];
+  dispatch_async(dispatch_get_main_queue(), ^{
+   if(!self->owner) return;
+   if(error) { [self failed:self.task.closeCode]; return; }
+   if(message.type!=NSURLSessionWebSocketMessageTypeString) { [self failed:4400]; return; }
+   QByteArray body=QString::fromNSString(message.string).toUtf8();
+   auto callback=self->owner->message; callback(body);
+   // The callback may detach this attempt and open a new connection.
+   if(self->owner) [self receive];
+  });
  }];
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didOpenWithProtocol:(NSString *)protocol {
+ if(!owner) return; // A cancelled attempt must not send a delayed authentication.
  [task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:self.auth] completionHandler:^(NSError *error){ if(error) [self failed:0]; }];
  self.auth=nil;
  [self receive];
@@ -41,7 +47,8 @@ void DesktopConnection::openSocket(QUrl url,QString token) {
  PVDesktopSocket *s=[PVDesktopSocket new]; s->owner=this;
  NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
  config.timeoutIntervalForRequest=10; config.HTTPCookieStorage=nil; config.URLCredentialStorage=nil; config.URLCache=nil;
- s.session=[NSURLSession sessionWithConfiguration:config delegate:s delegateQueue:nil];
+ // Owner, delegate lifecycle and receive-loop decisions share Qt/Cocoa main.
+ s.session=[NSURLSession sessionWithConfiguration:config delegate:s delegateQueue:NSOperationQueue.mainQueue];
  s.task=[s.session webSocketTaskWithURL:[NSURL URLWithString:url.toString().toNSString()]];
  s.task.maximumMessageSize=16384;
  s.auth=QString::fromUtf8(QJsonDocument(QJsonObject{{"type","auth"},{"device_token",token}}).toJson(QJsonDocument::Compact)).toNSString();
@@ -57,6 +64,7 @@ void DesktopConnection::closeSocket() {
  if(!socket) return;
  PVDesktopSocket *s=CFBridgingRelease(socket); socket=nullptr;
  s->owner=nullptr;
+ s.auth=nil;
  [s.task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
  [s.session invalidateAndCancel];
 }
@@ -80,14 +88,14 @@ bool saveDevice(const QString &origin,const QString &token) {
   q[(__bridge id)kSecAttrAccessible]=(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
   result=SecItemAdd((__bridge CFDictionaryRef)q,nullptr);
  }
- return result==errSecSuccess && loadDevice(origin)==token;
+ return keychainStatus("sender-save",result)==errSecSuccess && loadDevice(origin)==token;
 }
 QString loadDevice(const QString &origin) {
  NoninteractiveKeychain interaction;
  if(!interaction.ready) return {};
  auto q=query(origin); q[(__bridge id)kSecReturnData]=@YES;
  CFTypeRef value=nullptr;
- if(SecItemCopyMatching((__bridge CFDictionaryRef)q,&value)!=errSecSuccess) return {};
+ if(keychainStatus("sender-read",SecItemCopyMatching((__bridge CFDictionaryRef)q,&value))!=errSecSuccess) return {};
  NSData *data=CFBridgingRelease(value);
  return QString::fromUtf8(static_cast<const char *>(data.bytes),data.length);
 }
@@ -95,6 +103,12 @@ bool removeDevice(const QString &origin) {
  NoninteractiveKeychain interaction;
  if(!interaction.ready) return false;
  auto status=SecItemDelete((__bridge CFDictionaryRef)query(origin));
- return (status==errSecSuccess || status==errSecItemNotFound) && loadDevice(origin).isEmpty();
+ keychainStatus("sender-remove",status);
+ if(status!=errSecSuccess && status!=errSecItemNotFound) return false;
+ auto q=query(origin); q[(__bridge id)kSecReturnData]=@YES;
+ CFTypeRef value=nullptr;
+ status=SecItemCopyMatching((__bridge CFDictionaryRef)q,&value);
+ if(value) CFRelease(value);
+ return keychainStatus("sender-remove-verification",status)==errSecItemNotFound;
 }
 }

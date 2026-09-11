@@ -1,6 +1,7 @@
 #include "DecklinkOutput.hpp"
 
 #include <util/threading.h>
+#include "decklink-output-receive.inc"
 
 DeckLinkOutput::DeckLinkOutput(obs_output_t *output, DeckLinkDeviceDiscovery *discovery_)
 	: DecklinkBase(discovery_),
@@ -13,6 +14,7 @@ DeckLinkOutput::~DeckLinkOutput(void)
 {
 	discovery->RemoveCallback(DeckLinkOutput::DevicesChanged, this);
 	Deactivate();
+	obs_source_release(receiveSource);
 }
 
 void DeckLinkOutput::DevicesChanged(void *param, DeckLinkDevice *device, bool)
@@ -60,7 +62,7 @@ bool DeckLinkOutput::Activate(DeckLinkDevice *device, long long modeId)
 		return false;
 	}
 
-	if (!instance->StartOutput(mode)) {
+	if (!(nativeReceive ? instance->StartNativeOutput(mode, receiveSource) : instance->StartOutput(mode))) {
 		instance = nullptr;
 		return false;
 	}
@@ -76,9 +78,11 @@ void DeckLinkOutput::Deactivate(void)
 		instance->StopOutput();
 	}
 
+	if (instance) {
+		os_atomic_dec_long(&activateRefs);
+	}
 	instance = nullptr;
-
-	os_atomic_dec_long(&activateRefs);
+	DetachReceive();
 }
 
 obs_output_t *DeckLinkOutput::GetOutput(void) const
@@ -88,12 +92,20 @@ obs_output_t *DeckLinkOutput::GetOutput(void) const
 
 void DeckLinkOutput::UpdateVideoFrame(video_data *frame)
 {
+	std::lock_guard<std::recursive_mutex> lock(deviceMutex);
+	if (!instance || nativeReceive) {
+		return;
+	}
 	instance->UpdateVideoFrame(frame);
+	PumpReceiveAudio();
 }
 
 void DeckLinkOutput::WriteAudio(audio_data *frames)
 {
-	instance->WriteAudio(frames);
+	std::lock_guard<std::recursive_mutex> lock(deviceMutex);
+	if (instance && !receiveSource) {
+		instance->WriteAudio(frames);
+	}
 }
 
 void DeckLinkOutput::SetSize(int width, int height)

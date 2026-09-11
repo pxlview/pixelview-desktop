@@ -41,6 +41,7 @@ int main() {
         refresh = body(text, 'RefreshPixelviewDevices')
         discovery = refresh[refresh.index('std::vector<pixelview::Device> devices;'):refresh.index('OBSSourceAutoRelease source')]
         startup = body(text, 'InitPixelview').split('pixelviewRefreshTimer->start(2000);', 1)[1]
+        seed = refresh[refresh.index('\tif (source)\n\t\tpixelviewCaptureAutoSelectPending'):]
         compiled(r'''#include <cassert>
 #include <string>
 #include <vector>
@@ -63,10 +64,12 @@ void obs_sceneitem_select(int*,bool){}
 void obs_sceneitem_set_locked(int*,bool){}
 struct Combo {int count(){return int(discover().size())+1;}} combo;
 auto *pixelviewDevices=&combo;
-void RefreshPixelviewDevices(){}
+bool pixelviewCaptureAutoSelectPending=false,pixelviewReceiving=false,properties=false;
+bool PixelviewSettingsBusy(){return false;}
 void SelectPixelviewDevice(int index,bool initializing=false) {
  assert(initializing); selected=discover().at(index-1).id;
 }
+void RefreshPixelviewDevices(){auto devices=discover();auto source=obs_get_source_by_name("");SEED}
 void startup() {STARTUP}
 int main(){
  entries={{"","empty",false},{"gone","Disconnected",true},{"actual-first","First",false},{"actual-second","Second",false}};
@@ -75,7 +78,7 @@ int main(){
  saved=true;selected="saved-disconnected";startup();assert(selected=="saved-disconnected");
  saved=false;selected.clear();entries.clear();startup();assert(selected.empty());
  entries={{"gone","Disconnected",true}};startup();assert(selected.empty());
-}'''.replace('DISCOVERY', discovery).replace('STARTUP', startup))
+}'''.replace('DISCOVERY', discovery).replace('STARTUP', startup).replace('SEED', seed))
 
     def test_saved_encoder_is_not_replaced_even_when_temporarily_unavailable(self):
         text = (ROOT/'frontend/widgets/OBSBasic_PixelviewEncoding.inc').read_text()

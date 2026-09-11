@@ -4,10 +4,10 @@ ROOT=pathlib.Path(__file__).resolve().parents[2]
 class Noninteractive(unittest.TestCase):
  def test_failed_read_preserves_pairing_identity(self):
   source=(ROOT/'frontend/widgets/OBSBasic_PixelviewDesktop.inc').read_text()
-  body=source.split('if(token.isEmpty()) {',1)[1].split('return;',1)[0]
+  body=source.split('void OBSBasic::ConnectPixelviewDesktop()',1)[1].split('if(token.isEmpty()) {',1)[1].split('return;',1)[0]
   self.assertNotIn('pixelviewIdentity.clear()',body)
   self.assertNotIn('SavePixelviewIdentity()',body)
-  self.assertIn('Keychain',body)
+  self.assertIn('saved pairing has not been removed',body)
 
  def test_pairing_operations_disable_ui_and_restore_policy(self):
   source=(ROOT/'frontend/utility/PixelviewDesktopMac.mm').read_text()
@@ -24,6 +24,7 @@ static bool policyFailure=false;
 static int calls=0;
 OSStatus fakeGet(Boolean *v) { *v=allowed; return policyFailure ? errSecAuthFailed : errSecSuccess; }
 OSStatus fakeSet(Boolean v) { allowed=v; return errSecSuccess; }
+OSStatus fakeDefault(SecKeychainRef *v) { *v=(SecKeychainRef)CFRetain(CFSTR("offline")); return 0; }
 OSStatus denied() { ++calls; assert(!allowed && "Keychain operation would show ACL prompt / hang"); return errSecInteractionNotAllowed; }
 OSStatus fakeCopy(CFDictionaryRef,CFTypeRef*) { return denied(); }
 OSStatus fakeUpdate(CFDictionaryRef,CFDictionaryRef) { return denied(); }
@@ -31,6 +32,7 @@ OSStatus fakeAdd(CFDictionaryRef,CFTypeRef*) { return denied(); }
 OSStatus fakeDelete(CFDictionaryRef) { return denied(); }
 #define SecKeychainGetUserInteractionAllowed fakeGet
 #define SecKeychainSetUserInteractionAllowed fakeSet
+#define SecKeychainCopyDefault fakeDefault
 #define SecItemCopyMatching fakeCopy
 #define SecItemUpdate fakeUpdate
 #define SecItemAdd fakeAdd

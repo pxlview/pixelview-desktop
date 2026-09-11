@@ -16,7 +16,8 @@ cmd=['clang','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-mmacosx-versi
 if '--asan' in sys.argv: cmd+=['-g','-fsanitize=address','-fno-omit-frame-pointer']
 cmd+=['-I'+str(p) for p in [REPO/'libobs',REPO/'build_macos/config',DEPS/'include',SDK/'include/gstreamer-1.0',SDK/'include/glib-2.0',SDK/'lib/glib-2.0/include']]
 cmd+=['-F'+str(FW),'-framework','libobs','-Wl,-rpath,'+str(FW),'-Wl,-rpath,'+str(DEPS/'lib'),'-L'+str(RUNTIME/'lib'),'-Wl,-rpath,'+str(RUNTIME/'lib')]
-cmd+=[str(ROOT/p) for p in ['tests/production-offer.c','video-format.c','profile-offer.c','capability-probe.c']]
+import native422_build
+cmd+=[str(ROOT/p) for p in ['tests/production-offer.c','video-format.c','profile-offer.c','capability-probe.c']] + native422_build.flags(ROOT)
 cmd+=['-l'+x for x in ['gstwebrtc-1.0.0','gstsdp-1.0.0','gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0']]
 exe=WORK/'production-offer'
 subprocess.run(cmd+['-o',str(exe)],check=True)

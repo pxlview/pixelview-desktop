@@ -19,6 +19,9 @@ class ReceiveUI(unittest.TestCase):
     def test_offline_native_receive_lifecycle(self):
         self._run_native_receive_ui(offline=True)
 
+    def test_native422_preview_telemetry(self):
+        self._run_native_receive_ui(offline=True, layout_only=True)
+
     def test_unavailable_credential_preserved_until_explicit_replacement(self):
         self._run_native_receive_ui(offline=True, credential_error=True)
 
@@ -40,7 +43,7 @@ class ReceiveUI(unittest.TestCase):
             subprocess.run(['clang++','-std=c++17','-fPIC','-I'+str(ROOT),'-I'+str(ROOT/'frontend'),'-I'+str(ROOT/'libobs'),'-I'+str(ROOT/'build_macos/config'),'-I'+str(ROOT/'build_macos/libobs'),'-I'+str(deps.parent/'include'),'-I'+str(qt/'QtWidgets.framework/Headers'),'-I'+str(qt/'QtCore.framework/Headers'),'-I'+str(qt/'QtGui.framework/Headers'),'-F'+str(qt),'-F'+str(frameworks),'-framework','QtWidgets','-framework','QtGui','-framework','QtCore','-framework','libobs','-Wl,-rpath,'+str(qt),'-Wl,-rpath,'+str(frameworks),'-Wl,-rpath,'+str(deps),str(src),str(ROOT/'frontend/utility/PixelviewReceiver.cpp'),str(ROOT/'frontend/utility/PixelviewReceiveCredentialStoreMac.mm'),'-fobjc-arc','-framework','Security','-framework','Foundation','-framework','LocalAuthentication','-o',str(exe)],check=True)
             service = 'com.pixelview.test.receiver.' + str(uuid.uuid4())
             if offline:
-                run = subprocess.run([str(exe),td+'/offline.ini',service] + (['credential-error'] if credential_error else []),env={**os.environ,'QT_QPA_PLATFORM':'offscreen','PIXELVIEW_RECEIVE_OFFLINE':'1'},timeout=30,capture_output=True,text=True)
+                run = subprocess.run([str(exe),td+'/offline.ini',service] + (['credential-error'] if credential_error else ['layout'] if layout_only else []),env={**os.environ,'QT_QPA_PLATFORM':'offscreen','PIXELVIEW_RECEIVE_OFFLINE':'1'},timeout=30,capture_output=True,text=True)
                 self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
                 return
             try:
@@ -81,7 +84,7 @@ class ReceiveUI(unittest.TestCase):
         init = body(text, 'InitPixelviewReceive')
         self.assertIn('QLineEdit::Password', init)
         self.assertIn('QSysInfo::machineHostName()', init)
-        self.assertIn('calldata_set_int(&data, "latency", 50)', init)
+        self.assertIn('calldata_set_int(&data, "latency", 100)', init)
         self.assertNotIn('->start(', init)
         start = body(text, 'StartPixelviewReceive')
         self.assertLess(start.index('PixelviewModeBusy()'), start.index('->start('))

@@ -5,6 +5,7 @@
 #include <future>
 #include <vector>
 #include <iostream>
+#include <map>
 #define emit
 #define QTStr(x) QStringLiteral(x)
 namespace fixture {
@@ -25,18 +26,22 @@ struct Output {bool active=false;int forceStops=0;};
 bool obs_output_active(Output *o) {return o->active;}
 void obs_output_force_stop(Output *o) {++o->forceStops;o->active=false;}
 struct Handler {bool StreamingActive()const{return streamOutput && streamOutput->active;} Output *streamOutput=nullptr;int starts=0;bool StartStreaming(int*){++starts;return true;}};
-struct Connection {std::function<void(QByteArray)> message;std::function<void(int)> disconnected;int closes=0;void closeSocket(){++closes;}};
+struct Connection {std::function<void(QByteArray)> message;std::function<void(int)> disconnected;bool exchanging=false;QString authorizedToken;int closes=0;void closeSocket(){++closes;}};
 struct Label {QString text;void setText(QString s){text=s;}};
 struct Status {QString text;void showMessage(QString s){text=s;}void clearMessage(){text.clear();}void StreamDelayStarting(int){}};
 struct UI {Status *statusbar=nullptr;};
 struct QPushButton : Label {void *menu=nullptr;bool enabled=false;void setEnabled(bool b){enabled=b;}void setMenu(void *p){menu=p;}};
 struct Clock {qint64 now=0;qint64 elapsed()const{return now;}};
 struct Tray : Label {bool enabled=false;void setEnabled(bool value){enabled=value;}};
-struct Application {void *GetUserConfig(){return nullptr;}};
+// Stateful offline config boundary matching libobs/util/config-file.h. Reads
+// must observe revocation writes, rather than silently returning false forever.
+struct config_t {std::map<std::pair<std::string,std::string>,bool> booleans;};
+struct Application {config_t config;config_t *GetUserConfig(){return &config;}};
 Application application;
 Application *App(){return &application;}
-bool config_get_bool(void*,const char*,const char*) {return false;}
-int config_get_int(void*,const char*,const char*) {return 2;}
+bool config_get_bool(config_t *config,const char *section,const char *name) {return config && config->booleans[{section,name}];}
+void config_set_bool(config_t *config,const char *section,const char *name,bool value) {assert(config);config->booleans[{section,name}]=value;}
+int config_get_int(config_t*,const char*,const char*) {return 2;}
 constexpr int LOG_INFO=0;
 #define SHUTDOWN_SEPARATOR "shutdown"
 void blog(int,const char*){}
@@ -52,7 +57,7 @@ public:
  bool pixelviewNativeAttempt=false,pixelviewClosingSocket=false,pixelviewStreamingBusy=false;
  bool pixelviewUnpairPending=false,isClosing_=false,pixelviewShutdownPending=false;
  QUrl pixelviewOrigin{"https://fixture.invalid"};bool pixelviewDev=false;
- void *activeConfiguration=nullptr;
+ config_t *activeConfiguration=nullptr;
  int authentications=0,teardowns=0,nativePreparations=0;
  void StartStreaming();
  void closeWindow();void ConnectPixelviewDesktop();bool RequestPixelviewStart();
@@ -242,12 +247,22 @@ int main() {
  Timer::run();assert(!ui.button.text.contains("Reconnecting"));
  std::cout<<"native status/Stop cancellation between attempts: PASS\n";
  OBSBasic revoke;revoke.bind();revoke.pixelviewLease.intent=true;
+ revoke.pixelviewIdentity.accept({{"node_id","retained-node"},{"desktop_id","retained-desktop"}});
+ revoke.connection.authorizedToken="synthetic-revoked-token";
  revoke.connection.disconnected(0);assert(revoke.pixelviewLease.intent && revoke.pixelviewClosingSocket);
+ assert(revoke.connection.authorizedToken=="synthetic-revoked-token");
  // NSURLSession may report generic failure before the authoritative close code.
  revoke.connection.disconnected(4401);
- assert(!revoke.pixelviewLease.intent && revoke.pixelviewUnpairPending);
+ assert(!revoke.pixelviewLease.intent && !revoke.pixelviewUnpairPending);
+ assert(!revoke.pixelviewPairingDurable && revoke.pixelviewUnpairRetry);
+ assert(config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
+ assert(revoke.pixelviewIdentity.nodeId=="retained-node" && revoke.pixelviewIdentity.desktopId=="retained-desktop");
+ assert(revoke.connection.authorizedToken.isEmpty());
  assert(!revoke.pixelviewLease.takeRetry(99999,true));
- Timer::run();assert(revoke.unpairs==1);
+ Timer::run();assert(revoke.unpairs==0 && revoke.connection.closes==1);
+ revoke.ConnectPixelviewDesktop();assert(revoke.authentications==0 && revoke.pixelviewReconnectAt==0);
+ // The following scenarios represent independent installations.
+ application.config.booleans.clear();
  std::cout<<"revocation after generic disconnect cancels queued retry: PASS\n";
  OBSBasic callback;callback.bind();callback.pixelviewLease.ready=true;callback.pixelviewLease.deadline=30000;
  assert(callback.pixelviewLease.requestStart(0));callback.pixelviewLease.pending=false;callback.pixelviewLease.leased=true;

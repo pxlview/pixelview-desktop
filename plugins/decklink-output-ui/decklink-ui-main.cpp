@@ -2,6 +2,7 @@
 #include <obs-frontend-api.h>
 #include <QMainWindow>
 #include <QAction>
+#include <QTimer>
 #include <util/util.hpp>
 #include <util/platform.h>
 #include <media-io/video-io.h>
@@ -52,15 +53,24 @@ OBSData load_settings()
 	return nullptr;
 }
 
+void output_start();
+void output_stop();
+#include "decklink-receive-ui.inc"
+
 static void decklink_ui_tick(void *param, float sec);
 static void decklink_ui_render(void *param);
 
 void output_stop()
 {
+	receive_auto_pending = false;
+	if (!context.output) {
+		return;
+	}
 	obs_remove_main_rendered_callback(decklink_ui_render, &context);
 
 	obs_output_stop(context.output);
 	obs_output_release(context.output);
+	context.output = nullptr;
 
 	obs_enter_graphics();
 	for (gs_stagesurf_t *&surf : context.stagesurfaces) {
@@ -72,6 +82,7 @@ void output_stop()
 	obs_leave_graphics();
 
 	video_output_close(context.video_queue);
+	context.video_queue = nullptr;
 	obs_remove_tick_callback(decklink_ui_tick, &context);
 
 	main_output_running = false;
@@ -83,10 +94,48 @@ void output_stop()
 
 void output_start()
 {
+	if (context.output || shutting_down) {
+		return;
+	}
+	OBSSourceAutoRelease selected = receive_mode ? obs_weak_source_get_source(receive_source) : nullptr;
+	if (receive_mode && !selected) {
+		return;
+	}
 	OBSData settings = load_settings();
 
 	if (settings != nullptr) {
 		obs_output_t *const output = obs_output_create("decklink_output", "decklink_output", settings, NULL);
+		if (!output) {
+			return;
+		}
+		if (receive_mode) {
+			calldata_t cd;
+			calldata_init(&cd);
+			bool ready = proc_handler_call(obs_source_get_proc_handler(selected), "get_status", &cd) &&
+				     calldata_bool(&cd, "ready");
+			const bool native = calldata_int(&cd, "native422_frames") > 0;
+			calldata_set_ptr(&cd, "source", selected);
+			calldata_set_bool(&cd, "native", native);
+			bool bound = ready &&
+				     proc_handler_call(obs_output_get_proc_handler(output), "bind_receive", &cd) &&
+				     calldata_bool(&cd, "bound");
+			calldata_free(&cd);
+			if (!bound) {
+				obs_output_release(output);
+				return;
+			}
+			if (native) {
+				context.output = output;
+				main_output_running = obs_output_start(output);
+				if (!shutting_down) {
+					doUI->OutputStateChanged(main_output_running);
+				}
+				if (!main_output_running) {
+					output_stop();
+				}
+				return;
+			}
+		}
 		const struct video_scale_info *const conversion = obs_output_get_video_conversion(output);
 		if (conversion != nullptr) {
 			context.output = output;
@@ -125,7 +174,8 @@ void output_start()
 
 			obs_add_main_rendered_callback(decklink_ui_render, &context);
 
-			obs_output_set_media(context.output, context.video_queue, obs_get_audio());
+			obs_output_set_media(context.output, context.video_queue,
+					     receive_mode ? nullptr : obs_get_audio());
 			bool started = obs_output_start(context.output);
 
 			main_output_running = started;
@@ -283,6 +333,13 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
 	shutting_down = true;
+	if (receive_watchdog) {
+		receive_watchdog->stop();
+		delete receive_watchdog;
+		receive_watchdog = nullptr;
+	}
+	obs_weak_source_release(receive_source);
+	receive_source = nullptr;
 
 	if (main_output_running) {
 		output_stop();
@@ -296,6 +353,16 @@ void obs_module_post_load(void)
 	}
 
 	addOutputUI();
+	proc_handler_add(obs_get_proc_handler(),
+			 "void pixelview_decklink_receive(ptr source, bool receiving, out bool bound)",
+			 bind_receive_source, nullptr);
+	proc_handler_add(
+		obs_get_proc_handler(), "void pixelview_decklink_receive_state(out bool receiving)",
+		[](void *, calldata_t *cd) { calldata_set_bool(cd, "receiving", receive_mode); }, nullptr);
+	receive_watchdog = new QTimer;
+	receive_watchdog->setInterval(100);
+	QObject::connect(receive_watchdog, &QTimer::timeout, receive_output_watchdog);
+	receive_watchdog->start();
 
 	obs_frontend_add_event_callback(OBSEvent, nullptr);
 }

@@ -1,16 +1,16 @@
 # Pixelview local macOS build
 
-Run from any directory:
+After all source workers are settled and the canonical app is stopped, run from any directory with normal HOME and unset CFFIXED_USER_HOME:
 
 ```sh
-bash /Users/max/src/pixelview-desktop/cmake/macos/pixelview-build.sh
+bash /Users/max/src/pixelview-desktop/cmake/macos/pixelview-build.sh --allow-dirty --source-settled
 ```
 
 Artifact: `build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app` (executable: `Contents/MacOS/Pixelview Desktop`). Quote paths containing spaces. Historical verification entries below retain the artifact names used at the time.
-Bundle ID: `com.pixelview.desktop`; executable: `Pixelview` (arm64).
+Bundle ID: `com.pixelview.desktop`; executable: `Pixelview Desktop` (arm64).
 No installation into `/Applications` is performed. `DEVELOPER_DIR` selects Xcode locally, without changing global `xcode-select`.
 
-Opt-in Developer ID signing, verified signed-build results, and the SDK compatibility fix are documented in [Developer ID signing](pixelview-developer-id.md). The signed app passed deep/strict signature verification and was launched locally; notarization is still pending.
+Normal local builds now require the pinned Developer ID identity with no ad-hoc fallback. Use the [canonical build/launch commands](pixelview-signed-development.md), including native authorization and same-app dual settings. Historical results below do not establish that the current uncommitted source has compiled or passed GUI acceptance.
 
 ## Pairing/audio UX build (41)
 

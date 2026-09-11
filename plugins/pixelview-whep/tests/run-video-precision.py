@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private runtime, no auth/capture/staging; real decode -> production callback -> main texture."""
 import os
+import native422_build
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ with tempfile.TemporaryDirectory(prefix='pv-receive-precision-') as tmp:
         GST_PLUGIN_SCANNER=str(stage/'libexec/gst-plugin-scanner'),GST_REGISTRY=str(work/'registry.bin'))
     inc=['-I'+str(p) for p in [ROOT/'libobs',ROOT/'build_macos/config',DEPS/'include',SDK/'include/gstreamer-1.0',SDK/'include/glib-2.0',SDK/'lib/glib-2.0/include']]
     libs=['-F'+str(FW),'-framework','libobs','-Wl,-rpath,'+str(FW),'-Wl,-rpath,'+str(DEPS/'lib'),'-L'+str(stage/'lib'),'-Wl,-rpath,'+str(stage/'lib')]+['-l'+x for x in ['gstapp-1.0.0','gstaudio-1.0.0','gstvideo-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','glib-2.0.0','gobject-2.0.0']]
+    libs += native422_build.libraries()
     def run(cmd,**kw): return subprocess.run(cmd,check=True,env=env,**kw)
     run(['clang','-Wall','-Wextra','-Werror',*inc,str(PLUGIN/'tests/video-format.c'),str(PLUGIN/'video-format.c'),*libs,'-o',str(work/'formats')])
     run([str(work/'formats')])
@@ -26,11 +28,11 @@ with tempfile.TemporaryDirectory(prefix='pv-receive-precision-') as tmp:
     (codec/'MacOS').mkdir(parents=True); (codec/'Resources').mkdir()
     (codec/'Resources/GStreamer').symlink_to(stage)
     codec_exe=codec/'MacOS/codecs'
-    run(['clang',*inc,str(PLUGIN/'tests/codecs.c'),str(PLUGIN/'video-format.c'),str(PLUGIN/'profile-offer.c'),str(PLUGIN/'capability-probe.c'),*libs,'-o',str(codec_exe)])
+    run(['clang',*inc,str(PLUGIN/'tests/codecs.c'),str(PLUGIN/'video-format.c'),str(PLUGIN/'profile-offer.c'),str(PLUGIN/'capability-probe.c'),*native422_build.sources(PLUGIN),*libs,'-o',str(codec_exe)])
     run([str(codec_exe)],timeout=90)
     subprocess.run([str(codec_exe)],check=True,env={**env,"PIXELVIEW_TEST_P010":"1"},timeout=90)
     objects=[]
-    for name in ['tests/callback-precision.c','video-format.c','profile-offer.c','capability-probe.c']:
+    for name in ['tests/callback-precision.c','video-format.c','profile-offer.c','capability-probe.c','native-422.m','native-422-filter.c']:
         obj=work/(Path(name).stem+'.o');objects.append(str(obj))
         run(['clang','-Wall','-Wextra','-Werror',*inc,'-c',str(PLUGIN/name),'-o',str(obj)])
     text=(ROOT/'frontend/widgets/OBSBasic_PixelviewReceive.inc').read_text()

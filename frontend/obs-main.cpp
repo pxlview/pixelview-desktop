@@ -57,6 +57,8 @@ static log_handler_t def_log_handler;
 extern string currentLogFile;
 extern string lastLogFile;
 
+#include <utility/PixelviewConfig.hpp>
+
 bool portable_mode = false;
 bool steam = false;
 bool safe_mode = false;
@@ -563,8 +565,11 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 		}
 
 		if (!multi) {
-			QMessageBox mb(QMessageBox::Question, QTStr("AlreadyRunning.Title"),
-				       QTStr("AlreadyRunning.Text"));
+			QMessageBox mb(QMessageBox::Question, QStringLiteral("Pixelview Desktop"),
+				       QStringLiteral("Pixelview Desktop is already running. Unless you meant to do this, "
+						      "please shut down any existing instances of Pixelview Desktop before "
+						      "trying to run a new instance. If you have Pixelview Desktop set to "
+						      "minimize to the system tray, please check to see if it is still running there."));
 			mb.addButton(QTStr("AlreadyRunning.LaunchAnyway"), QMessageBox::YesRole);
 			QPushButton *cancelButton = mb.addButton(QTStr("Cancel"), QMessageBox::NoRole);
 			mb.setDefaultButton(cancelButton);
@@ -940,6 +945,11 @@ int main(int argc, char *argv[])
 	for (int i = 1; i < argc; i++) {
 		if (arg_is(argv[i], "--multi", "-m")) {
 			multi = true;
+		} else if (arg_is(argv[i], "--app-config-dir", nullptr)) {
+			if (++i >= argc || !pixelview::setConfigRoot(argv[i])) {
+				std::cerr << "--app-config-dir requires an absolute application configuration directory.\n";
+				return 1;
+			}
 
 #if ALLOW_PORTABLE_MODE
 		} else if (arg_is(argv[i], "--portable", "-p")) {
@@ -1009,6 +1019,7 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--help", "-h")) {
 			std::string help =
 				"--help, -h: Get list of available commands.\n\n"
+				"--app-config-dir <absolute-path>: Override app settings only, not HOME or Keychain.\n"
 				"--startstreaming: Automatically start streaming.\n"
 				"--startrecording: Automatically start recording.\n"
 				"--startreplaybuffer: Start replay buffer.\n"

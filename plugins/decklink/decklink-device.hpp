@@ -6,9 +6,12 @@
 #include <string>
 #include <vector>
 #include <stdint.h>
+#include <atomic>
 
 class DeckLinkDevice {
 	ComPtr<IDeckLink> device;
+	std::atomic<void *> mediaOwner{nullptr};
+	std::atomic<bool> removed{false};
 	std::map<long long, DeckLinkDeviceMode *> inputModeIdMap;
 	std::vector<DeckLinkDeviceMode *> inputModes;
 	std::map<long long, DeckLinkDeviceMode *> outputModeIdMap;
@@ -32,6 +35,14 @@ class DeckLinkDevice {
 
 public:
 	DeckLinkDevice(IDeckLink *device);
+	bool TryAcquire(void *owner)
+	{
+		void *empty = nullptr;
+		return !removed && mediaOwner.compare_exchange_strong(empty, owner);
+	}
+	void ReleaseOwner(void *owner) { mediaOwner.compare_exchange_strong(owner, nullptr); }
+	void MarkRemoved() { removed = true; }
+	bool Removed() const { return removed; }
 	~DeckLinkDevice(void);
 
 	ULONG AddRef(void);

@@ -1544,6 +1544,16 @@ void OBSBasic::InitPixelview()
 	appMenu->addAction(ui->actionCheckForUpdates);
 	appMenu->addSeparator();
 #endif
+	// Keep the native local diagnostics and their Designer-connected handlers.
+	// Pixelview has no configured log-upload service; do not expose upload actions.
+	ui->menuLogFiles->removeAction(ui->actionUploadCurrentLog);
+	ui->menuLogFiles->removeAction(ui->actionUploadLastLog);
+	appMenu->addMenu(ui->menuLogFiles);
+	if (ui->menuCrashLogs) {
+		ui->menuCrashLogs->removeAction(ui->actionUploadLastCrashLog);
+		appMenu->addMenu(ui->menuCrashLogs);
+	}
+	appMenu->addSeparator();
 	auto *license = appMenu->addAction(QStringLiteral("License information…"));
 	license->setMenuRole(QAction::NoRole);
 	connect(license, &QAction::triggered, this, &OBSBasic::ShowPixelviewLicense);
@@ -1680,12 +1690,11 @@ void OBSBasic::InitPixelview()
 		obs_sceneitem_select(item, true);
 		obs_sceneitem_set_locked(item, false);
 	}
-	RefreshPixelviewDevices();
-	// Only seed an installation without a saved capture source. Discovery omits
-	// empty/disabled entries; selection revalidates against fresh type properties.
+	// Device notifications can arrive after this first refresh. Keep the initial
+	// selection pending until discovery has an input and native state is idle.
 	OBSSourceAutoRelease savedCapture = obs_get_source_by_name("Pixelview Capture");
-	if (!savedCapture && pixelviewDevices->count() > 1)
-		SelectPixelviewDevice(1, true);
+	pixelviewCaptureAutoSelectPending = !savedCapture;
+	RefreshPixelviewDevices();
 }
 
 bool OBSBasic::PixelviewSettingsBusy() const
@@ -1892,6 +1901,15 @@ void OBSBasic::RefreshPixelviewDevices()
 		break;
 	}
 	pixelviewDevices->setToolTip(captureHelp);
+	if (source)
+		pixelviewCaptureAutoSelectPending = false; // Saved or explicitly chosen, even if disconnected.
+	if (pixelviewCaptureAutoSelectPending && !devices.empty() && !pixelviewReceiving &&
+	    !PixelviewSettingsBusy() && !properties) {
+		// Selection refreshes synchronously; disarm before entering it. Internal
+		// initialization bypasses pairing only and revalidates native discovery.
+		pixelviewCaptureAutoSelectPending = false;
+		SelectPixelviewDevice(1, true);
+	}
 }
 
 void OBSBasic::SelectPixelviewDevice(int index, bool initializing)

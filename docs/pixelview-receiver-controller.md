@@ -12,7 +12,7 @@ receiver = new pixelview::PixelviewReceiver(this);
 // Explicit development only, independent of publish pairing:
 // receiver->setOrigin(QUrl("http://127.0.0.1:8000"), true);
 receiver->onEndpoint = [this](const QString &url) {
-    // Call source connect(endpoint=url, latency_ms=50) in memory only.
+    // Call source connect(endpoint=url, latency=100) in memory only (milliseconds).
 };
 receiver->onStopped = [this] {
     // Disconnect native receive source synchronously; do not stop publishing.

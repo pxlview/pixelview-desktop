@@ -5,4 +5,4 @@
 
 extern DeckLinkDeviceDiscovery *deviceEnum;
 
-void fill_out_devices(obs_property_t *list);
+void fill_out_devices(obs_property_t *list, bool inputOnly = false);

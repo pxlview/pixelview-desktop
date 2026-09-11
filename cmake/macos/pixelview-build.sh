@@ -2,6 +2,11 @@
 # Pixelview macOS build helper. Development builds keep updates disabled.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# Ordinary local builds always enter the canonical identity/process gate.
+# Release preparation keeps its independent explicit identity and clean-tag policy.
+if [[ "${PIXELVIEW_RELEASE_BUILD:-OFF}" != "ON" && "${PIXELVIEW_LOCAL_SIGNING_VERIFIED:-}" != "1" ]]; then
+  exec python3 cmake/macos/pixelview-signed-development.py "$@"
+fi
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
 read_version_field() {
@@ -39,7 +44,7 @@ if [[ "$identity" != "-" ]]; then
     printf '%s\n' 'Set PIXELVIEW_CODESIGN_IDENTITY to a Developer ID Application name or SHA-1 and PIXELVIEW_CODESIGN_TEAM to its 10-character team ID.' >&2
     exit 2
   fi
-  build_dir=build_macos_developer_id
+  build_dir=build_macos
 elif [[ -n "$team" ]]; then
   printf '%s\n' 'PIXELVIEW_CODESIGN_TEAM requires an explicit Developer ID Application identity.' >&2
   exit 2
@@ -58,6 +63,12 @@ else
 fi
 
 build_dir="${PIXELVIEW_BUILD_DIR:-$build_dir}"
+if [[ "$release_build" != "ON" ]]; then
+  [[ "$identity" != "-" && -n "$team" && "$build_config" == "RelWithDebInfo" && "$build_dir" == "$PWD/build_macos" ]] || {
+    printf '%s\n' 'Local builds require the canonical signed-development wrapper; no ad-hoc or alternate output.' >&2
+    exit 2
+  }
+fi
 
 # Verify pins and stage the curated receiver runtime for EVERY build, including
 # ordinary local development. Missing/unreviewed dependencies fail closed.
@@ -66,7 +77,7 @@ python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
 python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer
 
 # Upstream manual Xcode signing signs dependencies on copy. The release mode is
-# fail-closed; ordinary local builds remain ad-hoc and updater-free.
+# fail-closed; ordinary local builds use verified Developer ID and no updater.
 cmake --preset macos -B "$build_dir" \
   "-DPIXELVIEW_LICENSE_DATA_DIR=${PIXELVIEW_LICENSE_DATA_DIR:-}" \
   "-DPIXELVIEW_ENABLE_UNIVERSAL_LINKS=${PIXELVIEW_ENABLE_UNIVERSAL_LINKS:-OFF}" \

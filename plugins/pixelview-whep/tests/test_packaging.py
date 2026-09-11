@@ -53,6 +53,23 @@ class UpstreamAcquisition(unittest.TestCase):
    (payload/'escape').symlink_to('/etc/passwd')
    with self.assertRaisesRegex(RuntimeError,'symlink'):
     m.merge_payload(payload,sdk)
+ def test_sdk_merge_does_not_duplicate_extracted_file_storage(self):
+  import tempfile, shutil
+  spec=importlib.util.spec_from_file_location('fetch_gstreamer',SCRIPT.parent/'fetch-gstreamer.py')
+  m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  with tempfile.TemporaryDirectory() as tmp:
+   payload=Path(tmp)/'Payload'; payload.mkdir()
+   source=payload/'library.a'; source.write_bytes(b'pinned package bytes')
+   source.chmod(0o755)
+   sdk=Path(tmp)/'sdk'; m.merge_payload(payload,sdk)
+   self.assertEqual(source.stat().st_ino,(sdk/'library.a').stat().st_ino)
+   self.assertEqual((sdk/'library.a').stat().st_mode & 0o777,0o755)
+   other=Path(tmp)/'Other'; other.mkdir()
+   (other/'library.a').write_bytes(b'overriding component')
+   m.merge_payload(other,sdk)
+   self.assertEqual(source.read_bytes(),b'pinned package bytes')
+   shutil.rmtree(payload); shutil.rmtree(other)
+   self.assertEqual((sdk/'library.a').read_bytes(),b'overriding component')
  def test_builder_isolates_sdk_from_host(self):
   spec=importlib.util.spec_from_file_location('build_rswebrtc',SCRIPT.parent/'build-rswebrtc.py')
   m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)

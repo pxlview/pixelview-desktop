@@ -119,7 +119,7 @@ int main(void)
  assert(source);
  obs_data_t *saved = obs_source_get_settings(source);
  assert(!strstr(obs_data_get_json(saved), "secret"));
- assert(obs_data_get_int(saved, "latency") == 50);
+ assert(obs_data_get_int(saved, "latency") == 100);
  calldata_t cd; calldata_init(&cd);
  assert(proc_handler_call(obs_source_get_proc_handler(source), "get_status", &cd));
  assert(!strcmp(calldata_string(&cd, "state"), "idle"));

@@ -13,7 +13,8 @@ endif()
 
 add_library(pixelview-whep MODULE pixelview-whep.c runtime.h
  video-format.c video-format.h profile-offer.c profile-offer.h
- capability-probe.c capability-probe.h capability-fixtures.h)
+ capability-probe.c capability-probe.h capability-fixtures.h
+ native-422.m native-422.h native-422-filter.c native-422-filter.h)
 add_library(OBS::pixelview-whep ALIAS pixelview-whep)
 target_include_directories(pixelview-whep PRIVATE
  "${PIXELVIEW_GST_SDK}/include/gstreamer-1.0"
@@ -23,6 +24,8 @@ target_include_directories(pixelview-whep PRIVATE
 target_link_directories(pixelview-whep PRIVATE "${PIXELVIEW_GST_RUNTIME}/lib")
 target_link_libraries(pixelview-whep PRIVATE OBS::libobs gstapp-1.0.0 gstvideo-1.0.0 gstaudio-1.0.0 gstbase-1.0.0 gstreamer-1.0.0 gobject-2.0.0 glib-2.0.0)
 target_link_options(pixelview-whep PRIVATE "LINKER:-headerpad_max_install_names")
+target_link_libraries(pixelview-whep PRIVATE gstcodecparsers-1.0.0 gstrtp-1.0.0
+ "-framework Foundation" "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo")
 set_target_properties_obs(pixelview-whep PROPERTIES FOLDER plugins PREFIX "")
 set_property(TARGET pixelview-whep APPEND PROPERTY BUILD_RPATH "@loader_path/../Resources/GStreamer/lib")
 add_custom_command(TARGET pixelview-whep POST_BUILD

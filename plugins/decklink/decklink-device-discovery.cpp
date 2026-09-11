@@ -85,6 +85,7 @@ HRESULT STDMETHODCALLTYPE DeckLinkDeviceDiscovery::DeckLinkDeviceRemoved(IDeckLi
 
 	for (size_t i = 0; i < devices.size(); i++) {
 		if (devices[i]->IsDevice(device)) {
+			devices[i]->MarkRemoved();
 
 			for (DeviceChangeInfo &cb : callbacks) {
 				cb.callback(cb.param, devices[i], false);

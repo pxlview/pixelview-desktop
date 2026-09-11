@@ -2,17 +2,22 @@
 
 Development signing uses `pixelview-build.sh`. Customer releases must use the fail-closed `release/pixelview-macos.sh` 1Password entrypoint documented in [Pixelview Desktop macOS updates and releases](pixelview-macos-updates-and-releases.md); that path additionally requires an arm64 Release build, Pixelview Sparkle metadata, Apple notarization, stapling, Gatekeeper assessment, provenance, and a signed appcast.
 
-The local build helper supports explicit opt-in signing through upstream OBS/Xcode settings:
+The normal local build now uses the [canonical signed build/launch workflow](pixelview-signed-development.md):
 
 ```sh
-PIXELVIEW_CODESIGN_IDENTITY='Developer ID Application: Your Organization (TEAMID1234)' \
-PIXELVIEW_CODESIGN_TEAM='TEAMID1234' \
-bash cmake/macos/pixelview-build.sh
+bash cmake/macos/pixelview-build.sh --check-only
+# App stopped, source workers settled:
+BUILD_JOBS=1 bash cmake/macos/pixelview-build.sh --allow-dirty --source-settled
 ```
 
-A 40-character certificate SHA-1 fingerprint is also accepted as the identity. These inputs select an installed signing identity; no private keys or machine-specific identities are stored in source. Xcode resolves the actual certificate; the helper validates input shape, not the certificate's class or team membership. Verify the resulting authority and team before distribution.
-
-Signed builds default to `build_macos_developer_id/frontend/RelWithDebInfo/Pixelview Desktop.app`, separate from the running development app in `build_macos`. `PIXELVIEW_BUILD_DIR` overrides the build directory for either mode; choose a new directory and never target a running app's build directory. `DEVELOPER_DIR` selects Xcode for this invocation only. With no Pixelview signing identity/team, the helper explicitly selects ad-hoc signing and clears inherited upstream signing/provisioning inputs. A team without an identity is rejected instead of triggering automatic Apple Development signing.
+Output is always `build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app`.
+The local wrapper selects the pinned Cinecode OU Developer ID certificate,
+validates real identity metadata and its configured team, then verifies the
+finished bundle and nested code. No ad-hoc fallback or alternate local output.
+Keep normal HOME and unset CFFIXED_USER_HOME; use `--app-config-dir` for dual
+settings roots. Interactive signing lets actual codesign request native
+permission even if default-Keychain metadata reports locked; only explicit
+`--unattended` metadata checks fail before staging on that status.
 
 ## Native signing path
 
@@ -23,7 +28,7 @@ If macOS requests private-key authorization, the user must handle the OS prompt 
 Verify a completed artifact before launching or distributing:
 
 ```sh
-app="build_macos_developer_id/frontend/RelWithDebInfo/Pixelview Desktop.app"
+app="build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app"
 codesign --verify --deep --strict --verbose=2 "$app"
 codesign -d --verbose=4 "$app"
 codesign -d -r- "$app"
@@ -32,7 +37,7 @@ codesign -d --entitlements :- "$app"
 
 Require Developer ID Application authority, the expected TeamIdentifier, `runtime` flags, a secure timestamp, and a designated requirement with an Apple anchor and team certificate condition rather than an ad-hoc cdhash-only requirement. Inspect every embedded Mach-O/framework/plugin too. Passing code-signature validation does not establish notarization or Gatekeeper acceptance.
 
-## Verified local build
+## Historical verified local build (not current-tree acceptance)
 
 The full Pixelview suite passes **129 tests**, including the Xcode-processed branding/plist check, native SDK/deployment regression, release/updater contracts, and signing-helper tests (plus existing disposable Keychain/loopback fixtures, not the real pairing account). `bash -n` and `git diff --check` passed.
 

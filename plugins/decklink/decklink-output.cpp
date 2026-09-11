@@ -25,11 +25,32 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 	decklinkOutput->modeID = obs_data_get_int(settings, MODE_ID);
 	decklinkOutput->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklinkOutput->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
+	proc_handler_add(
+		obs_output_get_proc_handler(output), "void bind_receive(ptr source, bool native, out bool bound)",
+		[](void *p, calldata_t *cd) {
+			auto *o = static_cast<DeckLinkOutput *>(p);
+			calldata_set_bool(cd, "bound",
+					  o->BindReceive(static_cast<obs_source_t *>(calldata_ptr(cd, "source")),
+							 calldata_bool(cd, "native")));
+		},
+		decklinkOutput);
+	proc_handler_add(
+		obs_output_get_proc_handler(output),
+		"void receive_status(out bool healthy, out int completed, out int repeats, out int dropped, out int late, out int audio_empty_polls, out int partial_writes)",
+		[](void *p, calldata_t *cd) {
+			auto *o = static_cast<DeckLinkOutput *>(p);
+			calldata_set_bool(cd, "healthy", o->ReceiveHealthy());
+			o->ReceiveStats(cd);
+		},
+		decklinkOutput);
 
 	ComPtr<DeckLinkDevice> device;
-	device.Set(deviceEnum->FindByHash(decklinkOutput->deviceHash));
+	device.Set(deviceEnum->FindByHash(decklinkOutput->deviceHash.c_str()));
 	if (device) {
 		DeckLinkDeviceMode *mode = device->FindOutputMode(decklinkOutput->modeID);
+		if (!mode) {
+			return decklinkOutput;
+		}
 
 		struct video_scale_info to = {};
 		to.format = VIDEO_FORMAT_BGRA;
@@ -48,6 +69,9 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 static void decklink_output_update(void *data, obs_data_t *settings)
 {
 	auto *decklink = (DeckLinkOutput *)data;
+	if (obs_output_active(decklink->GetOutput())) {
+		return;
+	}
 
 	decklink->deviceHash = obs_data_get_string(settings, DEVICE_HASH);
 	decklink->modeID = obs_data_get_int(settings, MODE_ID);
@@ -58,14 +82,50 @@ static void decklink_output_update(void *data, obs_data_t *settings)
 static bool decklink_output_start(void *data)
 {
 	auto *decklink = (DeckLinkOutput *)data;
+	if (obs_output_active(decklink->GetOutput())) {
+		return false;
+	}
 	struct obs_audio_info aoi;
+	if (decklink->IsReceive()) {
+		ComPtr<DeckLinkDevice> device;
+		if (decklink->deviceHash.empty()) {
+			return false;
+		}
+		device.Set(deviceEnum->FindByHash(decklink->deviceHash.c_str()));
+		if (!device) {
+			return false;
+		}
+		DeckLinkDeviceMode *mode = device->FindOutputMode(decklink->modeID);
+		if (!mode) {
+			return false;
+		}
+		if (!decklink->IsNativeReceive()) {
+			obs_video_info vi = {};
+			if (!obs_get_video_info(&vi) || !mode->IsEqualFrameRate(vi.fps_num, vi.fps_den)) {
+				return false;
+			}
+		}
+		if (!decklink->PrepareReceive(mode)) {
+			decklink->Deactivate();
+			return false;
+		}
+		decklink->start_timestamp = 0;
+		decklink->SetSize(mode->GetWidth(), mode->GetHeight());
+		device->SetKeyerMode(0);
+		if (!decklink->Activate(device, decklink->modeID) ||
+		    !obs_output_begin_data_capture(decklink->GetOutput(), 0)) {
+			decklink->Deactivate();
+			return false;
+		}
+		return true;
+	}
 
 	if (!obs_get_audio_info(&aoi)) {
 		blog(LOG_WARNING, "No active audio");
 		return false;
 	}
 
-	if (!decklink->deviceHash || !*decklink->deviceHash) {
+	if (decklink->deviceHash.empty()) {
 		return false;
 	}
 
@@ -77,13 +137,16 @@ static bool decklink_output_start(void *data)
 
 	ComPtr<DeckLinkDevice> device;
 
-	device.Set(deviceEnum->FindByHash(decklink->deviceHash));
+	device.Set(deviceEnum->FindByHash(decklink->deviceHash.c_str()));
 
 	if (!device) {
 		return false;
 	}
 
 	DeckLinkDeviceMode *mode = device->FindOutputMode(decklink->modeID);
+	if (!mode) {
+		return false;
+	}
 
 	struct obs_video_info ovi;
 	if (!obs_get_video_info(&ovi)) {
@@ -112,6 +175,7 @@ static bool decklink_output_start(void *data)
 	obs_output_set_audio_conversion(decklink->GetOutput(), &conversion);
 
 	if (!obs_output_begin_data_capture(decklink->GetOutput(), 0)) {
+		decklink->Deactivate();
 		return false;
 	}
 
@@ -169,6 +233,9 @@ static bool prepare_audio(DeckLinkOutput *decklink, const struct audio_data *fra
 static void decklink_output_raw_audio(void *data, struct audio_data *frames)
 {
 	auto *decklink = (DeckLinkOutput *)data;
+	if (decklink->IsReceive()) {
+		return;
+	}
 	struct audio_data in;
 
 	if (!decklink->start_timestamp) {
@@ -222,10 +289,15 @@ static bool decklink_output_device_changed(obs_properties_t *props, obs_property
 		} else {
 			const std::vector<DeckLinkDeviceMode *> &modes = device->GetOutputModes();
 
-			struct obs_video_info ovi;
-			if (obs_get_video_info(&ovi)) {
+			calldata_t route;
+			calldata_init(&route);
+			proc_handler_call(obs_get_proc_handler(), "pixelview_decklink_receive_state", &route);
+			const bool receiving = calldata_bool(&route, "receiving");
+			calldata_free(&route);
+			struct obs_video_info ovi = {};
+			if (receiving || obs_get_video_info(&ovi)) {
 				for (DeckLinkDeviceMode *mode : modes) {
-					if (mode->IsEqualFrameRate(ovi.fps_num, ovi.fps_den)) {
+					if (receiving || mode->IsEqualFrameRate(ovi.fps_num, ovi.fps_den)) {
 						obs_property_list_add_int(modeList, mode->GetName().c_str(),
 									  mode->GetId());
 					}

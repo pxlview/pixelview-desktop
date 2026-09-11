@@ -8,6 +8,7 @@
 #include "OBSVideoFrame.h"
 #include <atomic>
 #include <vector>
+#include "decklink-receive.hpp"
 
 class AudioRepacker;
 class DecklinkBase;
@@ -16,11 +17,17 @@ template<typename T> class RenderDelegate : public IDeckLinkVideoOutputCallback 
 private:
 	std::atomic<unsigned long> m_refCount = 1;
 	T *m_pOwner;
+	std::recursive_mutex gate;
 
 	~RenderDelegate();
 
 public:
 	RenderDelegate(T *pOwner);
+	void Detach()
+	{
+		std::lock_guard<std::recursive_mutex> lock(gate);
+		m_pOwner = nullptr;
+	}
 
 	// IUnknown
 	virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID *ppv);
@@ -161,12 +168,16 @@ protected:
 	FrameQueue frameQueueObsToDecklink;
 	FrameQueue frameQueueDecklinkToObs;
 	uint8_t *activeBlob = nullptr;
-	BMDTimeValue frameDuration;
-	BMDTimeScale frameTimescale;
+	BMDTimeValue frameDuration = 0;
+	BMDTimeScale frameTimescale = 0;
 	BMDTimeScale totalFramesScheduled;
 	ComPtr<RenderDelegate<DeckLinkDeviceInstance>> renderDelegate;
+	ComPtr<DeckLinkReceive> receive;
 
 	void FinalizeStream();
+	bool StartOutputInternal(DeckLinkDeviceMode *mode);
+	bool StartCaptureInternal(DeckLinkDeviceMode *mode, bool tenBit, BMDVideoConnection video,
+				  BMDAudioConnection audio);
 	void SetupVideoFormat(DeckLinkDeviceMode *mode_);
 
 	void HandleAudioPacket(IDeckLinkAudioInputPacket *audioPacket, const uint64_t timestamp);
@@ -194,6 +205,14 @@ public:
 	bool StopCapture(void);
 
 	bool StartOutput(DeckLinkDeviceMode *mode_);
+	bool StartNativeOutput(DeckLinkDeviceMode *mode_, obs_source_t *source);
+	void NativeStats(calldata_t *cd)
+	{
+		if (receive) {
+			receive->Stats(cd);
+		}
+	}
+	bool NativeOutputHealthy() { return !device->Removed() && receive && receive->Healthy(); }
 	bool StopOutput(void);
 
 	HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(IDeckLinkVideoInputFrame *videoFrame,

@@ -32,7 +32,8 @@ for name in ('libgstvideotestsrc.dylib','libgstaudiotestsrc.dylib'):
 flags=['-I'+str(sdk/p) for p in ('include/gstreamer-1.0','include/glib-2.0','lib/glib-2.0/include')]
 flags+=['-L'+str(stage/'lib'),'-Wl,-rpath,'+str(stage/'lib')]
 flags+=['-l'+x for x in ('gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0')]
-helpers=[str(root/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')]
+import native422_build
+helpers=[str(root/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')] + native422_build.flags(root)
 base=['clang','-g','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-mmacosx-version-min=14.0','-I'+str(repo/'libobs'),'-I'+str(obs_build/'config'),'-I'+str(deps/'include'),'-F'+framework,'-framework','libobs','-Wl,-rpath,'+framework,'-Wl,-rpath,'+str(deps/'lib')]
 subprocess.run(base+helpers+[str(root/'tests/native.c'),'-o',str(work/'native')]+flags,check=True)
 env={k:v for k,v in os.environ.items() if not k.startswith(('GST_','DYLD_'))}

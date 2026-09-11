@@ -54,14 +54,14 @@ def main():
     assert result.returncode == 0, result.stderr
     (work/'alternatives.sdp').write_text(result.stdout)
     assert 'level-id=123;profile-id=2;tier-flag=0;tx-mode=SRST' in result.stdout, result.stdout
-    assert result.stdout.count('H265/90000') == 2, result.stdout
+    assert result.stdout.count('H265/90000') == 3, result.stdout
     assert result.stdout.count('VP9/90000') == 2, result.stdout
     assert 'profile-id=0' in result.stdout and 'profile-id=2' in result.stdout
     import re
     payloads = re.findall(r'a=rtpmap:(\d+)', result.stdout)
-    assert len(payloads) == len(set(payloads)) == 6, payloads
-    print('PASS separate Main/Main10/VP9-0/VP9-2/H264 payloads + Opus')
-    for mask, level, hevc, vp9 in [(31,153,2,2),(31,0,0,2),(31,124,0,2),(5,123,1,0),(9,0,0,1),(17,0,0,1)]:
+    assert len(payloads) == len(set(payloads)) == 7, payloads
+    print('PASS separate Main/Main10/Main422/VP9-0/VP9-2/H264 payloads + Opus')
+    for mask, level, hevc, vp9 in [(31,153,3,2),(31,0,0,2),(31,124,0,2),(5,123,2,0),(9,0,0,1),(17,0,0,1)]:
         result = subprocess.run([str(binary),str(mask),str(level)],env=env,capture_output=True,text=True,timeout=30)
         assert result.returncode == 0, result.stderr
         assert result.stdout.count('H265/90000') == hevc, result.stdout
@@ -79,7 +79,7 @@ def main():
         assert len(payloads) == len(set(payloads)), (label, result.stdout)
         if mask:
             assert 'profile-level-id='+profile_level in result.stdout,result.stdout
-            assert result.stdout.count('H265/90000') == 2, result.stdout
+            assert result.stdout.count('H265/90000') == 3, result.stdout
             assert result.stdout.count('VP9/90000') == 2, result.stdout
             assert 'OPUS/48000/2' in result.stdout, result.stdout
         print('PASS captured actual rswebrtc raw-output',label)

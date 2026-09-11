@@ -11,7 +11,7 @@ class KeychainReceiveStore final : public ReceiveCredentialStore {
  QString service;
  NSMutableDictionary *query() const
  {
-  LAContext *context=[LAContext new]; context.interactionNotAllowed=YES;
+  LAContext *context=[LAContext new]; context.interactionNotAllowed=!KeychainUserAction::requested();
   return [@{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
    (__bridge id)kSecAttrService:service.toNSString(),
    (__bridge id)kSecAttrAccount:@"latest-session",
@@ -27,6 +27,7 @@ public:
   auto q=query(); q[(__bridge id)kSecReturnData]=@YES;
   CFTypeRef value=nullptr;
   auto status=SecItemCopyMatching((__bridge CFDictionaryRef)q,&value);
+  keychainStatus("receiver-read",status);
   if(status==errSecItemNotFound) return {};
   if(status!=errSecSuccess) return {State::Error,{}};
   NSData *data=CFBridgingRelease(value);
@@ -52,7 +53,7 @@ public:
    q[(__bridge id)kSecAttrAccessible]=(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
    status=SecItemAdd((__bridge CFDictionaryRef)q,nullptr);
   }
-  if(status!=errSecSuccess) return false;
+  if(keychainStatus("receiver-save",status)!=errSecSuccess) return false;
   auto check=load(origin,session,revision);
   return check.state==State::Found && check.password==password;
  }
@@ -61,12 +62,13 @@ public:
   NoninteractiveKeychain interaction;
   if(!interaction.ready) return false;
   auto status=SecItemDelete((__bridge CFDictionaryRef)query());
+  keychainStatus("receiver-remove",status);
   if(status!=errSecSuccess && status!=errSecItemNotFound) return false;
   auto q=query(); q[(__bridge id)kSecReturnData]=@YES;
   CFTypeRef value=nullptr;
   status=SecItemCopyMatching((__bridge CFDictionaryRef)q,&value);
   if(value) CFRelease(value);
-  return status==errSecItemNotFound;
+  return keychainStatus("receiver-remove-verification",status)==errSecItemNotFound;
  }
 };
 std::unique_ptr<ReceiveCredentialStore> makeReceiveCredentialStore(const QString &service)
