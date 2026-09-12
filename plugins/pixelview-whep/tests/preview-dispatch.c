@@ -17,6 +17,7 @@ static unsigned outputs;
 static bool sequence;
 static bool destroying, destroy_join_entered, destroyed;
 static GThread *joined_preview;
+static bool preview_join_entered;
 static gpointer held_join(GThread *thread);
 static unsigned events[64], event_count;
 static _Thread_local GstSample *injected;
@@ -81,6 +82,9 @@ static GstSample *pull_injected(GstAppSink *sink)
 static struct receiver *tested;
 static gpointer held_join(GThread *thread)
 {
+ if(thread==joined_preview) {
+  g_mutex_lock(&gate);preview_join_entered=true;g_cond_broadcast(&cond);g_mutex_unlock(&gate);
+ }
  if(destroying && thread==joined_preview) {
   g_mutex_lock(&gate); destroy_join_entered=true; g_cond_broadcast(&cond); g_mutex_unlock(&gate);
  }
@@ -172,40 +176,41 @@ static void reconnect(struct receiver *r)
 }
 static void wait_events(unsigned count)
 { g_mutex_lock(&gate); while(event_count<count)g_cond_wait(&cond,&gate); g_mutex_unlock(&gate); }
+static bool reconnected;
+static gpointer reconnect_thread(gpointer opaque)
+{
+ reconnect(opaque);
+ g_mutex_lock(&gate);reconnected=true;g_cond_broadcast(&cond);g_mutex_unlock(&gate);
+ return NULL;
+}
 static void mixed_case(int point)
 {
- sequence=true; g_atomic_int_set(&boundary,point); entered=released=finished=false; event_count=0;
+ sequence=true;g_atomic_int_set(&boundary,point);entered=released=finished=false;event_count=0;
  struct receiver r={.generation=1,.active_generation=1,.accept_samples=true,.preview_enabled=true};
- tested=&r; g_mutex_init(&r.lock); g_rec_mutex_init(&r.delivery); g_cond_init(&r.wake);
- r.pipe=gst_pipeline_new(NULL); gst_element_set_base_time(r.pipe,0);
+ tested=&r;g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);g_cond_init(&r.wake);
+ r.pipe=gst_pipeline_new(NULL);gst_element_set_base_time(r.pipe,0);
  submit(&r,true,1);
- g_mutex_lock(&gate); while(!entered)g_cond_wait(&cond,&gate); g_mutex_unlock(&gate);
- reconnect(&r);
- if(point==4) {
-  calldata_t cd; calldata_init(&cd); calldata_set_bool(&cd,"enabled",false); native_preview_proc(&r,&cd); calldata_free(&cd);
- }
- submit(&r,false,3);
- g_mutex_lock(&gate);
- printf("mixed boundary=%d held events=%u first=%u (expected no overtaking)\n",point,event_count,event_count?events[0]:0); fflush(stdout);
- released=true; g_cond_broadcast(&cond); g_mutex_unlock(&gate);
- wait_events(3);
- printf("actual data/NULL sequence: %u,%u,%u expected: 1,0,3\n",events[0],events[1],events[2]); fflush(stdout);
- assert(events[0]==1 && events[1]==0 && events[2]==3);
- g_mutex_lock(&r.lock); while(r.frames!=1)g_cond_wait_until(&r.wake,&r.lock,g_get_monotonic_time()+1000);
- assert(!strcmp(r.state,"playing") && r.last_video); g_mutex_unlock(&r.lock);
- calldata_t cd; calldata_init(&cd); status_proc(&r,&cd); assert(calldata_bool(&cd,"ready"));
- calldata_set_bool(&cd,"enabled",true); native_preview_proc(&r,&cd); calldata_free(&cd);
- /* Same worker retained across reverse and repeated codec transitions. */
- GThread *original=r.preview_thread;
+ g_mutex_lock(&gate);while(!entered)g_cond_wait(&cond,&gate);reconnected=false;g_mutex_unlock(&gate);
+ joined_preview=r.preview_thread;preview_join_entered=false;
+ GThread *transition=g_thread_new("new-attempt",reconnect_thread,&r);
+ /* Teardown must wait for reserved native OBS delivery before enabling direct
+  * ordinary callbacks. Stop/connect procs themselves still only invalidate. */
+ g_mutex_lock(&gate);while(!preview_join_entered)g_cond_wait(&cond,&gate);
+ assert(!reconnected && "new generation started before old native worker drained");
+ released=true;g_cond_broadcast(&cond);g_mutex_unlock(&gate);
+ g_thread_join(transition);assert(!r.preview_thread && !r.preview_sample);
+ submit(&r,false,3);assert(!r.preview_thread && !r.preview_sample);
+ assert(event_count==3 && events[0]==1 && events[1]==0 && events[2]==3);
  for(unsigned i=0;i<4;i++) {
-  unsigned before=event_count; reconnect(&r); submit(&r,i%2==0,5+i*2); wait_events(before+2);
-  assert(events[before]==0 && events[before+1]==5+i*2 && r.preview_thread==original);
+  unsigned before=event_count;reconnect(&r);submit(&r,i%2==0,5+i*2);wait_events(before+2);
+  assert(events[before]==0 && events[before+1]==5+i*2);
+  if(i%2) assert(!r.preview_thread && !r.preview_sample);
  }
- g_mutex_lock(&r.lock); r.quit=true; g_cond_broadcast(&r.wake); g_mutex_unlock(&r.lock);
- g_thread_join(r.preview_thread); stop_pipeline(&r); wipe(&r.endpoint);
- tested=NULL; g_cond_clear(&r.wake); g_rec_mutex_clear(&r.delivery); g_mutex_clear(&r.lock);
- sequence=false; puts("mixed native/ordinary data + NULL clear ordering and P010 codes64..940 passed");
+ disconnect_proc(&r,NULL);stop_pipeline(&r);wipe(&r.endpoint);
+ tested=NULL;g_cond_clear(&r.wake);g_rec_mutex_clear(&r.delivery);g_mutex_clear(&r.lock);
+ sequence=false;puts("native join -> NULL clear -> direct ordinary, repeated reverse transitions passed");
 }
+
 static gpointer empty_worker(gpointer data) { stop_pipeline(data); return NULL; }
 static gpointer destroy_test(gpointer data)
 {
@@ -227,24 +232,23 @@ static void ordinary_lifetime(void)
  invalid_color=true; submit(r,false,99); invalid_color=false;
  reconnect(r); wait_events(4);
  g_mutex_lock(&gate); g_atomic_int_set(&boundary,4); entered=released=false; g_mutex_unlock(&gate);
- submit(r,false,5);
+ submit(r,true,5);
  g_mutex_lock(&gate); while(!entered)g_cond_wait(&cond,&gate); g_mutex_unlock(&gate);
- /* The ordinary callback owns its original P010 mapping while blocked; later
-  * ordinary RAW replaces only the pending sample, and native disable must not
-  * discard ordinary work or reduce its precision. */
+ /* Only native preview replaces pending RAW; disabling it clears that work. */
+ for(unsigned i=6;i<20;i++) submit(r,true,i);
+ g_mutex_lock(&r->lock);assert(r->preview_sample && r->preview_timestamp==19 && r->preview_native);g_mutex_unlock(&r->lock);
  calldata_t cd; calldata_init(&cd); calldata_set_bool(&cd,"enabled",false); native_preview_proc(r,&cd); calldata_free(&cd);
- for(unsigned i=6;i<20;i++) submit(r,false,i);
- g_mutex_lock(&r->lock); assert(r->preview_sample && r->preview_timestamp==19 && !r->preview_native); g_mutex_unlock(&r->lock);
- reconnect(r); submit(r,false,21);
- r->thread=g_thread_new("completed-media",empty_worker,r);
+ g_mutex_lock(&r->lock); assert(!r->preview_sample); g_mutex_unlock(&r->lock);
+ /* Destroy must join the blocked native preview through pipeline teardown. */
  destroying=true; destroy_join_entered=destroyed=false; joined_preview=r->preview_thread;
+ r->thread=g_thread_new("completed-media",empty_worker,r);
  GThread *d=g_thread_new("destroy-source",destroy_test,r);
  g_mutex_lock(&gate); while(!destroy_join_entered)g_cond_wait(&cond,&gate);
  assert(!destroyed); released=true; g_cond_broadcast(&cond); g_mutex_unlock(&gate);
- g_thread_join(d); assert(destroyed); assert(event_count==5 && events[4]==5);
+ g_thread_join(d); assert(destroyed); assert(event_count==6 && events[4]==5 && events[5]==0);
  /* No callbacks may retain receiver storage after actual destroy returns. */
  obs_source_release(source); destroying=false; tested=NULL; sequence=false;
- puts("ordinary-first/reverse, disabled-native ordinary P010, latest queue, blocked reconnect and actual destroy join passed");
+ puts("ordinary-first P010, full-range refusal, native-only latest queue/disable, blocked native destroy join passed");
 }
 int main(void)
 {

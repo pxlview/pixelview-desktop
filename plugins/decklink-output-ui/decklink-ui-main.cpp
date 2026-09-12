@@ -174,8 +174,9 @@ void output_start()
 
 			obs_add_main_rendered_callback(decklink_ui_render, &context);
 
-			obs_output_set_media(context.output, context.video_queue,
-					     receive_mode ? nullptr : obs_get_audio());
+			// Ordinary reception uses the same rendered program and OBS mix as
+			// sending. Only native422 owns private v210/source-PCM endpoints.
+			obs_output_set_media(context.output, context.video_queue, obs_get_audio());
 			bool started = obs_output_start(context.output);
 
 			main_output_running = started;

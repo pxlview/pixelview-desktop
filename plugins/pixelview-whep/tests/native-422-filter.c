@@ -43,14 +43,13 @@ static void route_switch_regression(void)
  assert(gst_pad_send_event(input,gst_event_new_caps(ordinary)));gst_caps_unref(ordinary);
  GstCaps *native=gst_caps_from_string("video/x-h265,stream-format=hvc1,alignment=au,profile=main-422-10,width=1024,height=64,framerate=30000/1001");
  gboolean accepted=gst_pad_send_event(input,gst_event_new_caps(native));gst_caps_unref(native);
- GstElement *queue=gst_bin_get_by_name(GST_BIN(filter),"preview");gint leaky=-1;
- g_object_get(queue,"leaky",&leaky,NULL);
- (void)accepted; // A ghost pad may accept/cache a sticky CAPS event locally.
- assert(leaky==0); // Never turn a queue of compressed AUs leaky.
+ GstElement *queue=gst_bin_get_by_name(GST_BIN(filter),"preview");
+ /* Stock capsfilter rejects a new codec family at CAPS negotiation. */
+ assert(!queue); // Ordinary route never allocates a native queue.
  GstSegment segment;gst_segment_init(&segment,GST_FORMAT_TIME);
  gst_pad_send_event(input,gst_event_new_segment(&segment));
- assert(gst_pad_chain(input,gst_buffer_new_allocate(NULL,1,NULL))==GST_FLOW_NOT_NEGOTIATED);
- gst_object_unref(queue);gst_object_unref(input);
+ assert(!accepted);
+ gst_object_unref(input);
  gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
  assert(out.released==1 && !out.frames);
 }

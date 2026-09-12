@@ -11,13 +11,9 @@ protected:
 	int width;
 	int height;
 	obs_source_t *receiveSource = nullptr;
-	bool nativeReceive = false, receiveFailed = false;
+	bool nativeReceive = false;
 	uint64_t receiveFrames = 0, receiveLastFrame = 0;
 	DeckLinkPrivateMedia privateMedia;
-	struct pv_feed_request feedIdentity = {};
-	std::vector<uint8_t> receiveAudio;
-	void DetachReceive();
-	void PumpReceiveAudio();
 
 	static void DevicesChanged(void *param, DeckLinkDevice *device, bool added);
 

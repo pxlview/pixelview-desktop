@@ -53,8 +53,8 @@ static void check_codec(obs_source_t *source, const char *codec, bool audio)
    last=feed.timestamp_ns; ++packets;
    for (unsigned i=0; i<feed.audio_frames*2u; ++i) energy+=(int64_t)pcm[i]*pcm[i];
   }
-  assert(packets && energy); feed.command=PV_FEED_DETACH; pv_feed_request(&r.feed, 0, &feed);
-  printf("PASS existing Opus rendered source-only feed: packets=%u energy=%llu monotonic timestamps\n", packets, (unsigned long long)energy);
+  assert(!packets && !energy); feed.command=PV_FEED_DETACH; pv_feed_request(&r.feed, 0, &feed);
+  printf("PASS Opus OBS delivery without obsolete rendered private PCM feed\n");
  }
  source_controls_disconnect(&r);
  gst_message_unref(msg);gst_object_unref(bus);gst_object_unref(input);gst_object_unref(output);gst_object_unref(r.pipe);g_mutex_clear(&r.lock); g_rec_mutex_clear(&r.delivery);

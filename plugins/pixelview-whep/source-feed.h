@@ -22,7 +22,8 @@
 #define PV_FEED_MAX_AUDIO_FRAMES 5760u
 #define PV_FEED_MAX_VIDEO_BYTES (5120u * 1080u)
 /* ATTACH selects an immutable route for this token/generation. Native receives
- * early PCM for timestamped scheduling; rendered receives only clocked PCM.
+ * early PCM for timestamped scheduling. RENDERED is retained for ABI compatibility
+ * but the source no longer produces rendered PCM; use the ordinary OBS mix.
  * Every request repeats the route. Switching requires DETACH + fresh ATTACH. */
 enum pv_feed_route { PV_FEED_NATIVE = 1, PV_FEED_RENDERED };
 enum pv_feed_command { PV_FEED_ATTACH = 1, PV_FEED_VIDEO, PV_FEED_AUDIO, PV_FEED_DETACH };

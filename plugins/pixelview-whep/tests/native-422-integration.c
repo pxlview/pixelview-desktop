@@ -24,7 +24,7 @@ int main(int argc, char **argv)
  obs_source_t *source = obs_source_create_private(info.id, "isolated-native422", NULL); assert(source);
  struct fixture_output out = {.file=fopen(argv[2], "wb")}; assert(out.file);
  struct receiver r = {.source=source, .generation=1, .active_generation=1, .accept_samples=true,
-  .active_caps={.profiles=31, .hevc_level_id=123}, .active_latency=50};
+  .active_caps={.profiles=31, .hevc_level_id=123}, .active_latency_override=true,.active_latency=50};
  g_mutex_init(&r.lock); g_rec_mutex_init(&r.delivery);
  source_controls_init(&r);
  proc_handler_t *ph = obs_source_get_proc_handler(source);
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
   gst_buffer_fill(audio, 0, samples, sizeof(samples));
   GST_BUFFER_PTS(audio) = muted * 20000000; GST_BUFFER_DURATION(audio) = 62500;
   assert(gst_app_src_push_buffer(GST_APP_SRC(audio_src), audio) == GST_FLOW_OK);
-  assert(native_audio_sample(audio_sink, &r) == GST_FLOW_OK);
+  assert(native_audio_process(gst_app_sink_pull_sample(audio_sink), &r) == GST_FLOW_OK);
   feed.command=PV_FEED_AUDIO;
   assert(proc_handler_call(ph, "native422_feed", &request) && feed.status == PV_FEED_OK);
   assert(feed.audio_frames == 3 && feed.bytes == 12 && feed.timestamp_ns == out.base + muted * 20000000);
@@ -116,7 +116,7 @@ int main(int argc, char **argv)
   * Retained rx signal closures must not resurrect a filter after detachment. */
  /* A missing native branch dependency must not silently restore the ordinary
   * lossy decoder route. Removing a registry feature affects this process only. */
- GstPluginFeature *queue = GST_PLUGIN_FEATURE(gst_element_factory_find("queue")); assert(queue);
+ GstPluginFeature *queue = GST_PLUGIN_FEATURE(gst_element_factory_find("capsfilter")); assert(queue);
  gst_registry_remove_feature(gst_registry_get(), queue); gst_object_unref(queue);
  GstElement *unavailable = NULL;
  g_signal_emit_by_name(rx, "request-encoded-filter", "fixture", "video_1", caps, &unavailable);

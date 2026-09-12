@@ -156,7 +156,7 @@ void pv_owner_fixture_audio(obs_source_t *source, bool early, uint64_t timestamp
  GST_BUFFER_PTS(b)=timestamp_ns-gst_element_get_base_time(f->r.pipe);
  GST_BUFFER_DURATION(b)=20000000;
  assert(gst_app_src_push_buffer(GST_APP_SRC(src), b)==GST_FLOW_OK);
- assert((early ? native_audio_sample(sink, &f->r) : audio_sample(sink, &f->r))==GST_FLOW_OK);
+ assert((early ? native_audio_process(test_pull_audio(sink), &f->r) : audio_sample(sink, &f->r))==GST_FLOW_OK);
  gst_element_set_state(p, GST_STATE_NULL);
  gst_object_unref(src); gst_object_unref(sink); gst_object_unref(p);
 }
@@ -174,7 +174,7 @@ void pv_owner_fixture_bounds(obs_source_t *source)
   GST_BUFFER_PTS(b)=0;
   injected_audio=bounded_audio=gst_sample_new(b, caps, &segment, NULL);
   gst_buffer_unref(b); gst_caps_unref(caps); /* Sole sample owner: READ map can coalesce. */
-  assert((early ? native_audio_sample(NULL, &f->r) : audio_sample(NULL, &f->r))==GST_FLOW_ERROR);
+  assert((early ? native_audio_process(test_pull_audio(NULL), &f->r) : audio_sample(NULL, &f->r))==GST_FLOW_ERROR);
   assert(!bounded_audio && !injected_audio);
  }
  puts("both PCM callbacks: fragmented oversized refusal before coalescing/map PASS");
@@ -257,18 +257,8 @@ void pv_owner_fixture_controls(obs_source_t *source)
  g_atomic_int_set(&race.stop, 1); g_thread_join(writer);
  controls_lifetime(source, false); controls_lifetime(source, true);
  r.command=PV_FEED_DETACH; pv_feed_request(&f->r.feed, 1, &r);
- const uint64_t native_token=r.token;
- r.command=PV_FEED_ATTACH; r.route=PV_FEED_RENDERED;
- pv_feed_request(&f->r.feed, 1, &r); assert(r.status==PV_FEED_OK && r.token!=native_token);
- for (unsigned i=0; i<2; ++i) {
-  obs_source_set_volume(source, .25f); obs_source_set_muted(source, i==1);
-  audit_streaming_getters=true; pv_owner_fixture_audio(source, true, 2000000000);
-  r.command=PV_FEED_AUDIO; pv_feed_request(&f->r.feed, 1, &r); assert(r.status==PV_FEED_EMPTY);
-  pv_owner_fixture_audio(source, false, 2000000000); audit_streaming_getters=false;
-  pv_feed_request(&f->r.feed, 1, &r); assert(r.status==PV_FEED_OK && streaming_getters==0);
-  for (unsigned j=0; j<1920; ++j) assert(pcm[j]==(i ? 0 : 4096));
- }
- r.command=PV_FEED_DETACH; pv_feed_request(&f->r.feed, 1, &r);
+ /* Rendered output has no source-feed consumer; ordinary controls are tested
+  * through the actual OBS mixer and registered DeckLink owner in receive.cpp. */
  obs_source_set_volume(source, 1.f); obs_source_set_muted(source, false);
  puts("source controls: initialized gain/mute and signal changes without streaming getters PASS");
 }
@@ -330,7 +320,7 @@ void pv_owner_fixture_produce(obs_source_t *source, const char *path)
 	GST_BUFFER_PTS(b) = 0;
 	GST_BUFFER_DURATION(b) = 10000000;
 	assert(gst_app_src_push_buffer(GST_APP_SRC(as), b) == GST_FLOW_OK);
-	assert(native_audio_sample(sink, &f->r) == GST_FLOW_OK);
+	assert(native_audio_process(test_pull_audio(sink), &f->r) == GST_FLOW_OK);
 	gst_element_set_state(ap, GST_STATE_NULL);
 	gst_object_unref(as);
 	gst_object_unref(sink);

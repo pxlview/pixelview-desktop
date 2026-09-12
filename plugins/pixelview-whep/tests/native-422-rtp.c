@@ -6,7 +6,7 @@ int main(void) {
  gst_init(NULL,NULL);
  GstElement *filter=pv_native422_filter_new(deliver,NULL,NULL), *rx=gst_bin_new(NULL);
  assert(filter && pv_native422_filter_require_rtp(filter,rx));
- PvNativeTap *tap=(PvNativeTap *)gst_bin_get_by_name(GST_BIN(filter),"native-transform");
+ struct route_selector *tap=g_object_get_data(G_OBJECT(filter),"pixelview-route");
  assert(tap->require_rtp && !tap->rate->attached);
  GstElement *depay=gst_element_factory_make("rtph265depay",NULL);assert(depay);
  assert(gst_bin_add(GST_BIN(rx),depay));assert(tap->rate->attached);
@@ -19,7 +19,7 @@ int main(void) {
   assert(rate_probe(NULL,&info,rate)==GST_PAD_PROBE_OK);gst_buffer_unref(b);
  }
  assert(rate->rate.num==24 && rate->rate.den==1);
- gst_object_unref(tap);gst_object_unref(filter);
+ gst_object_unref(filter);
  /* Late pad callback retains only observer state, not freed source/filter. */
  GstPadProbeInfo invalid={0};assert(rate_probe(NULL,&invalid,rate)==GST_PAD_PROBE_OK);assert(rate->rate.failed);
  gst_object_unref(rx);return 0;

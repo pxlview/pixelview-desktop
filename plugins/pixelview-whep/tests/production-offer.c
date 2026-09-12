@@ -11,7 +11,7 @@ static void offline_video(obs_source_t *s,const struct obs_source_frame *f) {(vo
 static const char *video_caps="application/x-rtp,media=video,encoding-name=H265,clock-rate=90000,payload=96;application/x-rtp,media=video,encoding-name=H264,clock-rate=90000,payload=97;application/x-rtp,media=video,encoding-name=VP9,clock-rate=90000,payload=98";
 static void negative_hook(bool null_caps, bool stale)
 {
- struct receiver r={.active_latency=50,.generation=stale?1:0,.jitter_latency=-1};
+ struct receiver r={.active_latency_override=true,.active_latency=50,.generation=stale?1:0,.jitter_latency=-1};
  g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
  GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);
  struct receive_attempt *a=attempt_new(&r);webrtc_ready(NULL,NULL,rtc,a);
@@ -40,7 +40,7 @@ static void capture_ready(GObject *s,const char *peer,GstElement *rtc,gpointer o
 /* Inject already-admitted snapshots: no decoder, device or network needed. */
 static void admitted_envelope(unsigned profiles, unsigned level, unsigned fps)
 {
- struct receiver r={.active_latency=50,.active_caps={profiles,level}};
+ struct receiver r={.active_latency_override=true,.active_latency=50,.active_caps={profiles,level}};
  g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
  r.pipe=make_pipeline(&r,"http://127.0.0.1:9/offline-offer");g_assert_nonnull(r.pipe);
  GstElement *filter=gst_bin_get_by_name(GST_BIN(r.pipe),"video-policy");g_assert_nonnull(filter);
@@ -74,7 +74,7 @@ static void admitted_envelope(unsigned profiles, unsigned level, unsigned fps)
 }
 static void actual_graph(void)
 {
- struct receiver r={.active_latency=50};
+ struct receiver r={.active_latency_override=true,.active_latency=50};
  g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
  g_assert_true(probe_attempt(&r,0));
  g_assert_cmpuint(r.active_caps.profiles,!=,0);
@@ -136,7 +136,7 @@ static void actual_graph(void)
 }
 static void main422_offer(void)
 {
- struct receiver r={.active_latency=50,.active_caps={PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,123}};
+ struct receiver r={.active_latency_override=true,.active_latency=50,.active_caps={PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,123}};
  g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
  struct receive_attempt *a=attempt_new(&r);
  GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);
@@ -163,11 +163,12 @@ static void main422_offer(void)
 }
 /* Exercise production configuration and actual GObject jitter readback without
  * starting a receiver worker, decoder, network session or DeckLink device. */
+static void latency_notified(GObject *object,GParamSpec *spec,gpointer data)
+{ (void)object;(void)spec;(*(unsigned *)data)++; }
 static void latency_contract(void)
 {
- obs_data_t *settings=obs_data_create();defaults(settings);
- g_assert_cmpint(obs_data_get_int(settings,"latency"),==,100);
- obs_data_release(settings);
+ GstElement *fresh=gst_element_factory_make("webrtcbin",NULL);g_assert_nonnull(fresh);
+ guint upstream=0;g_object_get(fresh,"latency",&upstream,NULL);gst_object_unref(fresh);
  const int requests[]={-999,0,50,100,2000,-1,2001}; /* -999: omitted argument */
  for(unsigned i=0;i<G_N_ELEMENTS(requests);i++) {
   struct receiver r={0};g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);g_cond_init(&r.wake);
@@ -175,19 +176,28 @@ static void latency_contract(void)
   if(requests[i]!=-999)calldata_set_int(&cd,"latency",requests[i]);
   connect_proc(&r,&cd);
   bool valid=requests[i]==-999 || (requests[i]>=0 && requests[i]<=2000);
-  unsigned expected=requests[i]==-999 || !valid ? 100 : (unsigned)requests[i];
-  g_assert_cmpstr(r.state,==,valid?"connecting":"error");g_assert_cmpuint(r.latency,==,expected);
+  unsigned expected=requests[i]==-999 || !valid ? upstream : (unsigned)requests[i];
+  g_assert_cmpstr(r.state,==,valid?"connecting":"error");
+  calldata_t status;calldata_init(&status);status_proc(&r,&status);
+  g_assert_cmpint(calldata_int(&status,"latency"),==,valid && requests[i]!=-999 ? requests[i] : -1);
+  g_assert_cmpint(calldata_int(&status,"jitter_latency"),==,-1);calldata_free(&status);
+  if(!valid) { g_assert_null(r.endpoint);g_assert_null(r.pipe); }
   /* Same requested->active snapshot used by the production worker. */
-  r.active_latency=r.latency;r.active_generation=r.generation;r.changed=false;
+  r.active_latency=r.latency;r.active_latency_override=r.latency_override;
+  r.active_generation=r.generation;r.changed=false;
   struct receive_attempt *a=attempt_new(&r);
   GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);g_assert_nonnull(rtc);
+  unsigned writes=0;g_signal_connect(rtc,"notify::latency",G_CALLBACK(latency_notified),&writes);
   webrtc_ready(NULL,NULL,rtc,a);
+  g_assert_cmpuint(writes,==,valid && requests[i]!=-999 ? 1 : 0);
   guint actual=0;g_object_get(rtc,"latency",&actual,NULL);
   g_assert_cmpuint(actual,==,expected);g_assert_cmpint(r.jitter_latency,==,(int)expected);
+  calldata_init(&status);status_proc(&r,&status);
+  g_assert_cmpint(calldata_int(&status,"jitter_latency"),==,(int)actual);calldata_free(&status);
   r.attempt=a;stop_pipeline(&r);gst_object_unref(rtc);wipe(&r.endpoint);calldata_free(&cd);
   g_cond_clear(&r.wake);g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
  }
- puts("PASS production latency contract: default100ms, explicit0/50/100/2000 preserved, invalid rejected; actual webrtcbin readback");
+ printf("PASS production latency contract: upstream default observed %ums, explicit0/50/100/2000 preserved, invalid rejected; actual webrtcbin readback\n",upstream);
 }
 int main(int argc,char **argv)
 {

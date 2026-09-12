@@ -61,7 +61,26 @@ static GstSample *audit_pull(GstAppSink *sink)
 {
  GstSample *sample=gst_app_sink_pull_sample(sink);
  static bool printed;
- if(sample&&!printed&&!strcmp(GST_OBJECT_NAME(sink),"video")){printed=true;char *c=gst_caps_to_string(gst_sample_get_caps(sample));fprintf(stderr,"RAW_VIDEO %s\n",c);g_free(c);}
+ if(sample&&!printed&&!strcmp(GST_OBJECT_NAME(sink),"video")){
+  printed=true;char *c=gst_caps_to_string(gst_sample_get_caps(sample));fprintf(stderr,"RAW_VIDEO %s\n",c);g_free(c);
+  GstObject *parent=gst_object_get_parent(GST_OBJECT(sink));g_assert_true(GST_IS_BIN(parent));
+  GstElement *tap=gst_bin_get_by_name(GST_BIN(parent),"native-transform");g_assert_null(tap);
+  GstElement *queue=gst_bin_get_by_name(GST_BIN(parent),"preview");g_assert_null(queue);
+  GstPad *input=gst_element_get_static_pad(GST_ELEMENT(sink),"sink");GstPad *peer=gst_pad_get_peer(input);
+  GstElement *upstream=gst_pad_get_parent_element(peer);
+  g_assert_cmpstr(GST_OBJECT_NAME(upstream),==,"video-policy");
+  gst_object_unref(upstream);gst_object_unref(peer);gst_object_unref(input);
+  GstIterator *it=gst_bin_iterate_recurse(GST_BIN(parent));GValue value=G_VALUE_INIT;bool decoder=false;
+  while(gst_iterator_next(it,&value)==GST_ITERATOR_OK){
+   GstElement *element=g_value_get_object(&value);GstElementFactory *factory=gst_element_get_factory(element);
+   if(factory && gst_element_factory_list_is_type(factory,GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO)) {
+    fprintf(stderr,"ACTUAL_VIDEO_DECODER %s\n",gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory)));decoder=true;
+   }
+   g_value_reset(&value);
+  }
+  g_value_unset(&value);gst_iterator_free(it);gst_object_unref(parent);g_assert_true(decoder);
+  fprintf(stderr,"ORDINARY_GRAPH no-native-tap no-native-queue direct-clocked-appsink\n");
+ }
  return sample;
 }
 #define gst_app_sink_pull_sample audit_pull

@@ -5,7 +5,7 @@
 #include "main422-25p.h"
 #include <gst/rtp/gstrtpbuffer.h>
 
-struct rate_observer { gint refs; GMutex lock; struct pv422_rate rate; gboolean attached; };
+struct rate_observer { gint refs; GMutex lock; struct pv422_rate rate; gboolean attached, ordinary; };
 static void rate_unref(gpointer p)
 {
  struct rate_observer *r=p;
@@ -17,6 +17,7 @@ static GstPadProbeReturn rate_probe(GstPad *pad,GstPadProbeInfo *info,gpointer o
  struct rate_observer *r=opaque; GstBuffer *b=GST_PAD_PROBE_INFO_BUFFER(info);
  GstRTPBuffer packet=GST_RTP_BUFFER_INIT;
  g_mutex_lock(&r->lock);
+ if(r->ordinary) { g_mutex_unlock(&r->lock);return GST_PAD_PROBE_REMOVE; }
  if(!b || gst_buffer_get_size(b)>65536 || !gst_rtp_buffer_map(b,GST_MAP_READ,&packet)) {
   if(!r->rate.failed) r->rate.reason="ordered-rtp-map-or-size";
   r->rate.failed=true;
@@ -30,8 +31,8 @@ static GstPadProbeReturn rate_probe(GstPad *pad,GstPadProbeInfo *info,gpointer o
  g_mutex_unlock(&r->lock); return GST_PAD_PROBE_OK;
 }
 
-/* Serialized input chain owns the decoder. Only owned RAW buffers cross the
- * leaky queue. Other codecs pass unchanged through a NONleaky queue. */
+/* Only the selected native branch instantiates this decoder/queue. Its
+ * serialized input chain pushes owned RAW preview buffers to the leaky queue. */
 typedef struct {
  GstElement parent;
  GstPad *sink, *src;
@@ -241,7 +242,7 @@ static void pv_native_tap_init(PvNativeTap *tap)
  gst_pad_set_chain_function(tap->sink, tap_chain); gst_pad_set_event_function(tap->sink, tap_event);
  gst_element_add_pad(GST_ELEMENT(tap), tap->sink); gst_element_add_pad(GST_ELEMENT(tap), tap->src);
 }
-GstElement *pv_native422_filter_new(pv_native422_delivery delivery, void *opaque, GDestroyNotify destroy)
+static GstElement *native_filter_new(pv_native422_delivery delivery, void *opaque, GDestroyNotify destroy)
 {
  PvNativeTap *tap = g_object_new(pv_native_tap_get_type(), "name", "native-transform", NULL);
  tap->delivery=delivery; tap->opaque=opaque; tap->destroy=destroy;
@@ -258,6 +259,109 @@ GstElement *pv_native422_filter_new(pv_native422_delivery delivery, void *opaque
  gst_object_unref(out);
  if (!ok) { gst_object_unref(bin); return NULL; }
  return bin;
+}
+/* request-encoded-filter receives downstream RAW caps, not the selected codec.
+ * Inspect the first parsed CAPS event using the supported pad-probe API. The
+ * ordinary branch is a stock capsfilter: no AU callback, native decoder or queue.
+ * Native-only elements are inserted before the first AU, never by dropping or
+ * moving compressed buffers. A profile-family change requires a new attempt. */
+struct route_selector {
+ gint refs;
+ GstElement *bin, *policy; /* borrowed while the event probe is installed */
+ pv_native422_delivery delivery;
+ void *opaque;
+ GDestroyNotify destroy;
+ struct rate_observer *rate;
+ gboolean require_rtp, preview_nv12, selected;
+};
+static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
+{
+ (void)pad;(void)opaque;
+ gst_mini_object_unref(GST_MINI_OBJECT(GST_PAD_PROBE_INFO_DATA(info)));
+ GST_PAD_PROBE_INFO_DATA(info)=NULL;
+ GST_PAD_PROBE_INFO_FLOW_RETURN(info)=GST_FLOW_NOT_NEGOTIATED;
+ return GST_PAD_PROBE_HANDLED;
+}
+static void selector_unref(gpointer opaque)
+{
+ struct route_selector *s=opaque;
+ if(!g_atomic_int_dec_and_test(&s->refs)) return;
+ if(s->rate) rate_unref(s->rate);
+ if(s->destroy) s->destroy(s->opaque);
+ g_free(s);
+}
+static gboolean selector_delivery(void *opaque,GstSample *sample,const struct pv_native422_frame *frame)
+{ struct route_selector *s=opaque;return s->delivery(s->opaque,sample,frame); }
+static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
+{
+ (void)pad;
+ if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))!=GST_EVENT_CAPS) return GST_PAD_PROBE_OK;
+ struct route_selector *s=opaque;
+ GstCaps *caps;gst_event_parse_caps(GST_PAD_PROBE_INFO_EVENT(info),&caps);
+ const GstStructure *wire=gst_caps_is_fixed(caps)?gst_caps_get_structure(caps,0):NULL;
+ if(!wire) goto failed;
+ if(s->selected) {
+  GstCaps *policy=NULL;g_object_get(s->policy,"caps",&policy,NULL);
+  gboolean accepted=gst_caps_is_subset(caps,policy);gst_caps_unref(policy);
+  if(!accepted) goto failed;
+  return GST_PAD_PROBE_OK;
+ }
+ s->selected=TRUE;
+ gboolean native=gst_structure_has_name(wire,"video/x-h265") &&
+  !g_strcmp0(gst_structure_get_string(wire,"profile"),"main-422-10");
+ GstCaps *policy=gst_caps_new_empty_simple(gst_structure_get_name(wire));
+ if(gst_structure_has_name(wire,"video/x-h265")) {
+  gst_caps_set_simple(policy,"stream-format",G_TYPE_STRING,"hvc1","alignment",G_TYPE_STRING,"au",NULL);
+  /* Pin the actual profile. Never route a later native stream into stock 420
+   * decoding or silently enable native admission on a populated ordinary path. */
+  const char *profile=gst_structure_get_string(wire,"profile");
+  if(!profile || (g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !native)) {
+   gst_caps_unref(policy);goto failed;
+  }
+  gst_caps_set_simple(policy,"profile",G_TYPE_STRING,profile,NULL);
+ }
+ g_object_set(s->policy,"caps",policy,NULL);gst_caps_unref(policy);
+ if(!native && s->rate) { g_mutex_lock(&s->rate->lock);s->rate->ordinary=TRUE;g_mutex_unlock(&s->rate->lock); }
+ if(native) {
+  g_atomic_int_inc(&s->refs);
+  GstElement *branch=native_filter_new(selector_delivery,s,selector_unref);
+  if(!branch) goto failed;
+  PvNativeTap *tap=(PvNativeTap *)gst_bin_get_by_name(GST_BIN(branch),"native-transform");
+  tap->preview_nv12=s->preview_nv12;tap->require_rtp=s->require_rtp;
+  tap->rate=s->rate;if(tap->rate) g_atomic_int_inc(&tap->rate->refs);
+  gst_object_unref(tap);
+  if(!gst_bin_add(GST_BIN(s->bin),branch)) { gst_object_unref(branch);goto failed; }
+  GstPad *output=gst_element_get_static_pad(s->bin,"src");
+  GstPad *target=gst_element_get_static_pad(branch,"src");
+  gboolean ok=gst_ghost_pad_set_target(GST_GHOST_PAD(output),NULL) &&
+   gst_element_link(s->policy,branch) && gst_ghost_pad_set_target(GST_GHOST_PAD(output),target) &&
+   gst_element_sync_state_with_parent(branch);
+  gst_object_unref(target);gst_object_unref(output);
+  if(!ok) goto failed;
+ }
+ return GST_PAD_PROBE_OK;
+failed:
+ gst_pad_add_probe(pad,GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST,refuse_route,NULL,NULL);
+ GST_ELEMENT_ERROR(s->bin,CORE,NEGOTIATION,("Native receive branch unavailable"),(NULL));
+ return GST_PAD_PROBE_DROP;
+}
+GstElement *pv_native422_filter_new(pv_native422_delivery delivery,void *opaque,GDestroyNotify destroy)
+{
+ struct route_selector *s=g_new0(struct route_selector,1);
+ s->refs=1;s->delivery=delivery;s->opaque=opaque;s->destroy=destroy;s->preview_nv12=TRUE;
+ s->bin=gst_bin_new(NULL);s->policy=gst_element_factory_make("capsfilter","codec-route");
+ if(!delivery || !s->policy) { if(s->policy)gst_object_unref(s->policy);gst_object_unref(s->bin);selector_unref(s);return NULL; }
+ GstCaps *caps=gst_static_caps_get(&sink_template.static_caps);
+ g_object_set(s->policy,"caps",caps,NULL);gst_caps_unref(caps);
+ gst_bin_add(GST_BIN(s->bin),s->policy);
+ GstPad *input=gst_element_get_static_pad(s->policy,"sink"),*output=gst_element_get_static_pad(s->policy,"src");
+ gst_element_add_pad(s->bin,gst_ghost_pad_new("sink",input));gst_element_add_pad(s->bin,gst_ghost_pad_new("src",output));
+ /* The bin owns the configuration; a native child independently retains it
+  * through any external references surviving bin disposal. */
+ g_object_set_data_full(G_OBJECT(s->bin),"pixelview-route",s,selector_unref);
+ g_atomic_int_inc(&s->refs);
+ gst_pad_add_probe(input,GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,select_route,s,selector_unref);
+ gst_object_unref(input);gst_object_unref(output);return s->bin;
 }
 static void rate_closure_unref(gpointer opaque,GClosure *closure) { (void)closure; rate_unref(opaque); }
 static void rate_element_added(GstBin *bin,GstBin *sub,GstElement *element,gpointer opaque)
@@ -277,19 +381,18 @@ static void rate_element_added(GstBin *bin,GstBin *sub,GstElement *element,gpoin
 }
 gboolean pv_native422_filter_require_rtp(GstElement *filter, GstElement *receiver)
 {
- PvNativeTap *tap=(PvNativeTap *)gst_bin_get_by_name(GST_BIN(filter),"native-transform");
- if(!tap) return FALSE;
- tap->require_rtp=TRUE;
- if(tap->rate || !GST_IS_BIN(receiver)) { gst_object_unref(tap); return FALSE; }
- struct rate_observer *r=g_new0(struct rate_observer,1);r->refs=2;g_mutex_init(&r->lock);tap->rate=r;
+ struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
+ if(!s || s->rate || !GST_IS_BIN(receiver)) return FALSE;
+ s->require_rtp=TRUE;
+ struct rate_observer *r=g_new0(struct rate_observer,1);r->refs=2;g_mutex_init(&r->lock);s->rate=r;
  /* rswebrtc emits request-encoded-filter BEFORE creating parsebin/depay.
   * Its public deep-element-added signal observes the later native topology. */
  gulong id=g_signal_connect_data(receiver,"deep-element-added",G_CALLBACK(rate_element_added),r,rate_closure_unref,0);
- if(!id) { rate_unref(r); tap->failed=TRUE; }
- gst_object_unref(tap); return id!=0;
+ if(!id) { rate_unref(r); r->rate.failed=true; }
+ return id!=0;
 }
 void pv_native422_filter_preview_format(GstElement *filter, gboolean nv12)
 {
- PvNativeTap *tap = (PvNativeTap *)gst_bin_get_by_name(GST_BIN(filter), "native-transform");
- if (tap) { tap->preview_nv12=nv12; gst_object_unref(tap); }
+ struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
+ if(s) s->preview_nv12=nv12;
 }

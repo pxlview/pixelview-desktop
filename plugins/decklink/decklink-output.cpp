@@ -86,7 +86,7 @@ static bool decklink_output_start(void *data)
 		return false;
 	}
 	struct obs_audio_info aoi;
-	if (decklink->IsReceive()) {
+	if (decklink->IsNativeReceive()) {
 		ComPtr<DeckLinkDevice> device;
 		if (decklink->deviceHash.empty()) {
 			return false;
@@ -98,12 +98,6 @@ static bool decklink_output_start(void *data)
 		DeckLinkDeviceMode *mode = device->FindOutputMode(decklink->modeID);
 		if (!mode) {
 			return false;
-		}
-		if (!decklink->IsNativeReceive()) {
-			obs_video_info vi = {};
-			if (!obs_get_video_info(&vi) || !mode->IsEqualFrameRate(vi.fps_num, vi.fps_den)) {
-				return false;
-			}
 		}
 		if (!decklink->PrepareReceive(mode)) {
 			decklink->Deactivate();
@@ -233,7 +227,7 @@ static bool prepare_audio(DeckLinkOutput *decklink, const struct audio_data *fra
 static void decklink_output_raw_audio(void *data, struct audio_data *frames)
 {
 	auto *decklink = (DeckLinkOutput *)data;
-	if (decklink->IsReceive()) {
+	if (decklink->IsNativeReceive()) {
 		return;
 	}
 	struct audio_data in;

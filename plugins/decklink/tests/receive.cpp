@@ -3,8 +3,10 @@
 #include "DecklinkOutput.hpp"
 #include "decklink-devices.hpp"
 #include "sdk-stubs.hpp"
+#include "rendered-media.inc"
 #include "../pixelview-whep/source-feed-queue.h"
 #include <util/platform.h>
+#include <media-io/video-frame.h>
 #include <cassert>
 #include <thread>
 #include <mutex>
@@ -151,11 +153,13 @@ struct Card : StubIDeckLinkOutput {
 	};
 	std::vector<A> audio;
 	std::atomic<unsigned> syncWrites{0};
+	std::mutex syncMutex;
+	std::vector<int16_t> syncPCM;
 	HRESULT WriteAudioSamplesSync(void *p, uint32_t n, uint32_t *written) override
 	{
+		std::lock_guard<std::mutex> lock(syncMutex);
 		++syncWrites; *written=n;
-		assert(n == 960);
-		for (unsigned i=0; i<n*2; ++i) assert(static_cast<int16_t *>(p)[i] == 16384);
+		syncPCM.assign(static_cast<int16_t *>(p), static_cast<int16_t *>(p)+n*2);
 		return S_OK;
 	}
 	bool video = false, sound = false, started = false;
@@ -637,6 +641,7 @@ int main(int argc, char **argv)
 	obs_audio_info ai = {48000, SPEAKERS_STEREO};
 	assert(obs_reset_audio(&ai));
 	auto *native = pv_owner_fixture_create();
+	pv_owner_fixture_controls(native);
 	assert(native);
 	sdkMode.width = sdk.card.mode.width = 1024;
 	sdkMode.height = sdk.card.mode.height = 64;
@@ -731,17 +736,26 @@ int main(int argc, char **argv)
 		os_sleep_ms(2);
 	}
 	assert(!obs_output_active(realOutput));
+	// Exercise the actual UI media binding with its caller-owned rendered queue.
+	video_output_info borrowedInfo={}; borrowedInfo.name="borrowed UI rendered queue";
+	borrowedInfo.format=VIDEO_FORMAT_BGRA; borrowedInfo.width=48; borrowedInfo.height=2;
+	borrowedInfo.fps_num=30000; borrowedInfo.fps_den=1001; borrowedInfo.cache_size=16;
+	borrowedInfo.colorspace=VIDEO_CS_709; borrowedInfo.range=VIDEO_RANGE_FULL;
+	video_t *borrowedVideo=nullptr;
+	assert(video_output_open(&borrowedVideo,&borrowedInfo)==VIDEO_OUTPUT_SUCCESS);
+	bind_rendered_media(realOutput,borrowedVideo);
 	// Retain the registered output, not merely a private-media helper.
 	discovery.DeckLinkDeviceArrived(&sdk);
 	auto *retained = static_cast<DeckLinkOutput *>(obs_obj_get_data(realOutput));
 	for (unsigned route = 0; route < 4; ++route) {
 		assert(retained->BindReceive(realSource, false));
-		assert(obs_output_video(realOutput) == obs_get_video());
+		assert(obs_output_video(realOutput) == borrowedVideo);
 		assert(obs_output_start(realOutput));
 		assert(obs_output_active(realOutput));
-		assert(obs_output_video(realOutput) == obs_get_video());
-		assert(video_output_get_info(obs_output_video(realOutput))->width == 32);
-		assert(obs_output_audio(realOutput) != obs_get_audio());
+		assert(obs_output_video(realOutput) == borrowedVideo);
+		assert(video_output_get_info(obs_output_video(realOutput))->width == 48);
+		assert(obs_output_audio(realOutput) == obs_get_audio());
+		assert(!realFeed.queue.token); // rendered output must not attach any source PCM feed
 		obs_output_stop(realOutput);
 		for (int i = 0; i < 100 && obs_output_active(realOutput); ++i) os_sleep_ms(2);
 		assert(!obs_output_active(realOutput));
@@ -749,38 +763,86 @@ int main(int argc, char **argv)
 		std::thread p([&] { for (int i = 0; i < 20; ++i) { push(realFeed); os_sleep_ms(2); } });
 		assert(obs_output_start(realOutput)); p.join();
 		assert(obs_output_active(realOutput));
-		assert(obs_output_video(realOutput) != obs_get_video());
+		assert(obs_output_video(realOutput) != borrowedVideo);
+		assert(obs_output_audio(realOutput) != obs_get_audio());
+		assert(realFeed.queue.token && realFeed.queue.route == PV_FEED_NATIVE);
+		const unsigned syncBefore=sdk.card.syncWrites;
+		sdk.card.complete();
+		assert(sdk.card.queued.back().t==3003);
+		assert(sdk.card.audio.back().t==4804 && sdk.card.audio.back().count==480);
+		assert(sdk.card.syncWrites==syncBefore);
 		obs_output_stop(realOutput);
 		for (int i = 0; i < 100 && obs_output_active(realOutput); ++i) os_sleep_ms(2);
 		assert(!obs_output_active(realOutput));
 	}
-	// Actual registered rendered owner must never see unsynchronized +600ms PCM.
-	auto *renderedSource = pv_owner_fixture_create();
-	pv_owner_fixture_controls(renderedSource);
+	// Ordinary selection has no native feed proc at all: it is only a health
+	// selection, never a source PCM attachment or a replacement media endpoint.
+	obs_source_info mixedInfo = {};
+	mixedInfo.id="ordinary_audio"; mixedInfo.type=OBS_SOURCE_TYPE_INPUT;
+	mixedInfo.output_flags=OBS_SOURCE_AUDIO; mixedInfo.get_name=name;
+	mixedInfo.create=[](obs_data_t *, obs_source_t *s)->void * { return s; };
+	mixedInfo.destroy=[](void *){};
+	obs_register_source(&mixedInfo);
+	auto *renderedSource=obs_source_create_private(mixedInfo.id,"ordinary mix source",nullptr);
+	auto *scene=obs_scene_create_private("ordinary receive scene");
+	assert(obs_scene_add(scene,renderedSource));
+	auto *otherSource=obs_source_create_private(mixedInfo.id,"second mix source",nullptr);
+	assert(obs_scene_add(scene,otherSource));
+	obs_set_output_source(0,obs_scene_get_source(scene));
+	assert(!obs_source_get_monitoring_enabled(renderedSource));
 	assert(retained->BindReceive(renderedSource, false));
+	assert(!retained->IsNativeReceive());
 	assert(obs_output_start(realOutput));
-	const uint64_t renderedNow = os_gettime_ns();
-	pv_owner_fixture_audio(renderedSource, true, renderedNow + 600000000);
-	video_data renderedFrame = {}; uint8_t renderedPixels[48*2*4] = {};
-	renderedFrame.data[0]=renderedPixels; renderedFrame.linesize[0]=48*4;
-	renderedFrame.timestamp=renderedNow;
-	retained->UpdateVideoFrame(&renderedFrame);
-	assert(sdk.card.syncWrites == 0);
-	// Only the clocked boundary publishes rendered PCM; repeated pumps cannot duplicate it.
-	pv_owner_fixture_audio(renderedSource, false, renderedNow + 600000000);
-	renderedFrame.timestamp=renderedNow+600000000;
-	retained->UpdateVideoFrame(&renderedFrame);
-	retained->UpdateVideoFrame(&renderedFrame);
-	assert(sdk.card.syncWrites == 1);
+	assert(obs_output_audio(realOutput)==obs_get_audio());
+	// Feed the actual OBS mixer. Only one rendered video callback establishes
+	// the stock first-video epoch; subsequent PCM must flow without video pumps.
+	video_frame renderedFrame = {};
+	assert(video_output_lock_frame(borrowedVideo,&renderedFrame,1,os_gettime_ns()));
+	memset(renderedFrame.data[0],0,renderedFrame.linesize[0]*2);
+	video_output_unlock_frame(borrowedVideo);
+	for(unsigned i=0;i<100 && !retained->start_timestamp;++i) os_sleep_ms(2);
+	assert(retained->start_timestamp);
+	float pcm[960]; for(auto &sample:pcm) sample=.5f;
+	for(unsigned phase=0;phase<4;++phase) {
+		obs_source_set_volume(renderedSource,phase ? .25f : 1.f);
+		obs_source_set_muted(renderedSource,phase>=2);
+		unsigned before=sdk.card.syncWrites;
+		const uint64_t epoch=os_gettime_ns();
+		for(unsigned i=0;i<50;++i) {
+			obs_source_audio samples={}; samples.data[0]=reinterpret_cast<uint8_t *>(pcm);
+			samples.data[1]=reinterpret_cast<uint8_t *>(pcm); samples.frames=960;
+			samples.speakers=SPEAKERS_STEREO; samples.format=AUDIO_FORMAT_FLOAT_PLANAR;
+			samples.samples_per_sec=48000; samples.timestamp=epoch+uint64_t(i)*20000000;
+			obs_source_output_audio(renderedSource,&samples);
+			if(phase==3) { // source selection is not a private audio solo
+				obs_source_set_volume(otherSource,.25f);
+				obs_source_output_audio(otherSource,&samples);
+			}
+			os_sleepto_ns(epoch+uint64_t(i+1)*20000000);
+		}
+		assert(sdk.card.syncWrites>before+10);
+		std::lock_guard<std::mutex> lock(sdk.card.syncMutex);
+		assert(!sdk.card.syncPCM.empty());
+		const int expected=phase==2 ? 0 : phase==1 || phase==3 ? 4096 : 16384;
+		for(auto sample:sdk.card.syncPCM) assert(abs(int(sample)-expected)<=1);
+	}
+	assert(!obs_source_get_monitoring_enabled(renderedSource));
 	obs_output_stop(realOutput);
 	for (int i=0; i<100 && obs_output_active(realOutput); ++i) os_sleep_ms(2);
 	assert(!obs_output_active(realOutput));
 	assert(retained->BindReceive(nullptr, false));
+	obs_set_output_source(0,nullptr);
+	obs_scene_release(scene);
 	obs_source_release(renderedSource);
-	puts("actual rendered owner: no early +600ms PCM, one clocked source-only write PASS");
-	assert(obs_output_video(realOutput) == obs_get_video());
+	obs_source_release(otherSource);
+	puts("actual stock rendered owner: OBS mixed PCM independent of video pumps, native gain/mute and monitoring-off PASS");
+	assert(obs_output_video(realOutput) == borrowedVideo);
 	assert(obs_output_audio(realOutput) == obs_get_audio());
 	obs_output_release(realOutput);
+	obs_queue_task(OBS_TASK_DESTROY, [](void *){}, nullptr, true);
+	// The native owner must never close this borrowed UI endpoint.
+	assert(video_output_get_info(borrowedVideo)->width==48);
+	video_output_close(borrowedVideo);
 	obs_source_release(realSource);
 	obs_data_release(settings);
 	calldata_free(&bind);

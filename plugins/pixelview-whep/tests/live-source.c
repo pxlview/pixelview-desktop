@@ -25,7 +25,7 @@ int main(void)
  struct obs_audio_info ai={.samples_per_sec=48000,.speakers=SPEAKERS_STEREO}; assert(obs_reset_audio(&ai));
  assert(obs_module_load());
  obs_source_t *source=obs_source_create_private("pixelview_whep_source","live-test",NULL); assert(source);
- struct receiver r={.source=source,.accept_samples=true,.latency=50,.active_latency=50,.jitter_latency=-1};
+ struct receiver r={.source=source,.accept_samples=true,.latency=50,.active_latency_override=true,.active_latency=50,.jitter_latency=-1};
  g_mutex_init(&r.lock); g_rec_mutex_init(&r.delivery);
  r.pipe=make_pipeline(&r,endpoint); memset(endpoint,0,sizeof(endpoint)); assert(r.pipe);
  GstElement *rx=gst_bin_get_by_name(GST_BIN(r.pipe),"rx"); GObject *signaller=NULL;

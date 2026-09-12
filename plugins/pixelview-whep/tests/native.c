@@ -67,7 +67,7 @@ static void test_audio(obs_source_t *source, const struct obs_source_audio *audi
 static void cancellation_during_build(bool replace)
 {
  struct receiver r = {.state="connecting", .endpoint=g_strdup("test://synthetic"),
-                      .latency=50, .changed=true};
+                      .latency_override=true, .latency=50, .changed=true};
  cancel_during_build = &r;
  replace_during_build = replace;
  r.thread = g_thread_new("cancel-test", worker, &r);
@@ -119,7 +119,7 @@ int main(void)
  assert(source);
  obs_data_t *saved = obs_source_get_settings(source);
  assert(!strstr(obs_data_get_json(saved), "secret"));
- assert(obs_data_get_int(saved, "latency") == 100);
+ assert(obs_data_get_int(saved, "latency") == 50);
  calldata_t cd; calldata_init(&cd);
  assert(proc_handler_call(obs_source_get_proc_handler(source), "get_status", &cd));
  assert(!strcmp(calldata_string(&cd, "state"), "idle"));
@@ -139,7 +139,7 @@ int main(void)
  assert(proc_handler_call(obs_source_get_proc_handler(source), "disconnect", &cd));
  GstElement *rtc = gst_element_factory_make("webrtcbin", NULL);
  assert(rtc);
- struct receiver latency_test = {.latency = 50, .active_latency = 50};
+ struct receiver latency_test = {.latency_override = true, .active_latency_override = true, .latency = 50, .active_latency = 50};
  struct receive_attempt *latency_attempt=attempt_new(&latency_test);
  webrtc_ready(NULL, "test", rtc, latency_attempt);attempt_unref(latency_attempt,NULL);
  guint latency=0; g_object_get(rtc,"latency",&latency,NULL);

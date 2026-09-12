@@ -41,13 +41,15 @@ subprocess.run([str(OUT/'private-media'),str(frameworks/'libobs-opengl.dylib'),s
 ui_source = (ROOT/'plugins/decklink-output-ui/decklink-ui-main.cpp').read_text()
 manual = re.search(r'bool ready = (.*?);', ui_source, re.S).group(0)
 assert ui_source.index(manual) < ui_source.index('main_output_running = obs_output_start(output)')
+media = re.search(r'obs_output_set_media\(context.output,.*?;', ui_source, re.S).group(0)
+(OUT/'rendered-media.inc').write_text('static void bind_rendered_media(obs_output_t *output, video_t *video) { struct { obs_output_t *output; video_t *video_queue; } context={output,video}; ' + media + ' }')
 (OUT/'manual-ready.inc').write_text('static bool manual_ready(obs_source_t *selected) { calldata_t cd; calldata_init(&cd); ' + manual + ' calldata_free(&cd); return ready; }')
 qt = ROOT/'.deps/obs-deps-qt6-2026-05-21-universal/lib'
 subprocess.run(base[:2]+['-F'+str(qt)]+base[2:]+['-include','arm_acle.h','-I'+str(qt/'QtCore.framework/Headers'),'-F'+str(qt),'-framework','QtCore','-Wl,-rpath,'+str(qt),str(ROOT/'plugins/decklink/tests/receive-ui.cpp'),'-o',str(OUT/'receive-ui')],check=True)
 subprocess.run([str(OUT/'receive-ui')],check=True,timeout=20)
-runtime = ROOT/'plugins/pixelview-whep/.test-build/native-422/runtime'
+runtime = ROOT/'.deps/pixelview-gstreamer'
 gstSDK = ROOT/'.deps/gstreamer-upstream-1.28.3/sdk'
-assert runtime.is_dir(), 'Run pixelview-whep/tests/run-native-422.py first'
+assert runtime.is_dir(), 'Stage the pinned GStreamer runtime first'
 gstinc = ['-I'+str(gstSDK/p) for p in ['include','include/gstreamer-1.0','include/glib-2.0','lib/glib-2.0/include']]
 gstlibs = ['-L'+str(runtime/'lib'), '-Wl,-rpath,'+str(runtime/'lib')] + ['-l'+x for x in ['gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gstcodecparsers-1.0.0','gstrtp-1.0.0','glib-2.0.0','gobject-2.0.0']]
 for key in list(os.environ):
@@ -92,5 +94,5 @@ cmd += [str(ROOT/'plugins/decklink'/f) for f in files] + [str(ROOT/'plugins/deck
 subprocess.run(cmd, check=True)
 if whep:
     raise SystemExit(0)
-fixtures=ROOT/'plugins/pixelview-whep/.test-build/native-422'
+fixtures=Path(os.environ.get('PV_DECKLINK_FIXTURES', ROOT/'plugins/pixelview-whep/.test-build/native-422'))
 subprocess.run([str(OUT/'receive'),str(fixtures/'limited.h265'),str(fixtures/'limited.v210'),str(frameworks/'libobs-opengl.dylib'),str(ROOT/'libobs/data')], check=True, timeout=30)

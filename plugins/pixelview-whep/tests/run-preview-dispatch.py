@@ -10,7 +10,7 @@ PLUGIN = ROOT / 'plugins/pixelview-whep'
 WORK = PLUGIN / '.test-build/preview-dispatch'
 WORK.mkdir(parents=True, exist_ok=True)
 SDK = ROOT / '.deps/gstreamer-upstream-1.28.3/sdk'
-STAGE = PLUGIN / '.test-build/native-422/runtime'
+STAGE = Path(os.environ.get('PIXELVIEW_TEST_RUNTIME', ROOT / '.deps/pixelview-gstreamer'))
 FW = ROOT / 'build_macos/libobs/RelWithDebInfo'
 DEPS = sorted((ROOT / '.deps').glob('obs-deps-*/include/simde'))[-1].parents[1]
 ENV = {k:v for k,v in os.environ.items() if not k.startswith(('GST_', 'DYLD_'))}
