@@ -57,6 +57,7 @@ class OBSAbout;
 #include <utility/PixelviewDeepLink.hpp>
 class QTabBar;
 class QLineEdit;
+class QToolButton;
 #include <QElapsedTimer>
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -322,6 +323,8 @@ private:
 	QWidget *pixelviewSendingPanel = nullptr, *pixelviewReceivingPanel = nullptr;
 	QLineEdit *pixelviewReceiveId = nullptr, *pixelviewReceivePassword = nullptr, *pixelviewReceiveName = nullptr;
 	QPushButton *pixelviewReceiveButton = nullptr;
+	QToolButton *pixelviewReceiveBuffer = nullptr;
+	int pixelviewReceiveBufferMs = 100;
 	QLabel *pixelviewReceiveStatus = nullptr;
 	QLabel *pixelviewReceiveStorageStatus = nullptr;
 	OBSSource pixelviewReceiveSource, pixelviewSendOutput;

@@ -118,6 +118,24 @@ static void native422_failure_locked(struct receiver *r,GstMessage *msg)
   blog(LOG_WARNING,"[pixelview-whep] native422 %s",text);g_free(text);
  }
 }
+static void log_media_stop(GstMessage *msg,bool stale)
+{
+ if(msg) {
+  if(GST_MESSAGE_TYPE(msg)==GST_MESSAGE_EOS) {
+   blog(LOG_WARNING,"[pixelview-whep] media stopped: end of stream");
+   return;
+  }
+  GError *error=NULL;gchar *debug=NULL;
+  gst_message_parse_error(msg,&error,&debug);
+  const char *domain=error?g_quark_to_string(error->domain):NULL;
+  GstObject *source=GST_MESSAGE_SRC(msg);
+  blog(LOG_ERROR,"[pixelview-whep] media pipeline error: source=%s domain=%s code=%d",
+   source?GST_OBJECT_NAME(source):"unknown",domain?domain:"unknown",error?error->code:0);
+  g_clear_error(&error);g_free(debug);
+ } else if(stale) {
+  blog(LOG_ERROR,"[pixelview-whep] media stopped: no video received for 15 seconds");
+ }
+}
 static void status_proc(void *opaque, calldata_t *cd)
 {
  struct receiver *r = opaque;
@@ -753,7 +771,12 @@ static gpointer worker(gpointer opaque)
     g_rec_mutex_unlock(&r->delivery);
     g_mutex_lock(&r->lock);
     r->last_video = os_gettime_ns();
-    if (failed && !r->quit && generation == r->generation) r->state = "error";
+    if (failed && !r->quit && generation == r->generation) {
+     r->state = "error";
+     blog(LOG_ERROR,"[pixelview-whep] media startup failed: %s",
+      !r->pipe?(r->offer_failed?"no verified receive offer":"pipeline creation failed"):
+      "pipeline did not enter playing state");
+    }
     g_mutex_unlock(&r->lock);
     if (failed) stop_pipeline(r);
    }
@@ -769,6 +792,7 @@ static gpointer worker(gpointer opaque)
    if ((msg || stale) && !r->changed) {
     r->accept_samples = false;
     r->state = msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS ? "ended" : "error";
+    log_media_stop(msg,stale);
    }
    g_mutex_unlock(&r->lock);
    if (msg || stale) stop_pipeline(r); /* no reconnect spin, no raw errors */
@@ -791,6 +815,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
  sanitize(NULL, settings);
  struct receiver *r = g_new0(struct receiver, 1);
  r->source = source; r->state = "idle"; r->jitter_latency = -1;
+ obs_source_set_async_unbuffered(source, true);
  r->preview_enabled = true;
  g_mutex_init(&r->lock); g_rec_mutex_init(&r->delivery); g_cond_init(&r->wake);
  source_controls_init(r);

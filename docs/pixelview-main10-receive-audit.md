@@ -38,9 +38,15 @@ This is the current working-tree status, superseding the original topology audit
 - `run-preview-dispatch.py`, `run-ordinary-route.py`, and `test/pixelview/test_decklink_output_ui.py` passed again; the UI runner ran4 tests. Final audio runner passed after the generation recheck. Logs: `/tmp/pv-audio-final.log`, `/tmp/pv-combined-decklink.log`, `/tmp/pv-combined-preview.log`, `/tmp/pv-combined-ordinary.log`, `/tmp/pv-combined-ui.log`.
 - The earlier actual compressed Main/Main10 WHEP30/31-frame results and full native422 suite above are retained, **not rerun on this final audio revision**. The known old finite-rate fixture blockers remain unchanged. Full parent-app compile/signature, live glitch reproduction, physical SDI and sustained/network A/V acceptance remain pending. No app build/replacement/restart, physical hardware, credentials, commit or push was performed.
 
-At the combined-path checkpoint jitter remained **100ms**; the user had asked for stock-path simplification, not a new200ms experiment. Supported OBS adapters and narrow preselection/native observers still exist.
+At the combined-path checkpoint jitter remained **100 ms**; the user had asked for stock-path simplification, not a new 200 ms experiment. Supported OBS adapters and narrow preselection/native observers still exist.
 
-### Current source: use native upstream jitter defaults
+### Current source: configurable 100 ms Desktop jitter
+
+Desktop now defaults `PixelviewReceive/BufferMs` to 100, exposes it through the compact **Buffer: 100 ms** link in the Receiving panel, persists values from 0 through 2000 ms, and passes the selected value explicitly in every WHEP `connect` call. The dialog recommends keeping 100 ms normally and increasing it if glitches occur. Changes apply to the next connection. The plugin continues to preserve omission as a distinct native-upstream-default path for non-Desktop callers.
+
+The libobs source also enables async unbuffered mode because the synchronized GStreamer appsinks already pace delivery on the pipeline clock. This removes the second OBS video rebuffer; hardware smoothness and live jitter tolerance remain acceptance checks.
+
+### Earlier upstream-default revision (superseded)
 
 The user subsequently explicitly requested removal of the override. Desktop now omits connect latency; the receiver snapshots a separate optional-override flag into each attempt. The default callback path does **not** call `g_object_set` on latency. Explicit0/50/100/2000 remain supported; invalid values are rejected. Removed the unused OBS setting default and numeric50 initialization/fallback. Requested status is -1 when unset; effective `jitter_latency` remains -1 before creation, then reports actual GObject readback.
 

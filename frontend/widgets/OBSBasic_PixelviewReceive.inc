@@ -1,5 +1,6 @@
 // Pixelview modification: one native canvas, mutually exclusive send/receive controls.
 #include <QToolButton>
+#include <QInputDialog>
 #include <QTabBar>
 #include <QLineEdit>
 #include <QSysInfo>
@@ -132,6 +133,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	pixelviewReceivePassword->setObjectName(QStringLiteral("pixelviewReceivePassword"));
 	pixelviewReceiveName->setObjectName(QStringLiteral("pixelviewReceiveName"));
 	auto *config = App()->GetUserConfig();
+	config_set_default_int(config, "PixelviewReceive", "BufferMs", 100);
+	pixelviewReceiveBufferMs = qBound(0, (int)config_get_int(config, "PixelviewReceive", "BufferMs"), 2000);
 	pixelviewReceiveId->setText(QString::fromUtf8(config_get_string(config, "PixelviewReceive", "SessionId")));
 	QString name = QString::fromUtf8(config_get_string(config, "PixelviewReceive", "Name"));
 	pixelviewReceiveName->setText(name.isEmpty() ? QSysInfo::machineHostName() : name);
@@ -231,7 +234,29 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	connect(pixelviewReceiveButton, &QPushButton::clicked, this, [this] {
 		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else StartPixelviewReceive();
 	});
-	connectionRows->addWidget(pixelviewReceiveStatus);
+	auto *statusRow = new QHBoxLayout;
+	statusRow->setContentsMargins(0, 0, 0, 0); statusRow->setSpacing(8);
+	statusRow->addWidget(pixelviewReceiveStatus, 1);
+	pixelviewReceiveBuffer = new QToolButton(connection);
+	pixelviewReceiveBuffer->setObjectName(QStringLiteral("pixelviewReceiveBuffer"));
+	pixelviewReceiveBuffer->setText(QStringLiteral("Buffer: %1 ms").arg(pixelviewReceiveBufferMs));
+	pixelviewReceiveBuffer->setAutoRaise(true);
+	pixelviewReceiveBuffer->setToolTip(QStringLiteral("Change the WebRTC jitter buffer for the next connection."));
+	pixelviewReceiveBuffer->setStyleSheet(QStringLiteral("QToolButton { border: none; background: transparent; color: white; font-size: 11px; padding: 0; text-decoration: underline; }"));
+	connect(pixelviewReceiveBuffer, &QToolButton::clicked, this, [this] {
+		bool accepted = false;
+		const int value = QInputDialog::getInt(this, QStringLiteral("Receive buffer"),
+			QStringLiteral("Keep this at 100 ms normally. If you see glitches, try increasing it.\n\nJitter buffer (milliseconds):"),
+			pixelviewReceiveBufferMs, 0, 2000, 10, &accepted);
+		if (!accepted) return;
+		pixelviewReceiveBufferMs = value;
+		pixelviewReceiveBuffer->setText(QStringLiteral("Buffer: %1 ms").arg(value));
+		auto *config = App()->GetUserConfig();
+		config_set_int(config, "PixelviewReceive", "BufferMs", value);
+		config_save_safe(config, "tmp", nullptr);
+	});
+	statusRow->addWidget(pixelviewReceiveBuffer, 0, Qt::AlignTop);
+	connectionRows->addLayout(statusRow);
 	connectionRows->addWidget(hardwareDivider);
 	connectionRows->addWidget(outputHint);
 	connectionRows->addWidget(decklink);
@@ -263,6 +288,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		calldata_t data; calldata_init(&data);
 		PixelviewBindDeckLinkReceive(pixelviewReceiveSource, true);
 		calldata_set_string(&data, "endpoint", endpoint.toUtf8().constData());
+		calldata_set_int(&data, "latency", pixelviewReceiveBufferMs);
 		const bool accepted = proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "connect", &data);
 		calldata_free(&data);
 		if (!accepted) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native receive connection unavailable."), ReceiveStatusTone::Error); return; }
@@ -533,6 +559,7 @@ void OBSBasic::RefreshPixelviewModes()
 	pixelviewReceiveId->setEnabled(!busy);
 	pixelviewReceivePassword->setEnabled(!busy);
 	pixelviewReceiveName->setEnabled(!busy);
+	pixelviewReceiveBuffer->setEnabled(!busy);
 	pixelviewReceiveButton->setText(pixelviewReceiveIntent ? QStringLiteral("Stop receiving") : QStringLiteral("Start receiving"));
 	pixelviewReceiveButton->setEnabled(!isClosing() && !pixelviewShutdownPending && (pixelviewReceiveIntent || !busy));
 }

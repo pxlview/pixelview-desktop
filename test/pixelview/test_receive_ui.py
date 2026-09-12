@@ -84,7 +84,13 @@ class ReceiveUI(unittest.TestCase):
         init = body(text, 'InitPixelviewReceive')
         self.assertIn('QLineEdit::Password', init)
         self.assertIn('QSysInfo::machineHostName()', init)
-        self.assertNotRegex(init, r'calldata_set_\w+\([^;]*"latency"')
+        self.assertIn('config_set_default_int(config, "PixelviewReceive", "BufferMs", 100)', init)
+        self.assertIn('QInputDialog::getInt', init)
+        self.assertIn('Keep this at 100 ms normally. If you see glitches, try increasing it.', init)
+        self.assertIn('QStringLiteral("Buffer: %1 ms").arg(pixelviewReceiveBufferMs)', init)
+        self.assertNotIn('Buffer: %1 ms…', init)
+        self.assertIn('color: white', init)
+        self.assertIn('calldata_set_int(&data, "latency", pixelviewReceiveBufferMs)', init)
         self.assertNotIn('->start(', init)
         start = body(text, 'StartPixelviewReceive')
         self.assertLess(start.index('PixelviewModeBusy()'), start.index('->start('))
@@ -160,11 +166,12 @@ int main() {
 #include <cassert>
 class OBSBasic { public:
 bool receive=false, busy=false, closing=false;
-QTabBar tabs; QWidget sending, receiving; QLineEdit id, password, name; QPushButton start;
+QTabBar tabs; QWidget sending, receiving; QLineEdit id, password, name; QPushButton start; QToolButton buffer;
 QTabBar *pixelviewModeTabs=&tabs;
 QWidget *pixelviewSendingPanel=&sending, *pixelviewReceivingPanel=&receiving;
 QLineEdit *pixelviewReceiveId=&id, *pixelviewReceivePassword=&password, *pixelviewReceiveName=&name;
 QPushButton *pixelviewReceiveButton=&start;
+QToolButton *pixelviewReceiveBuffer=&buffer;
 bool pixelviewReceiving=false, pixelviewReceiveIntent=false;
 bool PixelviewModeBusy() const { return busy; }
 bool isClosing() const { return closing; }
