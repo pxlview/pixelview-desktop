@@ -469,6 +469,7 @@ int main(int argc,char **argv) {
  assert(w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"ColdSession",revision).state==pixelview::ReceiveCredentialStore::State::Missing);
  w.pixelviewReceiveName->setText(QSysInfo::machineHostName());
  inbox.shutdown(); w.SelectPixelviewMode(0); w.pixelviewReceiveId->clear();
+ assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","Mode"))=="sending" && "Leaving receive mode must persist the sending tab");
 
  auto *sidebar=w.findChild<QWidget *>("pixelviewSidebar"); assert(sidebar);
  w.resize(1000,800); w.show(); app.processEvents();
@@ -492,6 +493,7 @@ int main(int argc,char **argv) {
   *busy=true; w.SelectPixelviewMode(1); assert(!w.pixelviewReceiving); *busy=false;
  }
  w.SelectPixelviewMode(1); assert(w.pixelviewReceiving && w.pixelviewReceiveScene);
+ assert(QString::fromUtf8(config_get_string(application.config,"PixelviewReceive","Mode"))=="receiving" && "Entering receive mode must persist the receiving tab");
  app.processEvents();
 
  assertCredentials(w);

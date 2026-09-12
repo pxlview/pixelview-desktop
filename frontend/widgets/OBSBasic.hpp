@@ -352,6 +352,13 @@ private:
 	bool pixelviewDev=false, pixelviewStartPermit=false, pixelviewActualStreaming=false;
 	bool pixelviewClosingSocket=false;
 	bool pixelviewShutdownPending=false;
+	// Deferred close bookkeeping: monotonic deadline, last logged wait reason, and
+	// the application-quit override that completes teardown synchronously.
+	qint64 pixelviewShutdownDeadline=0;
+	QString pixelviewShutdownWait;
+	bool pixelviewForceClose=false;
+	// Starts native shutdown once; true when scene teardown may proceed.
+	bool PixelviewShutdownReady();
 	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
 	int pixelviewBackoff=1000;
 	OBSService pixelviewPreviousService;

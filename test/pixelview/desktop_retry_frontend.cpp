@@ -1,6 +1,7 @@
 // Compiles extracted, unmodified production frontend methods against offline boundaries.
 #include "frontend/utility/PixelviewDesktop.hpp"
 #include <QtCore/QJsonDocument>
+#include <QtCore/QStringList>
 #include <cassert>
 #include <future>
 #include <vector>
@@ -42,9 +43,10 @@ Application *App(){return &application;}
 bool config_get_bool(config_t *config,const char *section,const char *name) {return config && config->booleans[{section,name}];}
 void config_set_bool(config_t *config,const char *section,const char *name,bool value) {assert(config);config->booleans[{section,name}]=value;}
 int config_get_int(config_t*,const char*,const char*) {return 2;}
-constexpr int LOG_INFO=0;
+constexpr int LOG_INFO=0, LOG_WARNING=2;
 #define SHUTDOWN_SEPARATOR "shutdown"
-void blog(int,const char*){}
+#define PIXELVIEW_SHUTDOWN_WAIT_MS 10000
+void blog(int,const char*,...){}
 constexpr int OBS_FRONTEND_EVENT_STREAMING_STARTING=1;
 class OBSBasic {
 public:
@@ -56,6 +58,8 @@ public:
  bool pixelviewStartPermit=false,pixelviewActualStreaming=false,pixelviewStopPending=false;
  bool pixelviewNativeAttempt=false,pixelviewClosingSocket=false,pixelviewStreamingBusy=false;
  bool pixelviewUnpairPending=false,isClosing_=false,pixelviewShutdownPending=false;
+ qint64 pixelviewShutdownDeadline=0; QString pixelviewShutdownWait; bool pixelviewForceClose=false;
+ bool PixelviewShutdownReady();
  QUrl pixelviewOrigin{"https://fixture.invalid"};bool pixelviewDev=false;
  config_t *activeConfiguration=nullptr;
  int authentications=0,teardowns=0,nativePreparations=0;

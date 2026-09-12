@@ -322,6 +322,10 @@ void OBSBasic::SelectPixelviewMode(int index)
 	}
 	pixelviewReceiving = index == 1;
 	PixelviewBindDeckLinkReceive(pixelviewReceiveSource, pixelviewReceiving);
+	// Remember the operator's mode so the next launch opens on the same tab.
+	// Shutdown leaves receive mode through StopPixelviewReceive, never through here.
+	config_set_string(App()->GetUserConfig(), "PixelviewReceive", "Mode", pixelviewReceiving ? "receiving" : "sending");
+	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	RefreshPixelviewDevices();
 }
 

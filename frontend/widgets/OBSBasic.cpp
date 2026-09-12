@@ -612,9 +612,13 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 		[]() { OBSProjector::UpdateMultiviewProjectors(); });
 
 	connect(App(), &OBSApp::StyleChanged, this, [this]() { OnEvent(OBS_FRONTEND_EVENT_THEME_CHANGED); });
-#ifndef __APPLE__
-	connect(App(), &OBSApp::aboutToQuit, this, &OBSBasic::closeWindow);
-#endif
+	// Every platform: Dock/tray Quit and Cmd-Q can leave the event loop while a
+	// close is still waiting for native output/control teardown. Finish it now,
+	// synchronously, so OBSApp never shuts libobs down with live scene sources.
+	connect(App(), &OBSApp::aboutToQuit, this, [this] {
+		pixelviewForceClose = true;
+		closeWindow();
+	});
 
 	QActionGroup *actionGroup = new QActionGroup(this);
 	actionGroup->addAction(ui->actionSceneListMode);
@@ -982,6 +986,8 @@ void OBSBasic::InitOBSCallbacks()
 
 #define STARTUP_SEPARATOR "==== Startup complete ==============================================="
 #define SHUTDOWN_SEPARATOR "==== Shutting down =================================================="
+// Longest a hidden main window may wait for native stream/lease teardown before closing anyway.
+#define PIXELVIEW_SHUTDOWN_WAIT_MS 10000
 
 #define UNSUPPORTED_ERROR                                                     \
 	"Failed to initialize video:\n\nRequired graphics API functionality " \
@@ -1683,6 +1689,10 @@ void OBSBasic::InitPixelview()
 			control->setFixedHeight(36);
 		}
 	}
+	// Reopen on the last selected mode synchronously, before the deep-link inbox
+	// is drained, so a queued session link still wins over the remembered tab.
+	const char *savedMode = config_get_string(App()->GetUserConfig(), "PixelviewReceive", "Mode");
+	if (savedMode && strcmp(savedMode, "receiving") == 0) SelectPixelviewMode(1);
 	pixelviewRefreshTimer = new QTimer(this);
 	connect(pixelviewRefreshTimer, &QTimer::timeout, this, &OBSBasic::RefreshPixelviewDevices);
 	pixelviewRefreshTimer->start(2000);
@@ -2362,6 +2372,18 @@ void OBSBasic::closeEvent(QCloseEvent *event)
 		return;
 	}
 
+	/* Pixelview: the window has WA_DeleteOnClose, so an accepted close event
+	 * destroys this object on the next event-loop pass. Native stream/lease
+	 * teardown that must finish first therefore keeps the close pending (the
+	 * window stays up, showing the stopping state) and retries shortly. */
+	if (!PixelviewShutdownReady()) {
+		event->ignore();
+		restart = false;
+
+		QTimer::singleShot(100, this, &OBSBasic::close);
+		return;
+	}
+
 	QWidget::closeEvent(event);
 	if (!event->isAccepted()) {
 		return;
@@ -2583,11 +2605,8 @@ bool OBSBasic::promptToClose()
 	return true;
 }
 
-void OBSBasic::closeWindow()
+bool OBSBasic::PixelviewShutdownReady()
 {
-	if (isClosing()) {
-		return;
-	}
 	StopPixelviewReceive();
 	if (pixelviewReceiving) {
 		obs_set_output_source(0, pixelviewSendOutput);
@@ -2595,24 +2614,56 @@ void OBSBasic::closeWindow()
 		pixelviewReceiving = false;
 	}
 	pixelviewReceiveScene = nullptr;
+	if (!pixelviewDesktop) return true;
 	// Keep the control connection until actual output/setup completion, before
 	// scene teardown can pump timers and release the backend reservation.
-	if (pixelviewDesktop) {
-		if (!pixelviewShutdownPending) {
-			// Accepted close is terminal, including an existing transient recovery drain.
-			// Keep isClosing_ for final teardown so the deferred close can still run.
-			pixelviewShutdownPending=true;
-			pixelviewWatchdog->stop(); pixelviewHeartbeat->stop();
-			pixelviewLease.fail("Stopping before shutdown.");
-			pixelviewReconnectAt=0; pixelviewAuthDeadline=0;
+	if (!pixelviewShutdownPending) {
+		// Accepted close is terminal, including an existing transient recovery drain.
+		pixelviewShutdownPending=true;
+		pixelviewWatchdog->stop(); pixelviewHeartbeat->stop();
+		pixelviewLease.fail("Stopping before shutdown.");
+		pixelviewReconnectAt=0; pixelviewAuthDeadline=0;
+	}
+	QStringList waiting;
+	if (pixelviewStopPending) waiting << QStringLiteral("stop pending");
+	if (pixelviewLease.pending) waiting << QStringLiteral("lease pending");
+	if (pixelviewLease.leased) waiting << QStringLiteral("lease held");
+	if (pixelviewClosingSocket) waiting << QStringLiteral("socket closing");
+	if (pixelviewStreamingBusy) waiting << QStringLiteral("streaming busy");
+	if (outputHandler && outputHandler->StreamingActive()) waiting << QStringLiteral("stream output active");
+	if (setupStreamingGuard.valid() && setupStreamingGuard.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+		waiting << QStringLiteral("stream setup running");
+	if (!waiting.isEmpty()) {
+		// Bounded: a native stop that never reports back must not keep the
+		// window open until the operator force-quits.
+		if (!pixelviewShutdownDeadline) pixelviewShutdownDeadline = pixelviewClock.elapsed() + PIXELVIEW_SHUTDOWN_WAIT_MS;
+		const QString reason = waiting.join(QStringLiteral(", "));
+		if (!pixelviewForceClose && pixelviewClock.elapsed() < pixelviewShutdownDeadline) {
+			if (reason != pixelviewShutdownWait) {
+				pixelviewShutdownWait = reason;
+				blog(LOG_INFO, "Pixelview: close waiting for native teardown (%s)", reason.toUtf8().constData());
+			}
+			return false;
 		}
-		if (pixelviewStopPending || pixelviewLease.pending || pixelviewLease.leased || pixelviewClosingSocket || pixelviewStreamingBusy ||
-		    (outputHandler && outputHandler->StreamingActive()) ||
-		    (setupStreamingGuard.valid() && setupStreamingGuard.wait_for(std::chrono::seconds(0)) != std::future_status::ready)) {
-			QTimer::singleShot(100, this, &OBSBasic::closeWindow);
-			return;
-		}
-		pixelviewWatchdog->stop(); pixelviewHeartbeat->stop(); pixelviewDesktop->closeSocket();
+		blog(LOG_WARNING, "Pixelview: close proceeding %s with outstanding native state (%s)",
+		     pixelviewForceClose ? "on application quit" : "after timeout", reason.toUtf8().constData());
+		if (outputHandler && outputHandler->streamOutput && obs_output_active(outputHandler->streamOutput))
+			obs_output_force_stop(outputHandler->streamOutput);
+	}
+	pixelviewWatchdog->stop(); pixelviewHeartbeat->stop(); pixelviewDesktop->closeSocket();
+	return true;
+}
+
+void OBSBasic::closeWindow()
+{
+	if (isClosing()) {
+		return;
+	}
+	// closeEvent already waited; this only remains false on a forced quit
+	// after the deadline, where the helper has logged and force-stopped.
+	if (!PixelviewShutdownReady()) {
+		QTimer::singleShot(100, this, &OBSBasic::closeWindow);
+		return;
 	}
 
 	blog(LOG_INFO, SHUTDOWN_SEPARATOR);

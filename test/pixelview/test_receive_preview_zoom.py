@@ -58,8 +58,19 @@ class ReceivePreviewZoom(unittest.TestCase):
 #include <iostream>
 #include <cassert>
 #include <obs.hpp>
+#include <util/config-file.h>
 #include <utility/display-helpers.hpp>
+#include <QDir>
 namespace fixture {
+// Real libobs user configuration on disk: mode selection persists the tab.
+struct Application {
+ config_t *config=nullptr;
+ config_t *GetUserConfig() {
+  if (!config) assert(config_open(&config, (QDir::tempPath()+"/pixelview-receive-zoom-fixture.ini").toUtf8().constData(), CONFIG_OPEN_ALWAYS)==CONFIG_SUCCESS);
+  return config;
+ }
+} application;
+Application *App() { return &application; }
 using namespace std;
 #define MAX_SCALING_LEVEL 32
 #define MAX_SCALING_AMOUNT 8.0f
@@ -96,7 +107,8 @@ public:
  bool sendingBusy=false;
  QWidget *properties=nullptr;
  OBSSceneAutoRelease pixelviewReceiveScene;
- OBSSourceAutoRelease pixelviewSendOutput;
+ OBSSourceAutoRelease pixelviewSendOutput, pixelviewReceiveSource;
+ void PixelviewBindDeckLinkReceive(obs_source_t *, bool) {}
  OBSSceneAutoRelease sender;
  float previewScale=1;
  int previewX=0, previewY=0;

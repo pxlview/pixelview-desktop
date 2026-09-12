@@ -102,7 +102,9 @@ class ReceiveUI(unittest.TestCase):
         self.assertIn('PixelviewManagedSource()', audio)
         self.assertIn('source == pixelviewReceiveSource', body(audio, 'SavePixelviewAudioSource'))
         main=(ROOT/'frontend/widgets/OBSBasic.cpp').read_text()
-        self.assertIn('StopPixelviewReceive()', body(main, 'closeWindow'))
+        # Receive teardown now starts in the close-event gate shared with closeWindow.
+        self.assertIn('StopPixelviewReceive()', body(main, 'PixelviewShutdownReady'))
+        self.assertIn('PixelviewShutdownReady()', body(main, 'closeWindow'))
         self.assertIn('StopPixelviewReceive()', body(main.replace(' noexcept', ''), 'applicationShutdown'))
         self.assertIn('AddProjectorMenuMonitors', init)
         self.assertIn('OpenPreviewProjector', init)

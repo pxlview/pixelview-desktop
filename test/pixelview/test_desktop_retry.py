@@ -46,7 +46,8 @@ class DesktopRetry(unittest.TestCase):
         methods += '\nvoid OBSBasic::OutputStartedSignal(bool withDelay){auto handler=' + started + ';' + call + '}\n'
         methods += '\nvoid OBSBasic::bind(){\n' + halt + disconnected + message + publish_gate + '\npixelviewLease.monotonic=[this]{return pixelviewClock.elapsed();};\n}\n'
         basic = (ROOT/'frontend/widgets/OBSBasic.cpp').read_text()
-        # Execute the actual accepted-close gate, stopping at native teardown.
+        # Execute the actual accepted-close gate (shared with closeEvent), stopping at native teardown.
+        methods += basic[basic.index('bool OBSBasic::PixelviewShutdownReady()'):basic.index('void OBSBasic::closeWindow()')]
         methods += basic[basic.index('void OBSBasic::closeWindow()'):basic.index('\n\t/* While closing,', basic.index('void OBSBasic::closeWindow()'))] + '\n++teardowns;\n}\n'
         connect = inc[inc.index('void OBSBasic::ConnectPixelviewDesktop()'):inc.index(' QString token=')]
         methods += connect + '\n++authentications;\n}\n'
