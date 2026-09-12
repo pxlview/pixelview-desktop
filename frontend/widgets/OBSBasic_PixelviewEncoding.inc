@@ -134,6 +134,9 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	auto *divider = new QFrame(sidebar);
 	divider->setFrameShape(QFrame::HLine);
 	layout->addWidget(divider);
+	auto *encodingHeading = new QLabel(QStringLiteral("Encoding"), sidebar);
+	encodingHeading->setProperty("pixelviewHeading", true);
+	layout->addWidget(encodingHeading);
 	pixelviewEncoder = new QComboBox(sidebar);
 	pixelviewEncoder->setObjectName(QStringLiteral("pixelviewEncoder"));
 	pixelviewEncoder->setAccessibleName(QStringLiteral("Video encoder"));
@@ -159,6 +162,7 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	pixelviewBitrate->setRange(1, 12);
 	pixelviewBitrate->setValue(6);
 	pixelviewBitrate->setSuffix(QStringLiteral(" Mbps"));
+	pixelviewBitrate->setToolTip(QStringLiteral("Video bitrate for the stream, in megabits per second."));
 	pixelviewBitrate->setAlignment(Qt::AlignLeft);
 	auto *rates = new QHBoxLayout;
 	rates->setSpacing(8);

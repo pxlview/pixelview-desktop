@@ -84,7 +84,7 @@ class ReceiveUI(unittest.TestCase):
         init = body(text, 'InitPixelviewReceive')
         self.assertIn('QLineEdit::Password', init)
         self.assertIn('QSysInfo::machineHostName()', init)
-        self.assertIn('calldata_set_int(&data, "latency", 100)', init)
+        self.assertNotRegex(init, r'calldata_set_\w+\([^;]*"latency"')
         self.assertNotIn('->start(', init)
         start = body(text, 'StartPixelviewReceive')
         self.assertLess(start.index('PixelviewModeBusy()'), start.index('->start('))

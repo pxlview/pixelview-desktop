@@ -465,6 +465,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 		AddProjectorMenuMonitors(canvasFullscreenMenu, this, &OBSBasic::OpenPreviewProjector);
 	});
 	ui->previewFullscreenButton->setMenu(canvasFullscreenMenu);
+	// The theme shrinks the zoom readout to a caption; match the rest of the controls.
+	ui->previewXContainer->setStyleSheet(QStringLiteral(
+		"#previewScalePercent, #previewScalingMode { font-size: 12px; height: 24px; max-height: 24px; }"));
 
 	/* Preview Actions */
 	connect(ui->actionScaleWindow, &QAction::triggered, this, &OBSBasic::setPreviewScalingWindow);
@@ -1588,7 +1591,13 @@ void OBSBasic::InitPixelview()
 	sidebarLayout->setSpacing(12);
 	sidebar->setStyleSheet(QStringLiteral(
 		"QPushButton { text-align: left; padding-left: 12px; padding-right: 12px; }"
-		"QComboBox, QSpinBox { padding-left: 10px; }"));
+		"QComboBox, QSpinBox { padding-left: 10px; }"
+		// The one primary action per mode reads as such; secondary buttons stay quiet.
+		"QPushButton#streamButton, QPushButton#pixelviewReceiveButton { background-color: #2f5fc4; color: white; border: none; }"
+		"QPushButton#streamButton:hover, QPushButton#pixelviewReceiveButton:hover { background-color: #3a6fd8; }"
+		"QPushButton#streamButton:pressed, QPushButton#pixelviewReceiveButton:pressed { background-color: #2a53ab; }"
+		"QPushButton#streamButton:disabled, QPushButton#pixelviewReceiveButton:disabled { background-color: rgba(47, 95, 196, 0.35); color: rgba(255, 255, 255, 0.55); }"
+		"QLabel[pixelviewHeading=\"true\"] { font-weight: 600; }"));
 	bar->addWidget(sidebar);
 	auto *brandRow = new QHBoxLayout;
 	brandRow->setSpacing(8);
@@ -1618,12 +1627,18 @@ void OBSBasic::InitPixelview()
 	sidebar = pixelviewSendingPanel;
 	sidebarLayout = new QVBoxLayout(sidebar);
 	sidebarLayout->setContentsMargins(0, 0, 0, 0);
-	sidebarLayout->setSpacing(12);
+	// Tighter than the shared sidebar: the named groups now carry the visual
+	// separation, and the panel must still fit the minimum window height.
+	sidebarLayout->setSpacing(8);
 	InitPixelviewDesktop(sidebar);
 	auto *pairingDivider = new QFrame(sidebar);
 	pairingDivider->setObjectName(QStringLiteral("pixelviewPairingDivider"));
 	pairingDivider->setFrameShape(QFrame::HLine);
 	sidebarLayout->addWidget(pairingDivider);
+	// Every group is named so the sidebar scans as steps: pair, capture, encode, stream.
+	auto *captureHeading = new QLabel(QStringLiteral("Capture"), sidebar);
+	captureHeading->setProperty("pixelviewHeading", true);
+	sidebarLayout->addWidget(captureHeading);
 	pixelviewDevices = new QComboBox(sidebar);
 	pixelviewDevices->setObjectName(QStringLiteral("pixelviewDevices"));
 	pixelviewDevices->setAccessibleName(QStringLiteral("Blackmagic device"));
@@ -1638,7 +1653,7 @@ void OBSBasic::InitPixelview()
 	pixelviewSettings->setToolTip(QStringLiteral("Native Blackmagic device settings"));
 	deviceActions->addWidget(pixelviewSettings);
 	pixelviewFit = new QPushButton(QStringLiteral("Fit"), sidebar);
-	pixelviewFit->setToolTip(QStringLiteral("Reset position, scale, rotation and crop; fit inside 1920 × 1080"));
+	pixelviewFit->setToolTip(QStringLiteral("Reset framing to fit 1920 × 1080. Click the preview to move or resize the picture."));
 	deviceActions->addWidget(pixelviewFit);
 	deviceActions->addStretch();
 	sidebarLayout->addLayout(deviceActions);
@@ -1697,7 +1712,9 @@ void OBSBasic::InitPixelview()
 	connect(pixelviewRefreshTimer, &QTimer::timeout, this, &OBSBasic::RefreshPixelviewDevices);
 	pixelviewRefreshTimer->start(2000);
 	if (auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture")) {
-		obs_sceneitem_select(item, true);
+		// Editable, but no drag handles until the operator clicks the preview or
+		// uses Fit: a red outline on an empty canvas reads as an error.
+		obs_sceneitem_select(item, false);
 		obs_sceneitem_set_locked(item, false);
 	}
 	// Device notifications can arrive after this first refresh. Keep the initial
@@ -1705,6 +1722,19 @@ void OBSBasic::InitPixelview()
 	OBSSourceAutoRelease savedCapture = obs_get_source_by_name("Pixelview Capture");
 	pixelviewCaptureAutoSelectPending = !savedCapture;
 	RefreshPixelviewDevices();
+}
+
+void OBSBasic::RefreshPixelviewStreamHint()
+{
+	if (!pixelviewStreamHint || !pixelviewDevices) return;
+	// The cause of a disabled Start Streaming belongs next to the button.
+	// Unpaired is already explained by the pairing block at the top of the panel.
+	QString hint;
+	if (pixelviewReceiving || pixelviewLease.intent || pixelviewActualStreaming || !pixelviewPairingDurable) hint.clear();
+	else if (pixelviewDevices->currentIndex() <= 0) hint = QStringLiteral("Choose a capture device to stream.");
+	else if (!pixelviewLease.ready) hint = QStringLiteral("Waiting for the Pixelview connection…");
+	pixelviewStreamHint->setText(hint);
+	pixelviewStreamHint->setVisible(!hint.isEmpty());
 }
 
 bool OBSBasic::PixelviewSettingsBusy() const
@@ -1741,6 +1771,14 @@ void OBSBasic::InitPixelviewStreaming(QWidget *sidebar)
 	separator->setObjectName(QStringLiteral("pixelviewTransportSeparator"));
 	separator->setFrameShape(QFrame::HLine);
 	sidebar->layout()->addWidget(separator);
+	// The reason Start Streaming is unavailable sits directly above it; the
+	// transport button itself stays the sidebar's bottom-anchored last item.
+	pixelviewStreamHint = new QLabel(sidebar);
+	pixelviewStreamHint->setObjectName(QStringLiteral("pixelviewStreamHint"));
+	pixelviewStreamHint->setWordWrap(true);
+	pixelviewStreamHint->setTextFormat(Qt::PlainText);
+	pixelviewStreamHint->hide();
+	sidebar->layout()->addWidget(pixelviewStreamHint);
 	if (auto *streamButton = controlsDock->findChild<QPushButton *>(QStringLiteral("streamButton"))) {
 		sidebar->layout()->addWidget(streamButton);
 		streamButton->show();
@@ -1911,6 +1949,7 @@ void OBSBasic::RefreshPixelviewDevices()
 		break;
 	}
 	pixelviewDevices->setToolTip(captureHelp);
+	RefreshPixelviewStreamHint();
 	if (source)
 		pixelviewCaptureAutoSelectPending = false; // Saved or explicitly chosen, even if disconnected.
 	if (pixelviewCaptureAutoSelectPending && !devices.empty() && !pixelviewReceiving &&
@@ -1982,7 +2021,7 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 		auto *item = obs_scene_add(GetCurrentScene(), source);
 		if (!item)
 			return;
-		obs_sceneitem_select(item, true);
+		obs_sceneitem_select(item, false);
 		pixelviewFitPolicy.sourceCreated();
 	} else {
 		obs_source_update(source, settings);

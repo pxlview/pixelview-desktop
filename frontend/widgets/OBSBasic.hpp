@@ -305,7 +305,9 @@ private:
 	void StopPixelviewReceive(bool keepReceiving = false);
 	void DisconnectPixelviewReceiveMedia();
 	enum class ReceiveStatusTone { Idle, Connecting, Receiving, Error };
+	ReceiveStatusTone pixelviewReceiveStatusTone = ReceiveStatusTone::Idle;
 	void SetPixelviewReceiveStatus(const QString &text, ReceiveStatusTone tone);
+	void RefreshPixelviewReceiveHint(); // Idle guidance derived from the form fields.
 	int64_t pixelviewReceiveFrames = 0;
 	OBSSource PixelviewManagedSource();
 	std::unique_ptr<pixelview::PixelviewReceiver> pixelviewReceiver;
@@ -365,6 +367,8 @@ private:
 	void InitPixelviewStreaming(QWidget *sidebar);
 	bool PixelviewSettingsBusy() const;
 	bool pixelviewStreamingBusy = false;
+	QLabel *pixelviewStreamHint = nullptr; // Why Start Streaming is unavailable, next to the button.
+	void RefreshPixelviewStreamHint();
 	bool pixelviewCaptureAutoSelectPending = false;
 	void RefreshPixelviewDevices();
 	void SelectPixelviewDevice(int index, bool initializing = false);

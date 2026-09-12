@@ -52,6 +52,7 @@ int main(int argc, char **argv) {
  QWidget *pixelviewMeterHost;
  QLabel *pixelviewMeterMuted;
  QCheckBox *pixelviewStreamMute, *pixelviewListen;
+ QLabel *pixelviewStreamHint=nullptr;
  QComboBox *pixelviewMonitorDevice;
  AUDIO
  pixelviewMonitorDevice->addItem(QString(180, 'W'));

@@ -1,4 +1,5 @@
 // Pixelview modification: one native canvas, mutually exclusive send/receive controls.
+#include <QToolButton>
 #include <QTabBar>
 #include <QLineEdit>
 #include <QSysInfo>
@@ -80,6 +81,7 @@ void OBSBasic::SetPixelviewReceiveStatus(const QString &text, ReceiveStatusTone 
 		tone == ReceiveStatusTone::Error ? "#ed8585" : "palette(window-text)";
 	pixelviewReceiveStatus->setStyleSheet(QStringLiteral("QLabel { color: %1; }").arg(QString::fromLatin1(color)));
 	pixelviewReceiveStatus->setText(text);
+	pixelviewReceiveStatusTone = tone;
 }
 
 void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
@@ -139,17 +141,30 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	credentials->setColumnStretch(0, 1);
 	credentials->setColumnStretch(1, 1);
 	credentials->addWidget(new QLabel(QStringLiteral("Session ID"), pixelviewReceivingPanel), 0, 0);
-	credentials->addWidget(new QLabel(QStringLiteral("Password"), pixelviewReceivingPanel), 0, 1);
+	auto *passwordHeader = new QWidget(pixelviewReceivingPanel);
+	auto *passwordHeaderRow = new QHBoxLayout(passwordHeader);
+	passwordHeaderRow->setContentsMargins(0, 0, 0, 0); passwordHeaderRow->setSpacing(6);
+	passwordHeaderRow->addWidget(new QLabel(QStringLiteral("Password"), passwordHeader), 1);
+	auto *reveal = new QToolButton(passwordHeader);
+	reveal->setObjectName(QStringLiteral("pixelviewReceiveReveal"));
+	reveal->setText(QStringLiteral("Show")); reveal->setCheckable(true); reveal->setAutoRaise(true);
+	reveal->setToolTip(QStringLiteral("Show or hide the password while typing."));
+	reveal->setStyleSheet(QStringLiteral("QToolButton { border: none; background: transparent; font-size: 11px; padding: 0; }"));
+	connect(reveal, &QToolButton::toggled, this, [this, reveal](bool shown) {
+		pixelviewReceivePassword->setEchoMode(shown ? QLineEdit::Normal : QLineEdit::Password);
+		reveal->setText(shown ? QStringLiteral("Hide") : QStringLiteral("Show"));
+	});
+	passwordHeaderRow->addWidget(reveal, 0, Qt::AlignVCenter);
+	credentials->addWidget(passwordHeader, 0, 1);
 	credentials->addWidget(pixelviewReceiveId, 1, 0);
 	credentials->addWidget(pixelviewReceivePassword, 1, 1);
 	connectionRows->addLayout(credentials);
 	form->addRow(QStringLiteral("Receiver name"), pixelviewReceiveName);
 	connectionRows->addLayout(form);
-	pixelviewReceiveStatus = new QLabel(QStringLiteral("Enter session credentials to receive."), pixelviewReceivingPanel);
+	pixelviewReceiveStatus = new QLabel(pixelviewReceivingPanel);
 	pixelviewReceiveStatus->setTextFormat(Qt::PlainText);
 	pixelviewReceiveStatus->setWordWrap(true);
 	pixelviewReceiveStatus->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	connectionRows->addWidget(pixelviewReceiveStatus);
 	// Separate durable-storage diagnostics from authentication/media errors.
 	pixelviewReceiveStorageStatus = new QLabel(pixelviewReceivingPanel);
 	pixelviewReceiveStorageStatus->setObjectName(QStringLiteral("pixelviewReceiveStorageStatus"));
@@ -165,7 +180,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	if (credential.state == pixelview::ReceiveCredentialStore::State::Found) pixelviewReceivePassword->setText(credential.password);
 	else if (credential.state == pixelview::ReceiveCredentialStore::State::Error) {
 		pixelviewReceiveCredentialUnavailable = true;
-		pixelviewReceiveStorageStatus->setText(QStringLiteral("Could not read the saved receiver password. Click Start receiving to retry with macOS authorization, or re-enter it."));
+		pixelviewReceiveStorageStatus->setText(QStringLiteral("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again."));
 		pixelviewReceiveStorageStatus->show();
 	}
 	// Save edits without requiring Start. Deep links use a signal-blocked pair
@@ -174,36 +189,30 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		pixelviewReceiveCredentialUnavailable = false;
 		pixelviewReceivePassword->clear();
 		SavePixelviewReceive();
+		RefreshPixelviewReceiveHint();
 	});
-	connect(pixelviewReceiveName, &QLineEdit::textEdited, this, [this] { SavePixelviewReceive(); });
+	connect(pixelviewReceiveName, &QLineEdit::textEdited, this, [this] { SavePixelviewReceive(); RefreshPixelviewReceiveHint(); });
 	connect(pixelviewReceivePassword, &QLineEdit::textEdited, this, [this] {
 		pixelviewReceiveCredentialUnavailable = false;
 		pixelviewReceivePasswordOrigin = PixelviewReceiveOrigin();
 		pixelviewReceiveCredentialsDirty = true;
+		RefreshPixelviewReceiveHint();
 	});
 	connect(pixelviewReceivePassword, &QLineEdit::editingFinished, this, [this] {
 		if (!PixelviewModeBusy()) SavePixelviewReceive();
 	});
-	pixelviewReceiveButton = new QPushButton(QStringLiteral("Start receiving"), connection);
-	pixelviewReceiveButton->setObjectName(QStringLiteral("pixelviewReceiveButton"));
-	pixelviewReceiveButton->setStyleSheet(QStringLiteral("QPushButton { font-weight: 600; border: 1px solid palette(light); border-radius: 4px; background: palette(button); padding: 0 10px; } QPushButton:hover { background: palette(midlight); } QPushButton:disabled { color: palette(mid); }"));
-	pixelviewReceiveButton->ensurePolished(); pixelviewReceiveButton->setFixedHeight(36);
-	connectionRows->addWidget(pixelviewReceiveButton);
-	connect(pixelviewReceiveButton, &QPushButton::clicked, this, [this] {
-		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else StartPixelviewReceive();
-	});
-	// Native hardware settings follow the complete connection group.
-	auto *hardwareDivider = new QFrame(pixelviewReceivingPanel);
-	hardwareDivider->setFrameShape(QFrame::HLine); rows->addWidget(hardwareDivider);
-	auto *outputHint = new QLabel(QStringLiteral("DeckLink output"), pixelviewReceivingPanel);
-	outputHint->setWordWrap(true);
+	// The primary action follows the credentials; native output settings form
+	// their own group below it (added after Start/status).
+	auto *hardwareDivider = new QFrame(connection);
+	hardwareDivider->setFrameShape(QFrame::HLine);
+	auto *outputHint = new QLabel(QStringLiteral("Output"), pixelviewReceivingPanel);
+	outputHint->setProperty("pixelviewHeading", true);
+	outputHint->setStyleSheet(QStringLiteral("font-weight: 600;"));
 	outputHint->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	rows->addWidget(outputHint);
 	// Find the module's translated action in the retained Tools menu; never reimplement SDI output.
 	auto *decklink = new QPushButton(QStringLiteral("DeckLink output settings…"), pixelviewReceivingPanel);
 	decklink->setObjectName(QStringLiteral("pixelviewDecklinkOutputSettings"));
 	decklink->ensurePolished(); decklink->setFixedHeight(36);
-	rows->addWidget(decklink);
 	connect(decklink, &QPushButton::clicked, this, [this] {
 		if (isClosing() || pixelviewShutdownPending) return;
 		auto *module = obs_get_module("decklink-output-ui");
@@ -215,6 +224,17 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		}
 		QMessageBox::information(this, QStringLiteral("DeckLink output"), QStringLiteral("Native DeckLink output settings are unavailable. Check the bundled module and Desktop Video installation."));
 	});
+	pixelviewReceiveButton = new QPushButton(QStringLiteral("Start receiving"), connection);
+	pixelviewReceiveButton->setObjectName(QStringLiteral("pixelviewReceiveButton"));
+	pixelviewReceiveButton->ensurePolished(); pixelviewReceiveButton->setFixedHeight(36);
+	connectionRows->addWidget(pixelviewReceiveButton);
+	connect(pixelviewReceiveButton, &QPushButton::clicked, this, [this] {
+		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else StartPixelviewReceive();
+	});
+	connectionRows->addWidget(pixelviewReceiveStatus);
+	connectionRows->addWidget(hardwareDivider);
+	connectionRows->addWidget(outputHint);
+	connectionRows->addWidget(decklink);
 	rows->addStretch(1);
 	pixelviewReceiver = std::make_unique<pixelview::PixelviewReceiver>();
 	pixelviewReceiver->onStopped = [this] { DisconnectPixelviewReceiveMedia(); };
@@ -243,7 +263,6 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		calldata_t data; calldata_init(&data);
 		PixelviewBindDeckLinkReceive(pixelviewReceiveSource, true);
 		calldata_set_string(&data, "endpoint", endpoint.toUtf8().constData());
-		calldata_set_int(&data, "latency", 100);
 		const bool accepted = proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "connect", &data);
 		calldata_free(&data);
 		if (!accepted) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native receive connection unavailable."), ReceiveStatusTone::Error); return; }
@@ -282,7 +301,20 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	});
 	// Fullscreen is shared canvas chrome, available only through native View.
 
+	RefreshPixelviewReceiveHint();
 	RefreshPixelviewModes();
+}
+
+void OBSBasic::RefreshPixelviewReceiveHint()
+{
+	// Guidance only replaces idle guidance: errors stay visible until the next attempt.
+	if (!pixelviewReceiveStatus || pixelviewReceiveIntent || pixelviewReceiveStatusTone != ReceiveStatusTone::Idle) return;
+	const bool idMissing = pixelviewReceiveId->text().trimmed().isEmpty();
+	const bool nameMissing = pixelviewReceiveName->text().trimmed().isEmpty();
+	const bool passwordMissing = pixelviewReceivePassword->text().isEmpty() && !pixelviewReceiveCredentialUnavailable;
+	SetPixelviewReceiveStatus(idMissing || nameMissing ? QStringLiteral("Enter the session ID and a receiver name, then click Start receiving.") :
+		passwordMissing ? QStringLiteral("Enter the session password, then click Start receiving.") :
+		QStringLiteral("Ready. Click Start receiving."), ReceiveStatusTone::Idle);
 }
 
 void OBSBasic::SelectPixelviewMode(int index)
@@ -353,8 +385,8 @@ bool OBSBasic::SavePixelviewReceive()
 		const bool saved = config_save_safe(config, "tmp", nullptr) == CONFIG_SUCCESS;
 		pixelviewReceiveCredentialsDirty = !saved;
 		pixelviewReceiveStorageStatus->setText(saved ?
-			QStringLiteral("Could not read the saved receiver password. Click Start receiving to retry with macOS authorization, or re-enter it.") :
-			QStringLiteral("Receiver changes could not be saved. Check configuration permissions; previous settings may remain after reopening. The saved receiver password is still unavailable."));
+			QStringLiteral("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again.") :
+			QStringLiteral("Changes could not be saved. Check the app's configuration folder permissions; the saved password is still unavailable."));
 		pixelviewReceiveStorageStatus->show();
 		return saved;
 	}
@@ -369,8 +401,8 @@ bool OBSBasic::SavePixelviewReceive()
 	const bool saved = configSaved && secretSaved;
 	pixelviewReceiveCredentialsDirty = !saved;
 	pixelviewReceiveStorageStatus->setText(saved ? QString() : !configSaved ?
-		QStringLiteral("Receiver changes could not be saved. Check configuration permissions; previous settings may remain after reopening.") :
-		QStringLiteral("Receiver password could not be saved. Click Start receiving to retry with macOS authorization. Changes may not survive reopening."));
+		QStringLiteral("Changes could not be saved. Check the app's configuration folder permissions; previous settings may return after reopening.") :
+		QStringLiteral("The password could not be saved to the Keychain. Click Start receiving so macOS can ask for access; it may need typing again after reopening."));
 	pixelviewReceiveStorageStatus->setVisible(!saved);
 	return saved;
 }
@@ -457,7 +489,8 @@ void OBSBasic::DisconnectPixelviewReceiveMedia()
 void OBSBasic::StopPixelviewReceive(bool keepReceiving)
 {
 	pixelviewReceiveFrames = 0;
-	if (pixelviewReceiveStatus) SetPixelviewReceiveStatus(QStringLiteral("Not receiving."), ReceiveStatusTone::Idle);
+	if (pixelviewReceiveStatus) SetPixelviewReceiveStatus(keepReceiving && !isClosing() && !pixelviewShutdownPending ?
+		QStringLiteral("Stopped. Click Start receiving to reconnect.") : QStringLiteral("Not receiving."), ReceiveStatusTone::Idle);
 	pixelviewReceiveIntent = false;
 	if (pixelviewReceiveTimer) pixelviewReceiveTimer->stop();
 	// UI Stop retains the masked form; native close/shutdown drops its copy.
@@ -490,6 +523,11 @@ void OBSBasic::RefreshPixelviewModes()
 	const QSignalBlocker blocker(pixelviewModeTabs);
 	pixelviewModeTabs->setCurrentIndex(pixelviewReceiving ? 1 : 0);
 	pixelviewModeTabs->setEnabled(!busy);
+	// Say why the tabs are locked instead of leaving them silently grey.
+	const QString lock = !busy ? QString() : pixelviewReceiveIntent ? QStringLiteral("Stop receiving to switch modes.") :
+		QStringLiteral("Wait for the current operation to finish before switching modes.");
+	pixelviewModeTabs->setTabToolTip(0, lock);
+	pixelviewModeTabs->setTabToolTip(1, lock);
 	pixelviewSendingPanel->setVisible(!pixelviewReceiving);
 	pixelviewReceivingPanel->setVisible(pixelviewReceiving);
 	pixelviewReceiveId->setEnabled(!busy);

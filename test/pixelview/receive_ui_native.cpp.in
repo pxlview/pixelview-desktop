@@ -51,6 +51,7 @@ public:
  OBSBasic() { pixelviewReceiveStore=fixtureStore(testService); }
  void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
  QWidget *controlsDock=nullptr;
+ QLabel *pixelviewStreamHint=nullptr;
  QComboBox *pixelviewDevices=nullptr;
  QPushButton *pixelviewSettings=nullptr, *pixelviewFit=nullptr;
  void InitPixelviewDesktop(QWidget *sidebar) {
@@ -113,11 +114,11 @@ static void assertInteractionPolicyPreserved()
 static void assertDecklinkHeading(OBSBasic &w) {
  bool heading=false;
  for(auto *label : w.pixelviewReceivingPanel->findChildren<QLabel *>()) {
-  heading |= label->text()=="DeckLink output";
+  heading |= label->text()=="Output";
   assert(!label->text().contains("optional",Qt::CaseInsensitive));
   assert(!label->text().contains("canvas",Qt::CaseInsensitive));
  }
- assert(heading && "Hardware needs only the DeckLink output heading");
+ assert(heading && "Hardware needs only the Output heading");
 }
 static void assertCredentials(OBSBasic &w) {
  auto mapped=[](QWidget *widget,QWidget *root){return QRect(widget->mapTo(root,QPoint()),widget->size());};
@@ -132,12 +133,18 @@ static void assertCredentials(OBSBasic &w) {
   const auto status=mapped(w.pixelviewReceiveStatus,panel), transport=mapped(w.pixelviewReceiveButton,panel);
   auto *hardware=panel->findChild<QPushButton *>("pixelviewDecklinkOutputSettings");
   assert(w.pixelviewReceiveButton->parentWidget()==group);
-  assert(status.bottom()<transport.top());
-  if(w.pixelviewReceiveStorageStatus->isHidden()) assert(transport.top()-status.bottom()<=12);
+  assert(w.pixelviewReceiveButton->font()==hardware->font() && "Receive transport must inherit the native button font");
+  assert(w.pixelviewReceiveButton->styleSheet().isEmpty() && "Receive transport must inherit native button styling");
+  assert(mapped(w.pixelviewReceiveName,panel).bottom()<transport.top() && "Transport follows the credentials directly");
+  assert(status.bottom()<mapped(hardware,panel).top() && "Output settings form their own group after the transport and status");
+  assert(transport.bottom()<status.top() && status.top()-transport.bottom()<=12);
+  auto *connectionRows=qobject_cast<QVBoxLayout *>(group->layout());
+  assert(connectionRows->itemAt(connectionRows->count()-1)->widget()==hardware);
+  if(w.pixelviewReceiveStorageStatus->isVisible())
+   assert(mapped(w.pixelviewReceiveStorageStatus,panel).bottom()<transport.top());
   assert(transport.height()>=32 && transport.height()<=36);
   assert(transport.left()==id.left() && transport.right()==password.right());
-  assert(mapped(group,panel).bottom()<mapped(hardware,panel).top());
-  assert(mapped(hardware,panel).bottom()<panel->height());
+  assert(status.bottom()<panel->height());
   auto *rows=qobject_cast<QVBoxLayout *>(panel->layout());
   assert(rows->itemAt(rows->count()-1)->spacerItem());
   for(auto entry : {qMakePair(QStringLiteral("Session ID"),w.pixelviewReceiveId),
@@ -291,6 +298,18 @@ int main(int argc,char **argv) {
    for(auto *widget : layout.findChildren<QWidget *>()) { widget->style()->unpolish(widget); widget->style()->polish(widget); }
    for(auto size : {QSize(900,600),QSize(1000,800),QSize(1200,900)}) {
     layout.resize(size); app.processEvents(); assertCredentials(layout); assertDecklinkHeading(layout);
+    assert(layout.size()==size && "Layout must fit the requested window, not silently grow");
+    for(bool receiving : {false,true}) {
+     layout.pixelviewReceiveIntent=receiving; layout.RefreshPixelviewModes(); app.processEvents();
+     assertCredentials(layout);
+     assert(layout.pixelviewReceiveButton->text()==(receiving ? "Stop receiving" : "Start receiving"));
+     assert(layout.pixelviewReceiveButton->isEnabled());
+     assert(layout.pixelviewReceiveId->isEnabled()!=receiving);
+    }
+    layout.pixelviewReceiveIntent=false; layout.RefreshPixelviewModes();
+    layout.pixelviewReceiveStorageStatus->setText("Saved password unavailable. Re-enter it or use Start receiving to retry.");
+    layout.pixelviewReceiveStorageStatus->show(); app.processEvents(); assertCredentials(layout);
+    layout.pixelviewReceiveStorageStatus->hide();
    }
    // Synthetic native source reports the production get_status schema.
    static const char *mediaState="playing";
@@ -503,7 +522,7 @@ int main(int argc,char **argv) {
  QPushButton *decklink=nullptr;
  for(auto *button : sidebar->findChildren<QPushButton *>())
   if(button->text().startsWith("DeckLink output")) decklink=button;
- assert(decklink && decklink->parentWidget()==w.pixelviewReceivingPanel && "Optional output settings belong inside Receiving, not the shared footer");
+ assert(decklink && w.pixelviewReceivingPanel->isAncestorOf(decklink) && "Optional output settings belong inside Receiving, not the shared footer");
  assertDecklinkHeading(w);
  for(auto *button : sidebar->findChildren<QPushButton *>()) assert(!button->text().contains("Fullscreen"));
  auto *view=w.menuBar()->actions().last()->menu(); assert(view && view->title()=="View");
@@ -512,6 +531,8 @@ int main(int argc,char **argv) {
   w.resize(size);
   for(int mode : {0,1}) {
    w.SelectPixelviewMode(mode); app.processEvents();
+   assert(w.size()==size);
+   assert(w.pixelviewReceiveButton->font()==nativeSend->font());
    if(mode) assertCredentials(w);
    QWidget *panel=mode ? w.pixelviewReceivingPanel : w.pixelviewSendingPanel;
    auto *rows=qobject_cast<QVBoxLayout *>(panel->layout()); assert(rows);
@@ -522,15 +543,16 @@ int main(int argc,char **argv) {
     if(rows->itemAt(i)->spacerItem() && rows->stretch(i)>0) stretch=i;
    assert(stretch>=0);
    if(mode) {
-    assert(rows->count()==stretch+1); // Receiving's group precedes hardware and the bottom stretch.
-    assert(mapped(transport,panel).bottom()<mapped(hardware,panel).top());
+    assert(rows->count()==stretch+1); // Receiving ends with its connection group, then the bottom stretch.
+    assert(mapped(transport,panel).bottom()<mapped(hardware,panel).top() && "Start receiving precedes the Output settings group");
    } else {
-    assert(rows->count()==stretch+3); // Sending retains stretch, separator, native transport.
+    assert(rows->count()==stretch+4); // Sending retains stretch, separator, availability hint, native transport.
+    assert(rows->itemAt(rows->count()-2)->widget()==w.pixelviewStreamHint && "The disabled-reason hint sits directly above the transport");
     assert(rows->itemAt(rows->count()-1)->widget()==transport);
     assert(mapped(transport,sidebar).bottom()==sidebar->height()-outer->contentsMargins().bottom()-1);
    }
    assert(mapped(hardware,panel).bottom()<rows->itemAt(stretch)->geometry().top());
-   assert(mapped(hardware,sidebar).left()==tabs.left());
+   assert(mapped(hardware,sidebar).left()==tabs.left()+(mode ? 13 : 0));
    assert(mapped(panel,sidebar).top()>mapped(w.pixelviewModeTabs,sidebar).bottom());
    assert(transport->isVisible() && !(mode ? nativeSend : w.pixelviewReceiveButton)->isVisible());
    const QRect footer(0,mapped(transport,sidebar).top(),sidebar->width(),transport->height());

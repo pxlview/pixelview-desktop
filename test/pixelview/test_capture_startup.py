@@ -49,7 +49,7 @@ struct OBSBasic {
  int GetCurrentScene(){return 0;}
  bool PixelviewSettingsBusy(){return busy;}
  bool PixelviewConfigurationLocked(){return busy || !paired || pixelviewReceiving;}
- void RefreshPixelviewModes(){} void RefreshPixelviewAudio(){} void RefreshPixelviewFPS(){} void RefreshPixelviewEncoding(){}
+ void RefreshPixelviewModes(){} void RefreshPixelviewAudio(){} void RefreshPixelviewFPS(){} void RefreshPixelviewEncoding(){} void RefreshPixelviewStreamHint(){}
  void RefreshPixelviewDevices(){REFRESH}
  void SelectPixelviewDevice(int index,bool initializing=false){
  SELECTION
