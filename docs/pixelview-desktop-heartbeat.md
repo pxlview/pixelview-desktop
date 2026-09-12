@@ -2,7 +2,7 @@
 
 ## Protocols are different
 
-Authoritative Desktop contract: sibling `pixelview-backend-v4/docs/desktop-protocol.md` and its `routes/desktop.py:253-358`. Do not send the player/engine `PONG_RESPONSE` envelope on `/desktop/ws`.
+Authoritative Desktop contract: **PR207 checkout** `.desktop-integration/pixelview-backend-v4/docs/desktop-protocol.md` (not the older sibling main checkout). See `pixelview-control-recovery.md` for the working-tree resume fields and verification. Do not send the player/engine `PONG_RESPONSE` envelope on `/desktop/ws`.
 
 | Path | Application heartbeat | Deadline / presence |
 | --- | --- | --- |
@@ -17,16 +17,16 @@ Sources: backend `services/desktop_service.py:17,214-325`; `services/ws_manager.
 - `OBSBasic_PixelviewDesktop.inc` starts its 15-second heartbeat timer only after valid authenticated readiness; its watchdog runs every 100 ms. The initial connection/auth deadline is 10 seconds.
 - `PixelviewDesktop.hpp` permits only one outstanding heartbeat. Initial readiness gives a 30-second local deadline; a heartbeat ACK moves it to **the monotonic send time + 30 seconds**, not receive time + 30 seconds. Healthy RFC6455 PONGs cannot extend that authority. Stop acknowledgement also has an independent 30-second bound.
 - `PixelviewDesktopMac.mm` sets the NSURLSession request timeout to 10 seconds. It does **not** set the receiver's former 30-second resource timeout. Native configuration readback on this system gives resource timeout **604800 seconds**. The real transport stayed connected for over 65 seconds with 15-second application heartbeats, both before and after the cancellation fix. Do not transplant the receiver timeout fix here without a failing reproduction.
-- A lost TCP connection cannot survive a server restart. The application instead opens a **new authenticated socket**, using the durable device credential; the server issues a new connection ID. No old lease, fence or ingest authority may be reused.
+- A lost TCP connection cannot survive a server restart. The application opens a **new authenticated socket** using its process-held device credential. With updated PR207, `auth.resume_fence` can atomically transfer a matching live lease; resumed readiness rotates the fence and does not extend the local deadline. An immediate application heartbeat renews authority. Older readiness without boolean `resumed` keeps the old stop/drain/fresh-lease behavior.
 - Idle control reconnect uses 1, 2, 4, 8, 16, then 30-second capped backoff, reset on authenticated ready. Streaming intent uses the native Output/Reconnect, RetryDelay and MaxRetries settings (policy defaults: 2 seconds, 20 retries), not this exponential idle backoff. Both wait for pending native output/setup to drain. Successful actual output resets the streaming retry count.
 - Streaming intent exists only in memory. Manual Stop, shutdown, Unpair, revocation, identity mismatch and terminal protocol/lifecycle denial cancel it. Fresh application construction does not auto-start.
-- An **abrupt backend crash with an outstanding lease** can leave the old DynamoDB lock until expiry (at most 45 seconds since renewal). A new connection's immediate start can receive `busy`, which is deliberately terminal in the current client. The existing backend reconnect test calls old `disconnect()` before acquiring the new lease; it does not prove crash-without-cleanup automatic media resume. Pairing can survive this, but unconditional media resume across all backend crashes is not established. Do not weaken lock ownership or turn every terminal denial into a retry.
+- An **abrupt backend crash with an outstanding lease** requires the updated backend's explicit atomic resume contract, not an immediate new `start`. Healthy sender control recovery retries after one second without draining media, but only until the original monotonic deadline and only after resume capability was negotiated. Failed resume/4409 remains terminal. Real backend-plus-media crash acceptance is not established by native loopback fixtures; never weaken ownership or turn terminal denial into a retry.
 
 ## Cancellation fix
 
 A delayed `didOpenWithProtocol` callback could send authentication even after `closeSocket()` detached the owner. A compiled regression invoking the real late delegate failed on this behavior before the fix. Delegate lifecycle and receive-loop decisions now run on Cocoa main; detached attempts cannot authenticate or re-arm receive, and cancellation clears pending auth. Each socket owns a separate delegate; nulling its owner before cancellation is the attempt fence. An old delegate does not adopt the new socket's owner.
 
-This fixes a demonstrated cancellation race, **not a proven explanation for the operator's intermittent disconnects**. No heartbeat interval, lease deadline, retry classification, origin check or secure-storage implementation was changed.
+The historical cancellation fix addressed a demonstrated race, **not a proven explanation for the operator's intermittent disconnects**. The later control-recovery change additionally adds native PING/PONG detection, terminal HTTP/TLS classification and negotiated resume. Application heartbeat budgets, origin checks and secure-storage implementation remain unchanged.
 
 ## Pairing versus Keychain availability
 

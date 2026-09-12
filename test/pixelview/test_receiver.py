@@ -9,6 +9,19 @@ class ReceiverTests(unittest.TestCase):
             cmd=['clang++','-std=c++17','-fPIC','-I'+str(ROOT),'-F'+str(QT/'lib'),'-framework','QtCore','-Wl,-rpath,'+str(QT/'lib'),str(ROOT/'frontend/utility/PixelviewReceiver.cpp'),str(ROOT/'test/pixelview/receiver_native.cpp'),'-o',tmp+'/receiver']
             subprocess.run(cmd,check=True)
             subprocess.run([tmp+'/receiver'],check=True,timeout=15)
+    def test_authorization_expiry(self):
+        # Scale only the production authorization duration; do not reimplement policy.
+        with tempfile.TemporaryDirectory() as tmp:
+            source = (ROOT/'frontend/utility/PixelviewReceiver.cpp').read_text()
+            self.assertIn('23*60*60*1000', source)
+            controller = pathlib.Path(tmp)/'PixelviewReceiver.cpp'
+            controller.write_text(source.replace('23*60*60*1000', '250').replace('22*60*60*1000', '150').replace('1000 <<', '1 <<'))
+            subprocess.run(['clang++','-std=c++17','-fPIC','-I'+str(ROOT),
+                            '-I'+str(ROOT/'frontend/utility'),'-F'+str(QT/'lib'),
+                            '-framework','QtCore','-Wl,-rpath,'+str(QT/'lib'),
+                            str(controller),str(ROOT/'test/pixelview/receiver_expiry.cpp'),
+                            '-o',tmp+'/expiry'],check=True)
+            subprocess.run([tmp+'/expiry'],check=True,timeout=10)
     def test_transport(self):
         self.assertTrue((ROOT/'frontend/utility/PixelviewReceiverMac.mm').exists(), 'Native receiver transport missing')
         import http.server, threading, json, base64, hashlib, struct, time
@@ -47,7 +60,11 @@ class ReceiverTests(unittest.TestCase):
                         if n==126:n=struct.unpack('!H',self.rfile.read(2))[0]
                         assert n<16384 and h[1]&128
                         mask=self.rfile.read(4);b=self.rfile.read(n)
-                        return h[0]&15,bytes(x^mask[i%4] for i,x in enumerate(b))
+                        payload=bytes(x^mask[i%4] for i,x in enumerate(b))
+                        if h[0]&15==9: # Native RFC6455 liveness, separate from app PONG_RESPONSE.
+                            self.wfile.write(bytes([138,len(payload)])+payload);self.wfile.flush()
+                            return frame()
+                        return h[0]&15,payload
                     def send(obj):
                         b=json.dumps(obj,separators=(',',':')).encode();self.wfile.write(bytes([129,len(b)])+b);self.wfile.flush()
                     op,b=frame();data=json.loads(b);assert data['message']=='ADD_VIEWER_WEB';assert data['data']['viewer_id'];received.append('register')

@@ -236,6 +236,9 @@ int main(int argc,char **argv) {
  int saves=0; bool configOK=true;
  auto SavePixelviewIdentity=[&]{++saves;return configOK;};
  auto RefreshPixelviewReconnect=[]{};
+ bool pixelviewActualStreaming=false;
+ auto PixelviewLeaseValid=[&]{return pixelviewLease.authorized(pixelviewClock.elapsed());};
+ auto PixelviewReportedSettings=[]{return QJsonObject{};};
  auto receive=[&](QByteArray body){READY};
  const QByteArray valid=R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})";
  receive(valid);
@@ -246,7 +249,7 @@ int main(int argc,char **argv) {
  struct AppStub {int GetUserConfig(){return 0;}} appStub; auto App=[&]{return &appStub;};
  auto config_get_bool=[&](int,const char *,const char *){return disabled;};
  QUrl pixelviewOrigin=requestOrigin;
- struct Transport {int *opens;QString authorizedToken;bool exchanging=false;void openSocket(QUrl,QString token){assert(token=="new-secret");++*opens;}} client{&opens};
+ struct Transport {int *opens;QString authorizedToken;bool exchanging=false;double fence=0;void openSocket(QUrl,QString token,double resume){assert(token=="new-secret");fence=resume;++*opens;}} client{&opens};
  auto *pixelviewDesktop=&client;
  auto connect=[&]{CONNECT};
  connect();
@@ -259,6 +262,10 @@ int main(int argc,char **argv) {
  inaccessible=true; connect(); assert(opens==2 && client.authorizedToken==secret);
  client.exchanging=true; connect(); assert(opens==2 && client.authorizedToken==secret);
  client.exchanging=false;
+ // Execute the entire production Connect body with healthy media authority held.
+ pixelviewLease.recoveringControl=true;pixelviewLease.leased=true;pixelviewLease.fence=17;pixelviewLease.deadline=12345;
+ connect();assert(opens==3 && client.fence==17 && pixelviewLease.leased && pixelviewLease.deadline==12345);
+ pixelviewLease.recoveringControl=false;pixelviewLease.leased=false;
  // A failed durable identity write cannot advertise a successful pairing.
  pixelviewLease.ready=false; configOK=false; receive(valid);
  assert(!pixelviewPairingDurable && pixelviewUnpairRetry && !pixelviewLease.ready);

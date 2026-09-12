@@ -27,7 +27,7 @@ struct Output {bool active=false;int forceStops=0;};
 bool obs_output_active(Output *o) {return o->active;}
 void obs_output_force_stop(Output *o) {++o->forceStops;o->active=false;}
 struct Handler {bool StreamingActive()const{return streamOutput && streamOutput->active;} Output *streamOutput=nullptr;int starts=0;bool StartStreaming(int*){++starts;return true;}};
-struct Connection {std::function<void(QByteArray)> message;std::function<void(int)> disconnected;bool exchanging=false;QString authorizedToken;int closes=0;void closeSocket(){++closes;}};
+struct Connection {std::function<void(QByteArray)> message;std::function<void(int)> disconnected;bool exchanging=false;QString authorizedToken;int closes=0;void closeSocket(bool=true){++closes;}};
 struct Label {QString text;void setText(QString s){text=s;}};
 struct Status {QString text;void showMessage(QString s){text=s;}void clearMessage(){text.clear();}void StreamDelayStarting(int){}};
 struct UI {Status *statusbar=nullptr;};
@@ -114,6 +114,25 @@ public:
 } // namespace fixture: avoid interposing real Qt symbols at link time.
 using namespace fixture;
 int main() {
+ { OBSBasic live; live.bind(); Output output; output.active=true; live.handler.streamOutput=&output;
+   live.pixelviewLease.receive({{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45},{"resumed",false}},0);
+   live.pixelviewLease.requestStart(0);
+   live.pixelviewLease.receive({{"type","started"},{"fence",7},{"lease_expires_at",9999999},
+     {"config",QJsonObject{{"whip",QJsonObject{{"endpoint","https://fixture.invalid/whip"},{"bearer_token","t"}}}}}},0);
+   live.pixelviewActualStreaming=true; live.pixelviewNativeAttempt=true; live.pixelviewStreamingBusy=true;
+   live.connection.disconnected(1006);
+   assert(output.forceStops==0 && output.active && live.PixelviewLeaseValid());
+   assert(!live.pixelviewStopPending);
+   live.pixelviewClock.now=1000; live.Watchdog(); assert(live.authentications==1);
+   int renewals=0; live.pixelviewLease.send=[&](QJsonObject o){assert(o["type"]=="heartbeat");++renewals;};
+   live.pixelviewClock.now=2000;
+   live.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45,"resumed":true,"fence":8,"lease_expires_at":9999999})");
+   assert(renewals==1 && live.pixelviewLease.heartbeatRequest==2000);
+   assert(live.pixelviewLease.deadline==30000 && live.pixelviewLease.fence==8);
+   assert(output.forceStops==0 && output.active && live.pixelviewLease.ready);
+   live.connection.disconnected(4401); assert(output.forceStops==1 && !live.pixelviewLease.intent);
+   Timer::run(); application.config.booleans.clear();
+ }
  for (bool save : {false,true}) {
   OBSBasic first; first.bind(); first.pixelviewPairingDurable=false; first.identitySaveSucceeds=save;
   first.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");

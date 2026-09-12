@@ -30,6 +30,7 @@ public:
  // retaining lease bookkeeping until native output/setup have safely drained.
  void mediaStopped(QString message) {
   ++generation;intent=false;retryAt=-1;transientFailure=false;mediaDraining=true;
+  recoveringControl=false;controlRetryAt=-1;
   halt();error(message);
  }
  // Session-only intent: never persisted with pairing identity.
@@ -57,8 +58,18 @@ public:
   retryAt=-1;return true;
  }
  qint64 deadline=0, heartbeatRequest=-1;
+ // Only negotiated resume permits healthy media to outlive a control socket.
+ bool resumeSupported=false, recoveringControl=false;
+ double fence=0;
+ qint64 controlRetryAt=-1;
+ bool controlLost(qint64 now) {
+  if(!resumeSupported || !leased || !intent || stopping || mediaDraining || now>=deadline) return false;
+  ready=false; recoveringControl=true; heartbeatRequest=-1;
+  if(controlRetryAt<0) controlRetryAt=now+1000;
+  return true;
+ }
  bool heartbeatSent(qint64 now) { if(heartbeatRequest>=0) return false; heartbeatRequest=now; return true; }
- bool authorized(qint64 now) const { return ready && leased && !mediaDraining && now < deadline; }
+ bool authorized(qint64 now) const { return (ready || recoveringControl) && leased && !mediaDraining && now < deadline; }
  bool requestStart(qint64 now) {
   if (!ready || pending || leased || stopping || mediaDraining || now >= deadline) return false;
   if(!intent) retries=0;
@@ -67,6 +78,7 @@ public:
  void fail(QString message, bool transient=false) {
   if(transient && retryAt>=0) return; // Duplicate transport notifications.
   transientFailure=transient;
+  recoveringControl=false; controlRetryAt=-1; resumeSupported=false; fence=0;
   ++generation;
   if(!transient || !reconnect || retries>=maxRetries) intent=false;
   retryAt=-1;
@@ -78,12 +90,25 @@ public:
  bool development=false;
  void tick(qint64 now) {
   if(ready && stopping && now>=stopDeadline) fail("Stream stop acknowledgement timed out. Reconnecting control; start manually.",true);
-  else if(ready && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true);
+  else if((ready || recoveringControl) && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true);
  }
  void receive(const QJsonObject &o, qint64 now) {
   const auto type=o["type"].toString();
   if(type=="started" && (mediaDraining || stopping)) return; // Cancelled attempt, not fresh authority.
   if (type=="ready" && !ready && o["heartbeat_interval"].toInt()==15 && o["lease_seconds"].toInt()==45) {
+   if(recoveringControl) {
+    const double next=o["fence"].toDouble();
+    const double expiry=o["lease_expires_at"].toDouble();
+    if(now>=deadline || !o["resumed"].toBool() || !o["fence"].isDouble() || !std::isfinite(next) ||
+       next<=fence || next>9007199254740991.0 || std::floor(next)!=next ||
+       !o["lease_expires_at"].isDouble() || !std::isfinite(expiry) || expiry<=0) {
+     fail("Pixelview lease resume rejected. Stream stopped.");return;
+    }
+    fence=next; ready=true; recoveringControl=false; controlRetryAt=-1; heartbeatRequest=-1;
+    return; // Resume never extends authority or requests a new start.
+   }
+   if(o["resumed"].toBool()) {fail("Unexpected Pixelview lease resume.");return;}
+   resumeSupported=o["resumed"].isBool();
    ready=true; deadline=now+30000; heartbeatRequest=-1;
    if(intent && retryAt<0) requestStart(now);
   } else if(type=="started" && ready && pending && now<deadline) {
@@ -97,9 +122,10 @@ public:
     fail("WHIP is unavailable or invalid for this node. SRT is not supported."); return;
    }
    // A response cannot move the deadline beyond the request/ack budget.
+   fence=o["fence"].toDouble();
    publish(endpoint.toString(),whip["bearer_token"].toString());
   } else if(type=="heartbeat" && ready && now<deadline && heartbeatRequest>=0) {
-   if(leased && !o["lease_expires_at"].isDouble()) { fail("Streaming lease lost."); return; }
+   if(leased && (!o["lease_expires_at"].isDouble() || !std::isfinite(o["lease_expires_at"].toDouble()) || o["lease_expires_at"].toDouble()<=0)) { fail("Streaming lease lost."); return; }
    deadline=heartbeatRequest+30000; heartbeatRequest=-1;
   } else if(type=="stopped" && ready && stopping && !leased && !pending) {
    stopping=false;
@@ -111,6 +137,7 @@ public:
  }
  void outputStopped() {
   ++generation;intent=false;retryAt=-1;mediaDraining=false;
+  recoveringControl=false;controlRetryAt=-1;
   const bool release=ready && (leased || pending);
   leased=pending=false;
   if (release) {stopping=true;stopDeadline=monotonic()+30000;send({{"type","stop"}});}

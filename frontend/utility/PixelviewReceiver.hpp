@@ -2,6 +2,8 @@
 #include <QtCore/QObject>
 #include <QtCore/QUrl>
 #include <QtCore/QTimer>
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QDeadlineTimer>
 #include <QtCore/QJsonObject>
 #include <functional>
 #include <memory>
@@ -47,8 +49,9 @@ private:
  void loginFinished(int, const QByteArray &);
  void message(const QByteArray &);
  void disconnected(int);
+ bool authorityExpired();
  void fail(const QString &);
- void clearAttempt();
+ void clearAttempt(bool preserveMedia = false);
  void send(const QString &, const QJsonObject & = {});
  std::unique_ptr<ReceiverTransport> transport;
  QUrl origin{"https://api4.pixelview.io"};
@@ -56,8 +59,10 @@ private:
  quint64 generation = 0;
  State current = State::Idle;
  QString text{"Not receiving."};
- QString sessionId, password, name, viewerId, endpoint;
- QTimer deadline, retry, refresh;
+ QString sessionId, password, name, viewerId, endpoint, deliveredEndpoint;
+ QTimer deadline, retry, refresh, authorizationExpiry, controlGrace;
+ QElapsedTimer controlLossClock;
+ QDeadlineTimer authorizationDeadline, pendingAuthorizationDeadline;
  int retryCount = 0;
 };
 }

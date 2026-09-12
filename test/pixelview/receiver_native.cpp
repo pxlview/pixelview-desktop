@@ -2,6 +2,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QUrlQuery>
+#include <QtCore/QThread>
 #include <cassert>
 #include <iostream>
 using namespace pixelview;
@@ -24,10 +25,12 @@ int main(int argc,char **argv){
  assert(r.state()==PixelviewReceiver::State::Authenticating);
  assert(f->loginUrl.path()=="/login/player");
  assert(QJsonDocument::fromJson(f->loginBody).object()["password"]=="password");
+ assert(QJsonDocument::fromJson(f->loginBody).object()["client_type"]=="pixelview-desktop");
  f->events.login(200,R"({"player":"WHEP","stream_url":"http://localhost:8080/custom/whep?token=a%2Bb%3D&extra=x%2Fy","client_token":"private-token"})");
  assert(r.state()==PixelviewReceiver::State::Registering);
  auto registration=QJsonDocument::fromJson(f->sent).object();
  assert(registration["message"]=="ADD_VIEWER_WEB");
+ assert(registration["data"].toObject()["client_type"]=="pixelview-desktop");
  QString id=registration["data"].toObject()["viewer_id"].toString(); assert(!id.isEmpty());
  assert(endpoint.isEmpty());
  f->events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success","con_id":"fixture"}})");
@@ -45,7 +48,7 @@ int main(int argc,char **argv){
  auto before=QJsonDocument::fromJson(f->sent).object()["data"].toObject()["viewer_id"].toString();
  f->events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
  auto old=f->events; f->events.closed(1006);
- assert(r.state()==PixelviewReceiver::State::Reconnecting); assert(stopped==2);
+ assert(r.state()==PixelviewReceiver::State::Reconnecting); assert(stopped==1); // Healthy media survives control-only loss.
  old.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
  QEventLoop loop; QTimer::singleShot(1200,&loop,&QEventLoop::quit); loop.exec();
  assert(r.state()==PixelviewReceiver::State::Authenticating);
@@ -81,20 +84,44 @@ int main(int argc,char **argv){
  assert(deadline->isActive());QMetaObject::invokeMethod(deadline,"timeout",Qt::DirectConnection);assert(r.state()==PixelviewReceiver::State::Reconnecting);r.stop();
  r.start("s","p","n"); f->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a?"})");
  r.onStopped=[&]{r.stop();}; f->events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
- assert(!endpoint.contains("??"));f->events.closed(1006);assert(r.state()==PixelviewReceiver::State::Idle);
+ assert(!endpoint.contains("??"));f->events.closed(1006);r.stop();assert(r.state()==PixelviewReceiver::State::Idle);
  // Existing token-expiry/control rejection mapping remains distinct from login.
- for(const auto &kind : {"SOCKET_TOKEN_EXPIRED", "SOCKET_TOKEN_INVALID"}) {
+ for(const auto &kind : {"SOCKET_TOKEN_EXPIRED", "SOCKET_TOKEN_INVALID", "SOCKET_USER_KICKED", "SOCKET_SESSION_DELETED"}) {
   r.start("s","p","n");
   f->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a"})");
   f->events.message(QJsonDocument(QJsonObject{{"mutation",kind}}).toJson());
   assert(r.state()==PixelviewReceiver::State::Error);
   assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
  }
- for(int code : {1008,4401,4403,4001}) {
+ for(int code : {1000,1002,1003,1007,1008,4400,4401,4403,4408,4409,4001}) {
   r.start("s","p","n"); f->events.closed(code);
   assert(r.state()==PixelviewReceiver::State::Error);
   assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
  }
  r.onStopped={};
+ // A real 2-second retry interval retains the same media endpoint exactly once.
+ {
+  auto own=std::make_unique<Fake>();auto *wire=own.get();PixelviewReceiver live(nullptr,std::move(own));
+  int starts=0,halts=0;live.onEndpoint=[&](const QString &){++starts;};live.onStopped=[&]{++halts;};
+  const QByteArray login=R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a?token=x"})";
+  const QByteArray registered=R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})";
+  live.start("s","p","n");wire->events.login(200,login);wire->events.message(registered);
+  auto first=wire->events;first.closed(1006);
+  auto *grace=live.findChild<QTimer *>("receiverControlGrace");assert(grace && grace->interval()==7000 && grace->isActive());
+  QEventLoop pause;QTimer::singleShot(2100,&pause,&QEventLoop::quit);pause.exec();
+  assert(starts==1 && halts==0);
+  wire->events.login(200,login);wire->events.message(registered);
+  assert(live.state()==PixelviewReceiver::State::Ready && starts==1 && halts==0 && !grace->isActive());
+  first.message(R"({"mutation":"SOCKET_SESSION_DELETED"})");assert(halts==0); // Old detached generation.
+  wire->events.closed(1006);assert(grace->isActive());
+  QMetaObject::invokeMethod(grace,"timeout",Qt::DirectConnection);
+  assert(halts==1 && live.state()==PixelviewReceiver::State::Error);
+  // A stalled event loop must not accept an ACK delivered after the grace budget.
+  live.start("s","p","n");wire->events.login(200,login);wire->events.message(registered);
+  wire->events.closed(1006);QTimer::singleShot(1100,&pause,&QEventLoop::quit);pause.exec();
+  wire->events.login(200,login);
+  QThread::msleep(7100); // Do not dispatch the overdue timer before the ACK.
+  wire->events.message(registered);assert(live.state()==PixelviewReceiver::State::Error && halts==2);
+ }
  std::cout<<"receiver native basic, recovery and security passed\n";
 }

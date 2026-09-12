@@ -1,11 +1,13 @@
 #include "PixelviewDesktopConnection.hpp"
 #include "PixelviewNoninteractiveKeychain.hpp"
+#include "PixelviewSocketWatchdog.hpp"
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #include <QtCore/QPointer>
 @interface PVDesktopSocket : NSObject <NSURLSessionWebSocketDelegate> {
 @public
  QPointer<pixelview::DesktopConnection> owner;
+ std::unique_ptr<QTimer> watchdog;
 }
 @property NSURLSession *session;
 @property NSURLSessionWebSocketTask *task;
@@ -15,7 +17,20 @@
 @end
 @implementation PVDesktopSocket
 -(void)failed:(NSInteger)code {
- dispatch_async(dispatch_get_main_queue(), ^{ if(self->owner) self->owner->disconnected((int)code); });
+ // Send/receive/ping failures can race the authoritative close/HTTP/TLS event.
+ // Let the main-queue delegates classify first; never turn 4401 into a retry.
+ const bool transient=pixelview::Desktop::transientClose((int)code);
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,transient ? 100*NSEC_PER_MSEC : 0),dispatch_get_main_queue(), ^{
+  if(!self->owner) return;
+  NSInteger result=code;
+  if(transient) {
+   NSInteger status=[(NSHTTPURLResponse *)self.task.response statusCode];
+   if(status==401) result=4401;
+   else if(status==403 || (status>=300 && status<400)) result=4403;
+   else if(self.task.closeCode!=NSURLSessionWebSocketCloseCodeInvalid) result=self.task.closeCode;
+  }
+  auto callback=self->owner->disconnected;callback((int)result);
+ });
 }
 -(void)receive {
  if(!owner) return;
@@ -35,14 +50,18 @@
  if(!owner) return; // A cancelled attempt must not send a delayed authentication.
  [task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:self.auth] completionHandler:^(NSError *error){ if(error) [self failed:0]; }];
  self.auth=nil;
+ __weak PVDesktopSocket *weakSelf=self;
+ watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVDesktopSocket *s=weakSelf;if(s) [s failed:0];});
  [self receive];
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didCloseWithCode:(NSURLSessionWebSocketCloseCode)code reason:(NSData *)reason { [self failed:code]; }
--(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { if(error) [self failed:0]; }
+-(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+ if(error) [self failed:(error.code<=NSURLErrorSecureConnectionFailed && error.code>=NSURLErrorClientCertificateRequired) ? 4403 : 0];
+}
 -(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))handler { handler(nil); }
 @end
 namespace pixelview {
-void DesktopConnection::openSocket(QUrl url,QString token) {
+void DesktopConnection::openSocket(QUrl url,QString token,double resumeFence) {
  closeSocket();
  PVDesktopSocket *s=[PVDesktopSocket new]; s->owner=this;
  NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -51,7 +70,9 @@ void DesktopConnection::openSocket(QUrl url,QString token) {
  s.session=[NSURLSession sessionWithConfiguration:config delegate:s delegateQueue:NSOperationQueue.mainQueue];
  s.task=[s.session webSocketTaskWithURL:[NSURL URLWithString:url.toString().toNSString()]];
  s.task.maximumMessageSize=16384;
- s.auth=QString::fromUtf8(QJsonDocument(QJsonObject{{"type","auth"},{"device_token",token}}).toJson(QJsonDocument::Compact)).toNSString();
+ QJsonObject auth{{"type","auth"},{"device_token",token}};
+ if(resumeFence>0) auth["resume_fence"]=resumeFence;
+ s.auth=QString::fromUtf8(QJsonDocument(auth).toJson(QJsonDocument::Compact)).toNSString();
  socket=(__bridge_retained void *)s;
  [s.task resume];
 }
@@ -60,12 +81,14 @@ void DesktopConnection::sendSocket(QByteArray body) {
  PVDesktopSocket *s=(__bridge PVDesktopSocket *)socket;
  [s.task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:QString::fromUtf8(body).toNSString()] completionHandler:^(NSError *error){if(error) [s failed:0];}];
 }
-void DesktopConnection::closeSocket() {
+void DesktopConnection::closeSocket(bool normal) {
  if(!socket) return;
  PVDesktopSocket *s=CFBridgingRelease(socket); socket=nullptr;
  s->owner=nullptr;
+ s->watchdog.reset();
  s.auth=nil;
- [s.task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
+ if(normal) [s.task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
+ else [s.task cancel]; // A control timeout must not explicitly release a resumable lease.
  [s.session invalidateAndCancel];
 }
 }

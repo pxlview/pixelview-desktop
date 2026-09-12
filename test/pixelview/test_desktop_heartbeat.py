@@ -33,7 +33,11 @@ def frame(sock):
     assert header[1] & 128, 'native client must mask frames'
     mask = read(sock, 4)
     body = read(sock, size)
-    return header[0] & 15, bytes(v ^ mask[i % 4] for i, v in enumerate(body))
+    payload = bytes(v ^ mask[i % 4] for i, v in enumerate(body))
+    if header[0] & 15 == 9:
+        send(sock, payload, 10)  # Answer native client pings without acknowledging any app heartbeat.
+        return frame(sock)
+    return header[0] & 15, payload
 
 
 def send(sock, body, opcode=1):

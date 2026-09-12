@@ -92,4 +92,35 @@ int main() {
   assert(!denial.d.intent && !denial.d.authorized(0) && !denial.d.takeRetry(99999,true));
  }
  std::cout << "relaunch idle, zero settings, actual protocol denial messages: PASS\n";
+ for(const QJsonValue &expiry : {QJsonValue(0),QJsonValue(-1),QJsonValue("invalid"),QJsonValue()}) {
+  Fixture invalid;invalid.start();invalid.d.heartbeatSent(1000);
+  invalid.d.receive({{"type","heartbeat"},{"lease_expires_at",expiry}},1001);
+  assert(!invalid.d.intent && invalid.stops==1);
+ }
+ for(int mode=0;mode<5;++mode) {
+  Fixture resumed;
+  resumed.d.receive({{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45},{"resumed",false}},0);
+  resumed.d.requestStart(0);resumed.grant();
+  assert(resumed.d.controlLost(1000) && resumed.d.authorized(1000) && resumed.stops==0);
+  const auto generation=resumed.d.generation;
+  QJsonObject ready{{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45},{"resumed",true},{"fence",2},{"lease_expires_at",9999999}};
+  if(mode==1) ready["resumed"]=false;
+  if(mode==2) ready["fence"]=1;
+  if(mode==3) ready["lease_expires_at"]=QJsonValue::Null;
+  resumed.d.receive(ready,mode==4 ? 30000 : 2000);
+  if(mode) assert(!resumed.d.intent && resumed.stops==1 && resumed.starts==1);
+  else {
+   assert(resumed.d.ready && resumed.d.deadline==30000 && resumed.d.generation==generation);
+   assert(resumed.requests==1 && resumed.starts==1 && resumed.stops==0 && resumed.d.fence==2);
+   resumed.d.heartbeatSent(2000);resumed.d.receive({{"type","heartbeat"},{"lease_expires_at",9999999}},2500);
+   assert(resumed.d.deadline==32000);
+   resumed.d.controlLost(31000);resumed.d.tick(32000);assert(resumed.stops==1);
+  }
+ }
+ for(bool drain : {false,true}) {
+  Fixture ended;ended.start();ended.d.resumeSupported=true;assert(ended.d.controlLost(1000));
+  if(drain) ended.d.outputStopped(); else ended.d.mediaStopped("Native media failed");
+  assert(!ended.d.recoveringControl && ended.d.controlRetryAt<0 && !ended.d.intent);
+ }
+ std::cout<<"resume requires rotating fence, preserves deadline/media, expires and rejects invalid lease ACK: PASS\n";
 }

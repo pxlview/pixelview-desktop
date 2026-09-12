@@ -1,4 +1,5 @@
 #include "PixelviewReceiver.hpp"
+#include "PixelviewSocketWatchdog.hpp"
 #import <Foundation/Foundation.h>
 
 // Each login attempt owns a separate ephemeral session. Delegate callbacks and
@@ -8,6 +9,7 @@
  pixelview::ReceiverTransport::Events events;
  BOOL active;
  NSInteger httpCode;
+ std::unique_ptr<QTimer> watchdog;
 }
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSURLSessionDataTask *http;
@@ -18,7 +20,17 @@
 @end
 @implementation PVReceiverSession
 -(void)closed:(NSInteger)code {
- if(active && events.closed) {auto callback=events.closed; callback((int)code);}
+ const bool transient=code==0 || code==1001 || code==1006 || code==1011 || code==1012 || code==1013;
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,transient ? 100*NSEC_PER_MSEC : 0),dispatch_get_main_queue(), ^{
+  if(!self->active || !self->events.closed) return;
+  NSInteger result=code;
+  if(transient) {
+   NSInteger status=[(NSHTTPURLResponse *)self.socket.response statusCode];
+   if(status==401 || status==403 || (status>=300 && status<400)) result=1008;
+   else if(self.socket.closeCode!=NSURLSessionWebSocketCloseCodeInvalid) result=self.socket.closeCode;
+  }
+  auto callback=self->events.closed;callback((int)result);
+ });
 }
 -(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))handler {
  handler(nil); // Never forward either password or client_token on redirects.
@@ -52,6 +64,10 @@
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didOpenWithProtocol:(NSString *)protocol {
  if(!active) return;
  if(events.opened) {auto callback=events.opened;callback();}
+ if(active) {
+  __weak PVReceiverSession *weakSelf=self;
+  watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVReceiverSession *s=weakSelf;if(s && s->active) [s closed:0];});
+ }
  if(active) [self receive];
 }
 -(void)receive {
@@ -115,6 +131,7 @@ public:
  void cancel() override {
   auto s=connection;connection=nil;if(!s)return;
   s->active=NO;s->events={};s.body=nil;
+ s->watchdog.reset();
   [s.http cancel];s.http=nil;
   // Backend removes this viewer on websocket disconnect. There is no REMOVE
   // mutation. Allow the normal close frame to flush before bounded teardown.

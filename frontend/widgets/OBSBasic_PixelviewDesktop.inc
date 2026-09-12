@@ -91,6 +91,8 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    pixelviewBackoff=1000;
    pixelviewConnectionStatus->setText(pixelviewLease.pending ? QStringLiteral("Requesting exclusive WHIP lease…") : QStringLiteral("Connected · WHIP ready to request"));
    pixelviewHeartbeat->start();
+   if(pixelviewLease.leased && pixelviewLease.heartbeatSent(pixelviewClock.elapsed()))
+    pixelviewLease.send({{"type","heartbeat"},{"streaming",pixelviewActualStreaming && PixelviewLeaseValid()},{"settings",PixelviewReportedSettings()}});
   }
   // Keep the media failure detail available after release (also in the node tooltip).
   RefreshPixelviewReconnect();
@@ -100,6 +102,12 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   const bool transient=pixelview::Desktop::transientClose(code);
   // A definitive close (especially 4401) can follow NSURLSession's generic error.
   if(pixelviewClosingSocket && transient) return;
+  if(transient && pixelviewActualStreaming && pixelviewLease.controlLost(pixelviewClock.elapsed())) {
+   pixelviewHeartbeat->stop(); pixelviewAuthDeadline=0;
+   pixelviewDesktop->closeSocket(false);
+   pixelviewConnectionStatus->setText(QStringLiteral("Control disconnected. Reconnecting; stream continues within its lease."));
+   return;
+  }
   pixelviewLease.fail(code==4401 ? "Device revoked. Pair again in Pixelview admin." : "Pixelview control disconnected. Stream stopped.",transient);
 
   if(code==4401) {
@@ -132,7 +140,12 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   if(isClosing() || pixelviewShutdownPending) {pixelviewWatchdog->stop();pixelviewHeartbeat->stop();return;}
   RefreshPixelviewPairing();
   auto now=pixelviewClock.elapsed(); pixelviewLease.tick(now);
-  if(pixelviewAuthDeadline && now>=pixelviewAuthDeadline) pixelviewLease.fail("Pixelview authentication timed out.",true);
+  if(pixelviewAuthDeadline && now>=pixelviewAuthDeadline) {
+   pixelviewAuthDeadline=0; pixelviewDesktop->disconnected(0);
+  }
+  if(pixelviewLease.recoveringControl && pixelviewLease.controlRetryAt>=0 && now>=pixelviewLease.controlRetryAt) {
+   pixelviewLease.controlRetryAt=-1; ConnectPixelviewDesktop();
+  }
   const bool drained=!pixelviewStopPending && !pixelviewClosingSocket && !PixelviewSettingsBusy();
   if(pixelviewLease.takeRetry(now,drained)) ConnectPixelviewDesktop();
   else if(pixelviewReconnectAt && now>=pixelviewReconnectAt && drained) {pixelviewReconnectAt=0;ConnectPixelviewDesktop();}
@@ -245,10 +258,13 @@ void OBSBasic::ConnectPixelviewDesktop()
   pixelviewLease.fail("Pairing credential unavailable. Retrying without prompts; saved pairing has not been removed. Click Pair with Pixelview to authorize access without a new code.",pixelviewPairingDurable);
   return;
  }
- pixelviewLease.ready=false;pixelviewLease.pending=false;pixelviewLease.leased=false;pixelviewLease.stopping=false;pixelviewLease.heartbeatRequest=-1;pixelviewLease.development=pixelviewDev;
+ if(!pixelviewLease.recoveringControl) {
+  pixelviewLease.ready=false;pixelviewLease.pending=false;pixelviewLease.leased=false;pixelviewLease.stopping=false;
+ }
+ pixelviewLease.heartbeatRequest=-1;pixelviewLease.development=pixelviewDev;
  QUrl ws=pixelviewOrigin;ws.setScheme(ws.scheme()=="https" ? "wss":"ws");ws.setPath("/desktop/ws");
  pixelviewAuthDeadline=pixelviewClock.elapsed()+10000;
- pixelviewDesktop->openSocket(ws,token);
+ pixelviewDesktop->openSocket(ws,token,pixelviewLease.recoveringControl ? pixelviewLease.fence : 0);
 }
 bool OBSBasic::PixelviewLeaseValid() const {return pixelviewDesktop && !pixelviewShutdownPending && !pixelviewUnpairPending && pixelviewLease.authorized(pixelviewClock.elapsed());}
 bool OBSBasic::RequestPixelviewStart()

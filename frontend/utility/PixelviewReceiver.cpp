@@ -20,8 +20,15 @@ PixelviewReceiver::PixelviewReceiver(QObject *parent, std::unique_ptr<ReceiverTr
  deadline.setSingleShot(true); retry.setSingleShot(true); refresh.setSingleShot(true);
  deadline.setParent(this); deadline.setObjectName("receiverDeadline");
  refresh.setParent(this); refresh.setObjectName("receiverRefresh");
+ refresh.setTimerType(Qt::PreciseTimer);
+ authorizationExpiry.setParent(this); authorizationExpiry.setObjectName("receiverAuthorizationExpiry");
+ authorizationExpiry.setSingleShot(true); authorizationExpiry.setTimerType(Qt::PreciseTimer);
+ controlGrace.setParent(this); controlGrace.setObjectName("receiverControlGrace"); controlGrace.setSingleShot(true);
+ controlGrace.setTimerType(Qt::PreciseTimer);
+ connect(&controlGrace,&QTimer::timeout,this,[this]{if(intent) fail("Receiver control recovery timed out. Start again to sign in.");});
  connect(&deadline,&QTimer::timeout,this,[this]{if(intent) disconnected(0);});
  connect(&refresh,&QTimer::timeout,this,[this]{if(intent) disconnected(0);});
+ connect(&authorizationExpiry,&QTimer::timeout,this,[this]{if(intent) fail("Receiver authorization expired or rejected. Start again to sign in.");});
  connect(&retry,&QTimer::timeout,this,[this]{if(intent) authenticate();});
 }
 PixelviewReceiver::~PixelviewReceiver()
@@ -48,22 +55,27 @@ void PixelviewReceiver::start(const QString &id,const QString &pw,const QString 
 }
 void PixelviewReceiver::authenticate()
 {
+ if(authorityExpired()) return;
  const auto g=++generation; QPointer<PixelviewReceiver> self(this);
  change(State::Authenticating,"Authenticating receiver…");
  if(!intent || generation!=g) return;
+ // /login/player grants 86000 seconds. Anchor the conservative 23-hour
+ // budget before HTTP, not at response/readiness, so latency cannot add authority.
+ pendingAuthorizationDeadline=QDeadlineTimer(23*60*60*1000,Qt::PreciseTimer);
  deadline.start(30000);
  ReceiverTransport::Events e;
  e.login=[self,g](int code,QByteArray body){if(self && self->intent && self->generation==g) self->loginFinished(code,body);};
- e.opened=[self,g]{if(self && self->intent && self->generation==g) self->send("ADD_VIEWER_WEB",{{"name",self->name},{"viewer_id",self->viewerId},{"initial_load",false}});};
+ e.opened=[self,g]{if(self && self->intent && self->generation==g) self->send("ADD_VIEWER_WEB",{{"name",self->name},{"viewer_id",self->viewerId},{"initial_load",false},{"client_type","pixelview-desktop"}});};
  e.message=[self,g](QByteArray body){if(self && self->intent && self->generation==g) self->message(body);};
  e.closed=[self,g](int code){if(self && self->intent && self->generation==g) self->disconnected(code);};
  auto url=origin; url.setPath("/login/player");
- auto body=QJsonDocument(QJsonObject{{"session_id",sessionId},{"password",password},{"name",name},{"device_type","WEB"},{"platform","MAC"},{"browser","GSTREAMER"},{"mobile",false}}).toJson(QJsonDocument::Compact);
+ auto body=QJsonDocument(QJsonObject{{"session_id",sessionId},{"password",password},{"name",name},{"device_type","WEB"},{"platform","MAC"},{"browser","GSTREAMER"},{"mobile",false},{"client_type","pixelview-desktop"}}).toJson(QJsonDocument::Compact);
  transport->login(url,body,std::move(e));
 }
 void PixelviewReceiver::loginFinished(int code,const QByteArray &body)
 {
  if(current!=State::Authenticating) return;
+ if(authorityExpired()) return;
  if(code==0 || code==408 || code==429 || code==502 || code==503 || code==504) {disconnected(0);return;}
  if(body.size()>262144) {fail("Invalid receiver login response.");return;}
  auto o=QJsonDocument::fromJson(body).object();
@@ -101,24 +113,41 @@ void PixelviewReceiver::send(const QString &kind,const QJsonObject &data)
 }
 void PixelviewReceiver::message(const QByteArray &body)
 {
+ if(authorityExpired()) return;
  QJsonParseError error;
  const auto doc=QJsonDocument::fromJson(body,&error);
  if(body.size()>262144 || error.error!=QJsonParseError::NoError || !doc.isObject()) {fail("Invalid receiver control response.");return;}
  const auto o=doc.object(); const auto kind=o["mutation"].toString();
  if(kind.isEmpty()) {fail("Invalid receiver control response.");return;}
- if(kind=="SOCKET_TOKEN_EXPIRED" || kind=="SOCKET_TOKEN_INVALID") {disconnected(1008);return;}
+ if(kind=="SOCKET_TOKEN_EXPIRED" || kind=="SOCKET_TOKEN_INVALID" || kind=="SOCKET_USER_KICKED" || kind=="SOCKET_SESSION_DELETED") {disconnected(1008);return;}
  if(kind=="SOCKET_SEND_PING") {if(current==State::Ready) deadline.start(65000);send("PONG_RESPONSE"); return;}
  if(kind=="SOCKET_ADD_VIEWER_WEB" && current==State::Registering) {
   if(o["data"].toObject()["status"]!="success") {fail("Receiver registration rejected."); return;}
-  retryCount=0; deadline.start(65000); refresh.start(23*60*60*1000);
+  if(authorityExpired()) return;
+  if(pendingAuthorizationDeadline.hasExpired()) {fail("Receiver authorization expired or rejected. Start again to sign in.");return;}
+  // Only completed valid registration replaces the retained media authority.
+  authorizationDeadline=pendingAuthorizationDeadline;
+  retryCount=0; deadline.start(65000);
+  authorizationExpiry.start(int(authorizationDeadline.remainingTime()));
+  // Renew automatically at request-start +22h, never at readiness +22h.
+  refresh.start(int(std::max<qint64>(0,authorizationDeadline.remainingTime()-(23*60*60*1000-22*60*60*1000))));
   const auto g=generation;
   change(State::Ready,"Receiver authorized.");
-  if(intent && generation==g && onEndpoint) {endpointDelivered=true; const auto value=endpoint;onEndpoint(value);}
+  if(!intent || generation!=g) return;
+  controlGrace.stop(); controlLossClock.invalidate();
+  if(endpointDelivered && deliveredEndpoint!=endpoint) {
+   endpointDelivered=false; deliveredEndpoint.clear(); if(onStopped) onStopped();
+  }
+  if(intent && generation==g && !endpointDelivered && onEndpoint) {endpointDelivered=true; deliveredEndpoint=endpoint; const auto value=endpoint;onEndpoint(value);}
  }
 }
-void PixelviewReceiver::clearAttempt()
+void PixelviewReceiver::clearAttempt(bool preserveMedia)
 {
  ++generation; deadline.stop(); retry.stop(); refresh.stop(); transport->cancel(); endpoint.clear();
+ pendingAuthorizationDeadline=QDeadlineTimer();
+ if(preserveMedia) return;
+ authorizationExpiry.stop(); authorizationDeadline=QDeadlineTimer();
+ controlGrace.stop(); controlLossClock.invalidate(); deliveredEndpoint.clear();
  const bool delivered=endpointDelivered; endpointDelivered=false; if(delivered && onStopped) onStopped();
 }
 void PixelviewReceiver::stop()
@@ -130,11 +159,25 @@ void PixelviewReceiver::fail(const QString &reason)
 {
  stop(); change(State::Error,reason);
 }
+bool PixelviewReceiver::authorityExpired()
+{
+ if(endpointDelivered && authorizationDeadline.hasExpired()) {
+  fail("Receiver authorization expired or rejected. Start again to sign in.");return true;
+ }
+ if(controlLossClock.isValid() && controlLossClock.elapsed()>=7000) {
+  fail("Receiver control recovery timed out. Start again to sign in.");return true;
+ }
+ return false;
+}
 void PixelviewReceiver::disconnected(int code)
 {
  if(!intent) return;
- if(code==1008 || code==4401 || code==4403 || code==4001) {fail("Receiver authorization expired or rejected. Start again to sign in."); return;}
- clearAttempt();
+ if(code!=0 && code!=1001 && code!=1006 && code!=1011 && code!=1012 && code!=1013) {fail("Receiver authorization expired or rejected. Start again to sign in."); return;}
+ if(authorityExpired()) return;
+ if(endpointDelivered && !controlLossClock.isValid()) {
+  controlLossClock.start();controlGrace.start(int(std::min<qint64>(7000,authorizationDeadline.remainingTime())));
+ }
+ clearAttempt(true);
  if(!intent) return;
  change(State::Reconnecting,"Receiver disconnected. Reconnecting…");
  if(intent) retry.start(std::min(30000,1000 << std::min(retryCount++,5)));
