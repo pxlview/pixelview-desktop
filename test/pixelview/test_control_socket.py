@@ -1,4 +1,5 @@
 """Real native transport liveness. Loopback only; no GUI/media/Keychain access."""
+import concurrent.futures
 import base64, hashlib, http.server, json, pathlib, struct, subprocess, tempfile, threading, time, unittest
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 QT=ROOT/'.deps/obs-deps-qt6-2026-08-26-universal/lib'
@@ -26,7 +27,8 @@ class ControlSocket(unittest.TestCase):
      key=self.headers['Sec-WebSocket-Key']
      accept=base64.b64encode(hashlib.sha1((key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
      self.send_response(101);self.send_header('Upgrade','websocket');self.send_header('Connection','Upgrade');self.send_header('Sec-WebSocket-Accept',accept);self.end_headers()
-     self.connection.settimeout(16)
+     self.connection.settimeout(25)
+     opened=time.monotonic(); last_ping=opened
      ping_count=0
      while True:
       h=self.rfile.read(2)
@@ -37,6 +39,9 @@ class ControlSocket(unittest.TestCase):
       op=h[0]&15
       if op==8:break
       if op==9:
+       now=time.monotonic()
+       assert 19.8 <= now-last_ping < 23, (self.path, "RFC ping interval", now-last_ping)
+       last_ping=now
        pings.append(self.path);ping_count+=1
        if Handler.delayed and ping_count==1:
         time.sleep(2);self.wfile.write(bytes([138,len(b)])+b);self.wfile.flush()
@@ -60,11 +65,13 @@ class ControlSocket(unittest.TestCase):
    with http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler) as server:
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     try:
-     for mode in ['sender','receiver']:
-      subprocess.run([tmp+'/test',f'http://127.0.0.1:{server.server_port}',mode],check=True,timeout=18)
-     Handler.delayed=True
-     for mode in ['sender-delay','receiver-delay']:
-      subprocess.run([tmp+'/test',f'http://127.0.0.1:{server.server_port}',mode],check=True,timeout=23)
+     def run(mode):
+      subprocess.run([tmp+'/test',f'http://127.0.0.1:{server.server_port}',mode],check=True,timeout=70)
+     # Independent native processes share only the loopback fixture.
+     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+      list(pool.map(run, ['sender','receiver']))
+      Handler.delayed=True
+      list(pool.map(run, ['sender-delay','receiver-delay']))
      Handler.reject=True
      for mode in ['sender-denied','receiver-denied']:
       subprocess.run([tmp+'/test',f'http://127.0.0.1:{server.server_port}',mode],check=True,timeout=18)

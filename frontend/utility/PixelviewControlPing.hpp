@@ -8,7 +8,8 @@ struct ControlPing {
  std::int64_t sent=0;
  bool pending=false;
  Action poll(std::int64_t now) {
-  if(now-sent<5000) return None;
+  // Match the viewer's 20s cadence and Uvicorn's 20s RFC6455 pong timeout.
+  if(now-sent<20000) return None;
   if(pending) return Timeout;
   sent=now; pending=true; return Ping;
  }

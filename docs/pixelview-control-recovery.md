@@ -22,7 +22,7 @@ Exact receiver identity fields:
 
 ## Timeouts and safety
 
-Both macOS transports use supported `NSURLSessionWebSocketTask.sendPingWithPongReceiveHandler`. A shared small policy sends RFC6455 PING every **5 seconds**, permits one outstanding PING, and fails after **5 seconds without its PONG**. The main-thread watchdog polls every **250 ms**; generic failure delivery waits **100 ms** to let authoritative close/HTTP/TLS delegates win. A two-second delayed PONG is tolerated. Typical silent-loss detection is within roughly 10 seconds plus scheduling, not an exact real-time bound.
+Both macOS transports use supported `NSURLSessionWebSocketTask.sendPingWithPongReceiveHandler`. A shared small policy sends RFC6455 PING every **20 seconds**, permits one outstanding PING, and fails after **20 seconds without its PONG**. The main-thread watchdog polls every **250 ms**; generic failure delivery waits **100 ms** to let authoritative close/HTTP/TLS delegates win. A two-second delayed PONG is tolerated. Transport-only silent-loss detection can take roughly 40 seconds plus scheduling, not an exact real-time bound. This matches the normal viewer application-ping cadence and the installed backend RFC6455 interval/timeout values, not the application presence TTL. The sender’s unchanged 30-second application ACK deadline can stop media before transport detection; slower transport probes do not extend that authority.
 
 A PONG never refreshes application authorization. Sending still requires the application heartbeat every **15 seconds**, a **30-second monotonic request/ACK budget**, and the server's **45-second lease**. Sender control-only recovery retries after **1 second** without waiting for healthy media to drain; authentication remains bounded to **10 seconds** and the existing local lease deadline always wins. Only already-started, leased output on a resume-capable backend can continue. Initial/pending media setup retains the old drain/reacquire path. Native media loss retains the separate OBS retry/lease flow.
 
@@ -31,6 +31,20 @@ Receiving permits at most **7 seconds after detected control loss**, clamped to 
 Stop/shutdown/Unpair, auth/TLS errors, identity mismatch, malformed protocol, lease loss/expiry, revocation, kick and session deletion remain terminal. Receiver handles `SOCKET_USER_KICKED` and `SOCKET_SESSION_DELETED` immediately, not only their following close. Only close codes 0/1001/1006/1011/1012/1013 are retryable. Detached native delegates and receiver attempt generations cannot mutate newer attempts. Transient sender cancellation uses task cancellation rather than an explicit normal close that would release a resumable server lease.
 
 ## Verification and remaining gates
+
+Cadence correction: observed RED at `ControlPing::poll(5000)` (unexpected PING),
+then GREEN after changing only the shared transport threshold to 20000 ms.
+`python3 test/pixelview/test_control_socket.py -v` passed **2 tests in 107.752s**:
+compiled policy exact 20s/20s boundaries; both unscaled native transports' first
+and subsequent wire PING intervals (19.8–23s tolerance); unanswered PONG detection
+at 39.9–44.5s, or 59.9–64.5s after one two-second delayed PONG; HTTP403 rejection
+and sender resume payload. Sender/receiver processes run concurrently per case.
+The receiver/retry/media-failure/WHIP/recovery-UI run passed **15 tests in
+83.693s** (benign Qt offscreen/font warnings); the native Desktop heartbeat suite
+passed **3 tests in 121.537s**, including unchanged 30s application expiry despite
+RFC PONGs. These are focused offline checks, not a full suite or live-media/app
+build acceptance. No app/backend restart, credentials, pairing changes, AGENTS
+edits, commit or push was performed for this correction.
 
 Final parent verification after automatic-renewal correction: **25 tests passed
 in 148.000 seconds**, covering native socket liveness, receiver recovery/expiry/

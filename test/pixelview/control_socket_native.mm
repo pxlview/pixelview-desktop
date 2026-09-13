@@ -18,7 +18,7 @@ int main(int argc,char **argv) {
  if(sender) {QUrl ws(QString::fromUtf8(argv[1])+"/desktop/ws");ws.setScheme("ws");desktop.openSocket(ws,"fixture",17);}
  else {assert(receiver.setOrigin(QUrl(QString::fromUtf8(argv[1])),true));receiver.start("fixture-session","fixture-password","test");}
  QElapsedTimer clock; clock.start();
- while(clock.elapsed()<(delayed ? 19500 : 13500)) {
+ while(clock.elapsed()<(delayed ? 64500 : 44500)) {
   QCoreApplication::processEvents(); CFRunLoopRunInMode(kCFRunLoopDefaultMode,.005,true);
   if(!sender && receiver.state()==pixelview::PixelviewReceiver::State::Reconnecting) {++lost;break;}
   if(denied && !sender && receiver.state()==pixelview::PixelviewReceiver::State::Error) {++lost;break;}
@@ -26,7 +26,7 @@ int main(int argc,char **argv) {
  }
  assert(lost==1);
  if(denied) {assert(endpoints==0);assert(sender || receiver.state()==pixelview::PixelviewReceiver::State::Error);std::cout<<"terminal upgrade rejection: PASS\n";return 0;}
- assert(clock.elapsed()>=(delayed ? 14900 : 9900) && clock.elapsed()<(delayed ? 19500 : 13500));
+ assert(clock.elapsed()>=(delayed ? 59900 : 39900) && clock.elapsed()<(delayed ? 64500 : 44500));
  if(!sender) {assert(endpoints==1 && stopped==0);receiver.stop();assert(stopped==1);}
- std::cout<<(sender ? "sender" : "receiver")<<" native unanswered RFC6455 ping detected without app heartbeat: PASS\n";
+ std::cout<<(sender ? "sender" : "receiver")<<" native unanswered RFC6455 ping detected without app heartbeat at 20s/20s: PASS\n";
 }

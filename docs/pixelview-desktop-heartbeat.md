@@ -12,6 +12,34 @@ Authoritative Desktop contract: **PR207 checkout** `.desktop-integration/pixelvi
 
 Sources: backend `services/desktop_service.py:17,214-325`; `services/ws_manager.py:32,39,316-340,522-531,989-1000,1105-1124`; `routes/websocket/connections.py:158-162`; `routes/websocket/engine/handle_msg.py:107-108`; engine `internal/websocket/client.go:233-252`; player `src/stores/store.js:317-321`.
 
+## Verified backend handler distinction
+
+Both backend checkouts were read for the cadence correction:
+- `.desktop-integration/pixelview-backend-v4/services/ws_manager.py:33,443–480`
+  and `pixelview-backend-v4/services/ws_manager.py:32,316–340` send the JSON
+  `SOCKET_SEND_PING` immediately, then sleep 20s. In both checkouts,
+  `routes/websocket/connections.py:158–162` routes `PONG_RESPONSE` to
+  `pong_received`; viewer presence refresh is 90s at `ws_manager.py:1147–1157`
+  (integration) / `990–1000` (sibling). There is no 20s per-JSON-PONG timeout.
+- Both installed Uvicorn 0.37.0 environments read back `ws_ping_interval=20.0`
+  and `ws_ping_timeout=20.0`. Under their `.venv/lib/python3.11/site-packages/`,
+  `uvicorn/protocols/websockets/websockets_impl.py:63` forwards these settings
+  to the WebSocket protocol; `ws_handler` at line 229 only marks the handshake
+  complete and waits for close. The integration environment's selected `auto`
+  protocol is this `websockets_impl.WebSocketProtocol`.
+  `websockets/legacy/protocol.py:1218` implements RFC keepalive: sleep interval,
+  send control PING, await PONG with timeout, fail on timeout. It sleeps again
+  after PONG; native probes remain scheduled from PING-send time, with one
+  outstanding PING. Equal configured values do not imply identical phase.
+- `dev.sh` and the Dockerfile use Uvicorn without ping overrides. This verifies
+  checked-out launch defaults, not the production process/proxy configuration.
+
+Both native macOS transports now share **20s RFC PING / 20s PONG timeout** via
+`PixelviewControlPing.hpp` / `PixelviewSocketWatchdog.hpp`, wired by
+`PixelviewDesktopMac.mm:54` and `PixelviewReceiverMac.mm:69`. This does not change
+15s sender lease heartbeats, the 30s sender ACK budget, 65s receiver application
+silence watchdog, or the 7s receiver recovery grace **after detected loss**.
+
 ## Native deadlines and recovery
 
 - `OBSBasic_PixelviewDesktop.inc` starts its 15-second heartbeat timer only after valid authenticated readiness; its watchdog runs every 100 ms. The initial connection/auth deadline is 10 seconds.
