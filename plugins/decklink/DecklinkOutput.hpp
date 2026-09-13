@@ -21,7 +21,8 @@ public:
 	std::string deviceHash;
 	bool BindReceive(obs_source_t *source, bool native);
 	bool PrepareReceive(DeckLinkDeviceMode *mode);
-	bool ReceiveHealthy();
+	// A false result names the cause in *reason (static storage, UI-thread use).
+	bool ReceiveHealthy(const char **reason = nullptr);
 	void ReceiveStats(calldata_t *cd)
 	{
 		std::lock_guard<std::recursive_mutex> lock(deviceMutex);

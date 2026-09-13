@@ -588,3 +588,7 @@ No capture/output device or DeckLink driver/module was opened in tests. Full app
 - Capture↔output exclusivity, native Start/Stop/Auto Start, and identical card bytes/timing with ordinary preview on/off/fullscreen.
 
 These are not the only remaining gates: substantial **software integration** above is unfinished even before physical testing.
+
+## 2026-09-13 addendum: ordinary receive health no longer fails on frame gaps
+
+The UI-thread watchdog contract described above ("stops on loss/reset/card removal/stall", one-shot AutoStart) is superseded for the ordinary rendered path. Field logs showed the DeckLink output stopping cleanly every few minutes while the canvas kept playing, because `DeckLinkOutput::ReceiveHealthy` required a decoded frame within 500 ms. The rendered program is valid for as long as the source is `playing` and not native 4:2:2, so that cutoff was removed; the source's own 15-second stale detection still ends the attempt through its state. `receive_status` now also returns `reason`, the watchdog logs every stop with its cause and run time, and automatic resume is bounded (three consecutive failures within ten seconds of starting stop it until the next bind). Native 4:2:2 health (`NativeOutputHealthy`) is unchanged.

@@ -50,7 +50,32 @@ Both panels now name their groups (Pairing / Connection, Capture, Encoding; Sess
 
 Receiving no longer advertises or decodes HEVC Main 4:2:2 10. The single switch in `plugins/pixelview-whep/main422-25p.h` is now FALSE: the WHEP offer lists only Main/Main10 (plus H264/VP9), and the parsed-CAPS route selector refuses a `main-422-10` stream (or any other non-Main/Main10 HEVC profile) before its first access unit with a typed `GST_STREAM_ERROR_WRONG_TYPE` carrying a canonical reason. The plugin exposes that reason through `get_status.failure` (`unsupported-hevc-main-422-10` or `unsupported-hevc-profile`, never the wire profile string), logs one credential-safe line, and the Receiving panel stops the attempt with "The sender is streaming HEVC 4:2:2 10-bit, which cannot be received. Please use the HEVC Main or Main10 profile on the sender." The native VideoToolbox 4:2:2 code, its DeckLink v210 scheduling and their offline suites remain in the tree and admit the native branch explicitly per filter; flipping the switch back to TRUE restores the earlier behaviour end to end. Focused evidence for this change is listed in the commit; no app rebuild, live 4:2:2 sender or hardware run is implied.
 
+## DeckLink receive output no longer drops on frame gaps (working tree)
+
+The receiver's DeckLink output used to stop silently every few minutes while the canvas kept playing: the UI watchdog polled `receive_status` every 100 ms and the ordinary (Main/Main10) health check in `plugins/decklink/decklink-output-receive.inc` declared the output unhealthy whenever the source delivered no decoded frame for 500 ms, so any jitter-buffer or decoder hiccup drained the card permanently, without a log line, and AutoStart was one-shot so nothing restarted it. Logs from 2026-09-12/13 show three such stops (after 18 s, 16 min and 10 min) with a clean `Output 'decklink_output': stopping` and no preceding media error. The rendered path now stays healthy while the source is `playing` and has not turned native 4:2:2; leaving `playing` (the source's own 15-second stale/EOS/error detection), source removal, card removal or native scheduling failure still drain it. `receive_status` returns a `reason` string, the watchdog logs `[decklink-output-ui] receive output stopped after N ms: <reason>`, and it resumes automatically once the source reports ready again, bounded to three consecutive attempts that fail within ten seconds of starting (the budget resets on every bind). A manual Start that is refused (no bound source, source not ready, bind refused, device or mode unavailable) now logs `[decklink-output-ui] Start ignored: <reason>` instead of doing nothing. Offline evidence: the compiled Qt watchdog test now exercises resume and its budget, and the real-owner suite asserts a 600 ms frame gap stays healthy while state/native changes are named. Live check on the rebuilt signed bundle (2026-09-13, session 291056 at 1080p24 Main10 to the UltraStudio Monitor 3G): the output ran 607 s until the operator deliberately cut the stream, which produced the expected named stop (`state error, 15098 ms since last frame`) and an armed resume; after the receiver was restarted the output ran 28 minutes without a stop, longer than any interval in the failing logs. AutoStart was exercised once to bring the card up and then turned back off. Physical SDI picture was not inspected from the session, and the stall that previously triggered the 500 ms cutoff was not reproduced on demand.
+
 ## Repository status discipline
+
+### Pairing production/development defaults (working tree)
+
+New Pair uses `https://api4.pixelview.io` with only the masked one-time admin code
+visible. Only exact runtime `PIXELVIEW_LOCAL_DEVELOPMENT=1` exposes the backend
+origin and local-development checkbox, defaulting to `http://localhost:8000` with
+the box checked. Invoke from this repo with
+`PIXELVIEW_LOCAL_DEVELOPMENT=1 python3 cmake/macos/pixelview-launch.py` after a
+separately authorized build. Unset/empty/other values retain production defaults.
+Do not turn this into a build-time flag or rewrite a saved origin: existing
+pairings reconnect with their persisted origin/development flag and unchanged
+Keychain identity. Explicit successful Unpair is required before changing backend.
+TLS, loopback and resource-origin validation remain mandatory. See
+`docs/pixelview-pairing-ux.md` for invocation, overrides and verification scope.
+
+The new real-Qt dialog tests followed production RED→GREEN and development
+RED→GREEN; the focused pairing run passed 12 tests. The later 206-test full run
+had two errors (concurrent control-recovery changes outgrew the pairing-completion
+fixture; source inventory size mismatch) and one skip. No integrated app rebuild,
+replacement, launch, signing, publication, commit or push was performed for this
+pairing-defaults change. Do not infer release acceptance from these tests.
 
 Update this file in every commit that changes Pixelview Desktop’s delivered features, verification status, or known limitations. Keep the **Current first draft** section accurate: state what has been added, what has been verified, and what remains intentionally out of scope. Do not present planned Pixelview backend, authentication, or remote-control work as implemented.
 

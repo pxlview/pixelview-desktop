@@ -40,29 +40,54 @@ bool DeckLinkOutput::PrepareReceive(DeckLinkDeviceMode *mode)
 	return nativeReceive && privateMedia.Open(output, mode->GetWidth(), mode->GetHeight(), uint32_t(s), uint32_t(d));
 }
 
-bool DeckLinkOutput::ReceiveHealthy()
+bool DeckLinkOutput::ReceiveHealthy(const char **reason)
 {
+	const char *why = nullptr;
 	std::lock_guard<std::recursive_mutex> lock(deviceMutex);
-	if (!receiveSource || obs_source_removed(receiveSource) || !instance ||
-	    GetDevice()->Removed()) {
-		return false;
+	if (!receiveSource) {
+		why = "no receive source is bound";
+	} else if (obs_source_removed(receiveSource)) {
+		why = "the receive source was removed";
+	} else if (!instance) {
+		why = "the card output is no longer active";
+	} else if (GetDevice()->Removed()) {
+		why = "the DeckLink device was removed";
+	} else if (nativeReceive) {
+		if (!instance->NativeOutputHealthy()) {
+			why = "native 4:2:2 scheduling failed or stalled";
+		}
+	} else {
+		// The rendered program stays valid while the source is playing: a gap
+		// in decoded frames only repeats the last canvas frame on the card, so
+		// it must not drain the output. The source itself leaves "playing"
+		// after its own 15-second stale/EOS/error detection.
+		// A newly detected Main422 stream cannot continue through a rendered
+		// path: drain and require a new Start/admission, never silently
+		// downconvert it.
+		calldata_t cd;
+		calldata_init(&cd);
+		bool ok = proc_handler_call(obs_source_get_proc_handler(receiveSource), "get_status", &cd);
+		const char *state = calldata_string(&cd, "state");
+		const uint64_t frames = uint64_t(calldata_int(&cd, "frames"));
+		if (frames > receiveFrames) {
+			receiveFrames = frames;
+			receiveLastFrame = os_gettime_ns();
+		}
+		if (!ok) {
+			why = "the receive source reports no status";
+		} else if (!state || strcmp(state, "playing") != 0) {
+			static char buffer[128];
+			snprintf(buffer, sizeof(buffer), "the receive source left playing (state %s, %llu ms since last frame)",
+				 state ? state : "unknown",
+				 (unsigned long long)((os_gettime_ns() - receiveLastFrame) / 1000000ULL));
+			why = buffer;
+		} else if (calldata_int(&cd, "native422_frames") != 0) {
+			why = "the stream changed to native 4:2:2 and needs a new Start";
+		}
+		calldata_free(&cd);
 	}
-	if (nativeReceive) {
-		return instance->NativeOutputHealthy();
+	if (reason) {
+		*reason = why;
 	}
-	// A newly detected Main422 stream cannot continue through a rendered path:
-	// drain and require a new Start/admission, never silently downconvert it.
-	calldata_t cd;
-	calldata_init(&cd);
-	bool ok = proc_handler_call(obs_source_get_proc_handler(receiveSource), "get_status", &cd);
-	const char *state = calldata_string(&cd, "state");
-	const uint64_t frames = uint64_t(calldata_int(&cd, "frames"));
-	if (frames > receiveFrames) {
-		receiveFrames = frames;
-		receiveLastFrame = os_gettime_ns();
-	}
-	ok = ok && state && strcmp(state, "playing") == 0 && calldata_int(&cd, "native422_frames") == 0 &&
-	     os_gettime_ns() - receiveLastFrame < 500000000ULL;
-	calldata_free(&cd);
-	return ok;
+	return why == nullptr;
 }

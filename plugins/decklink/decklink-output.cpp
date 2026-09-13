@@ -36,10 +36,12 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 		decklinkOutput);
 	proc_handler_add(
 		obs_output_get_proc_handler(output),
-		"void receive_status(out bool healthy, out int completed, out int repeats, out int dropped, out int late, out int audio_empty_polls, out int partial_writes)",
+		"void receive_status(out bool healthy, out string reason, out int completed, out int repeats, out int dropped, out int late, out int audio_empty_polls, out int partial_writes)",
 		[](void *p, calldata_t *cd) {
 			auto *o = static_cast<DeckLinkOutput *>(p);
-			calldata_set_bool(cd, "healthy", o->ReceiveHealthy());
+			const char *reason = nullptr;
+			calldata_set_bool(cd, "healthy", o->ReceiveHealthy(&reason));
+			calldata_set_string(cd, "reason", reason ? reason : "");
 			o->ReceiveStats(cd);
 		},
 		decklinkOutput);

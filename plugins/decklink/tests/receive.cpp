@@ -826,6 +826,41 @@ int main(int argc, char **argv)
 		const int expected=phase==2 ? 0 : phase==1 || phase==3 ? 4096 : 16384;
 		for(auto sample:sdk.card.syncPCM) assert(abs(int(sample)-expected)<=1);
 	}
+	// Ordinary health: a gap in decoded frames only repeats the last rendered
+	// frame on the card, so it never drains the output. Leaving "playing" or a
+	// native 4:2:2 change does, with a named reason for the UI log.
+	static struct { const char *state = "playing"; long long frames = 1, native = 0; } ordinaryStatus;
+	proc_handler_add(obs_source_get_proc_handler(renderedSource),
+		"void get_status(out string state, out int frames, out int native422_frames)",
+		[](void *, calldata_t *cd) {
+			calldata_set_string(cd, "state", ordinaryStatus.state);
+			calldata_set_int(cd, "frames", ordinaryStatus.frames);
+			calldata_set_int(cd, "native422_frames", ordinaryStatus.native);
+		}, nullptr);
+	{
+		calldata_t health; calldata_init(&health);
+		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
+		assert(calldata_bool(&health, "healthy") && !*calldata_string(&health, "reason"));
+		calldata_free(&health);
+		os_sleep_ms(600); // no new frame for longer than the old 500 ms cutoff
+		calldata_init(&health);
+		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
+		assert(calldata_bool(&health, "healthy"));
+		calldata_free(&health);
+		ordinaryStatus.state = "error";
+		calldata_init(&health);
+		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
+		assert(!calldata_bool(&health, "healthy") && strstr(calldata_string(&health, "reason"), "left playing (state error"));
+		calldata_free(&health);
+		ordinaryStatus.state = "playing"; ordinaryStatus.native = 1;
+		calldata_init(&health);
+		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
+		assert(!calldata_bool(&health, "healthy") && strstr(calldata_string(&health, "reason"), "native 4:2:2"));
+		calldata_free(&health);
+		ordinaryStatus.native = 0;
+		assert(obs_output_active(realOutput)); // health is advisory; the UI watchdog drains
+	}
+	puts("ordinary receive health: frame gaps tolerated, playing/native changes named PASS");
 	assert(!obs_source_get_monitoring_enabled(renderedSource));
 	obs_output_stop(realOutput);
 	for (int i=0; i<100 && obs_output_active(realOutput); ++i) os_sleep_ms(2);

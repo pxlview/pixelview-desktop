@@ -108,22 +108,48 @@ int main(int argc, char **argv)
 	assert(stops == 0);
 	healthy = false;
 	receive_output_watchdog();
-	assert(stops == 1 && !main_output_running);
+	assert(stops == 1 && !main_output_running && receive_auto_pending);
+	// A watchdog stop resumes once the source is ready again, but an attempt
+	// that fails again right away counts against a bounded budget: three
+	// consecutive quick failures end automatic resume until the next bind.
 	receive_output_watchdog();
-	assert(starts == 1); // no restart loop after failure
+	assert(starts == 2 && main_output_running && !receive_auto_pending);
+	receive_output_watchdog();
+	assert(stops == 2 && receive_auto_pending);
+	receive_output_watchdog();
+	assert(starts == 3 && main_output_running);
+	receive_output_watchdog();
+	assert(stops == 3 && !receive_auto_pending); // budget exhausted
+	receive_output_watchdog();
+	receive_output_watchdog();
+	assert(starts == 3); // no restart loop after repeated failure
+	// A fresh bind resets the resume budget.
+	healthy = true;
+	bind_receive_source(nullptr, &cd);
+	assert(receive_auto_pending && stops == 3);
+	receive_output_watchdog();
+	assert(starts == 4 && main_output_running);
+	healthy = false;
+	receive_output_watchdog();
+	assert(stops == 4 && receive_auto_pending);
+	healthy = true;
+	receive_output_watchdog();
+	assert(starts == 5 && main_output_running);
+	receive_output_watchdog();
+	assert(stops == 4);
 	context.output = fixtureOutput;
 	calldata_set_ptr(&cd, "source", nullptr);
 	bind_receive_source(nullptr, &cd);
-	assert(stops == 2 && receive_mode && !receive_source && !receive_auto_pending);
+	assert(stops == 5 && receive_mode && !receive_source && !receive_auto_pending);
 	calldata_set_bool(&cd, "receiving", false);
 	bind_receive_source(nullptr, &cd);
 	assert(!receive_mode);
 	receive_output_watchdog();
-	assert(starts == 1);
+	assert(starts == 5);
 	obs_output_release(fixtureOutput);
 	obs_source_release(source);
 	obs_data_release(settings);
 	calldata_free(&cd);
 	obs_shutdown();
-	puts("compiled production receive UI: exact weak source, ready-only AutoStart, source-change drain and loss watchdog PASS");
+	puts("compiled production receive UI: exact weak source, ready-only AutoStart, source-change drain, loss watchdog and bounded resume PASS");
 }

@@ -99,13 +99,18 @@ void output_start()
 	}
 	OBSSourceAutoRelease selected = receive_mode ? obs_weak_source_get_source(receive_source) : nullptr;
 	if (receive_mode && !selected) {
+		blog(LOG_WARNING, "[decklink-output-ui] Start ignored: no receive source is bound");
 		return;
 	}
 	OBSData settings = load_settings();
+	if (settings == nullptr) {
+		blog(LOG_WARNING, "[decklink-output-ui] Start ignored: no saved DeckLink output settings");
+	}
 
 	if (settings != nullptr) {
 		obs_output_t *const output = obs_output_create("decklink_output", "decklink_output", settings, NULL);
 		if (!output) {
+			blog(LOG_WARNING, "[decklink-output-ui] Start ignored: could not create the DeckLink output");
 			return;
 		}
 		if (receive_mode) {
@@ -121,6 +126,9 @@ void output_start()
 				     calldata_bool(&cd, "bound");
 			calldata_free(&cd);
 			if (!bound) {
+				blog(LOG_WARNING, "[decklink-output-ui] Start ignored: %s",
+				     ready ? "the output refused to bind the receive source"
+					   : "the receive source is not ready (waiting for fresh video)");
 				obs_output_release(output);
 				return;
 			}
@@ -189,6 +197,7 @@ void output_start()
 				output_stop();
 			}
 		} else {
+			blog(LOG_WARNING, "[decklink-output-ui] Start ignored: the selected DeckLink device or mode is unavailable");
 			obs_output_release(output);
 		}
 	}
