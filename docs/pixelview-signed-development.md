@@ -81,6 +81,14 @@ and rechecks signatures/code metadata before executing the fixed bundle.
 
 ## Two settings roots, one app and normal Keychain
 
+For a **new local-backend pairing**, use
+`PIXELVIEW_LOCAL_DEVELOPMENT=1 python3 cmake/macos/pixelview-launch.py` at runtime.
+This exposes editable pairing settings defaulting to `http://localhost:8000` and
+checks Local development. Without the exact value `1`, new pairing asks only for
+the admin code and uses `https://api4.pixelview.io`. Existing saved pairings and
+credentials are not switched by the environment; explicitly Unpair first to
+change backends. See [pairing defaults and security](pixelview-pairing-ux.md#production-and-local-development-pairing).
+
 After the new source is compiled and launching is authorized, run in separate
 normal-user terminals:
 

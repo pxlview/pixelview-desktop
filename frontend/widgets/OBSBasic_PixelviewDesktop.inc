@@ -227,10 +227,14 @@ void OBSBasic::PairPixelviewDesktop()
  if(pixelviewUnpairRetry) return;
  QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Pair with Pixelview"));
  QFormLayout form(&dialog);
- QLineEdit origin(pixelviewOrigin.toString(),&dialog); origin.setPlaceholderText(QStringLiteral("https://your-backend-origin"));
+ // Runtime opt-in affects new pairing only, never a saved origin/credential.
+ const bool development=qgetenv("PIXELVIEW_LOCAL_DEVELOPMENT")=="1";
+ QLineEdit origin(development ? QStringLiteral("http://localhost:8000") : QStringLiteral("https://api4.pixelview.io"),&dialog);
  QLineEdit code(&dialog); code.setEchoMode(QLineEdit::Password); code.setPlaceholderText(QStringLiteral("One-time admin pairing code"));
- QCheckBox dev(QStringLiteral("Local development (allow HTTP only on loopback)"),&dialog); dev.setChecked(pixelviewDev);
- form.addRow(QStringLiteral("Backend origin"),&origin);form.addRow(QStringLiteral("Pairing code"),&code);form.addRow(&dev);
+ QCheckBox dev(QStringLiteral("Local development (allow HTTP only on loopback)"),&dialog); dev.setChecked(development);
+ if(development) form.addRow(QStringLiteral("Backend origin"),&origin); else origin.hide();
+ form.addRow(QStringLiteral("Pairing code"),&code);
+ if(development) form.addRow(&dev); else dev.hide();
  QDialogButtonBox buttons(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);form.addRow(&buttons);
  connect(&buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
  if(dialog.exec()!=QDialog::Accepted) return;
