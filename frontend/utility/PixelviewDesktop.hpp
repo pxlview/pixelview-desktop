@@ -123,7 +123,8 @@ public:
   } else if(name=="DESKTOP_ERROR") {
    const QString code=data["code"].toString();
    const QStringList known={"active_session_required","node_paused","subscription_required"};
-   fail(known.contains(code) ? "Pixelview: "+code+". Check admin and start manually." : "Pixelview protocol error. Stream stopped.");
+   fail(code=="start_failed" ? "Pixelview could not start the stream. Check admin and start manually." :
+        known.contains(code) ? "Pixelview: "+code+". Check admin and start manually." : "Pixelview protocol error. Stream stopped.");
   } else if(name=="SOCKET_DESKTOP_REVOKED") {
    revoked=true;
    fail("Device revoked. Pair again in Pixelview admin.");

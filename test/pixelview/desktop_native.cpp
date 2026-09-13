@@ -51,7 +51,7 @@ int main() {
  assert(!f.d.pingExpired(20000 + Desktop::PING_SILENCE_MS + 1) && f.d.ready);
  assert(!f.d.pingExpired(99999999)); // Cleared until the next ping or ready.
  f.d.receive(READY, 90000); assert(f.d.pingDeadline == 0); // Already ready: ignored.
- for (const char *code : {"active_session_required", "node_paused", "subscription_required", "unknown_message", "other"}) {
+ for (const char *code : {"active_session_required", "node_paused", "subscription_required", "start_failed", "unknown_message", "other"}) {
   Fixture e; e.d.receive(READY, 0); assert(e.d.requestStart(1));
   e.d.receive(mutation("DESKTOP_ERROR", {{"code", code}}), 2);
   assert(!e.d.ready && !e.d.intent && !e.d.pending && e.halts == 1 && e.starts == 0);

@@ -89,7 +89,7 @@ int main() {
  assert(!zero.d.intent && !zero.d.takeRetry(99999,true));
  Fixture immediate;immediate.start();immediate.d.retryDelay=0;immediate.d.fail("lost",true);
  assert(immediate.d.takeRetry(0,true));
- for(const char *code : {"active_session_required","node_paused","subscription_required","unknown_message","unknown"}) {
+ for(const char *code : {"active_session_required","node_paused","subscription_required","start_failed","unknown_message","unknown"}) {
   Fixture denial;denial.start();denial.d.receive(mutation("DESKTOP_ERROR",{{"code",code}}),0);
   assert(!denial.d.intent && !denial.d.authorized(0) && !denial.d.takeRetry(99999,true));
  }

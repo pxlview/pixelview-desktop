@@ -9,10 +9,11 @@ second publisher itself, and media is independent of the control socket.
 
 - Connect: `wss://<backend>/desktop/ws?token=<device_token>`. The paired
   device token (from `POST /desktop/exchange`, unchanged) authenticates the
-  upgrade; no first message is sent. An invalid or revoked token is rejected at
-  the upgrade (the server closes with 4401 before accepting, which the macOS
-  transport observes as HTTP 401/403 and maps to 4401/4403). The client keeps
-  a 10-second budget for `DESKTOP_READY` after opening.
+  upgrade; no first message is sent. For an invalid or revoked token the
+  server accepts and immediately closes with 4401 and no prior message, which the client treats exactly like `SOCKET_DESKTOP_REVOKED`; an
+  upgrade rejected outright with HTTP 401/403 is mapped to 4401/4403 and is
+  terminal as well. The client keeps a 10-second budget for `DESKTOP_READY`
+  after opening.
 - Envelope: server → client `{"mutation": NAME, "data": {...}}`; client →
   server `{"message": NAME, "data": {...}}`.
 - `DESKTOP_READY {desktop_id, node_id}`: sent once after connect. The client
@@ -28,7 +29,8 @@ second publisher itself, and media is independent of the control socket.
   pong. The client treats 60 s without a server ping as a dead socket.
 - `DESKTOP_START {}` → `DESKTOP_STARTED {config:{whip:{endpoint,bearer_token}|null, srt:{...}}}`
   or `DESKTOP_ERROR {code}` with `active_session_required`, `node_paused`,
-  `subscription_required` or `unknown_message`. Only `config.whip` is used;
+  `subscription_required`, `start_failed` (a server-side start failure; the
+  socket stays open) or `unknown_message`. Only `config.whip` is used;
   a missing WHIP config is an explicit error and SRT is never used. If another
   source is already publishing, the WHIP POST itself fails and the native
   output reports it; there is no `busy` code.
