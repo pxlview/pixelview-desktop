@@ -75,6 +75,9 @@ static void *fixture_create(obs_data_t *s, obs_source_t *source)
 	g_signal_emit_by_name(f->rx, "request-encoded-filter", "fixture", "video_0", caps, &filter);
 	gst_caps_unref(caps);
 	assert(filter);
+	/* Offline 4:2:2 fidelity fixture: admit the native branch explicitly on the
+	 * filter; normal-build policy (main422-25p.h) refuses main-422-10. */
+	pv_native422_filter_admit_native(filter, TRUE);
 	f->r.pipe = gst_pipeline_new(NULL);
 	f->src = gst_element_factory_make("appsrc", NULL);
 	GstElement *sink = gst_element_factory_make("fakesink", NULL);
