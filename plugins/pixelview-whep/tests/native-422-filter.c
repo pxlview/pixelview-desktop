@@ -31,6 +31,7 @@ static void route_switch_regression(void)
 {
  struct fake_output out={0};
  GstElement *pipe=gst_pipeline_new(NULL), *filter=pv_native422_filter_new(deliver,&out,release);
+ pv_native422_filter_admit_native(filter,TRUE);
  GstElement *sink=gst_element_factory_make("fakesink",NULL);g_object_set(sink,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));
  gst_element_set_state(pipe,GST_STATE_PLAYING);
@@ -65,6 +66,7 @@ int main(int argc, char **argv)
   GstElement *pipeline = gst_pipeline_new(NULL);
   GstElement *src = gst_element_factory_make("appsrc", NULL);
   GstElement *filter = pv_native422_filter_new(deliver, &out, release); assert(filter);
+  pv_native422_filter_admit_native(filter, TRUE); /* offline fidelity fixture, not normal-build policy */
   GstElement *preview = gst_element_factory_make("appsink", NULL);
   g_object_set(src, "format", GST_FORMAT_TIME, NULL);
   g_object_set(preview, "sync", FALSE, NULL);

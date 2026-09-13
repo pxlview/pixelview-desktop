@@ -22,7 +22,8 @@ static void check(unsigned num,unsigned den)
  gst_pad_set_active(tap->src,TRUE);gst_pad_set_active(sink,TRUE);assert(gst_pad_link(tap->src,sink)==GST_PAD_LINK_OK);
  GstBuffer *b=gst_buffer_new_allocate(NULL,1,NULL);GST_BUFFER_PTS(b)=0;
  assert(tap_chain(tap->sink,GST_OBJECT(tap),b)==GST_FLOW_NOT_NEGOTIATED);
- gboolean allowed=(guint64)num==25ULL*den;
+ /* The 25p restriction exists only while the Main422 policy is enabled. */
+ gboolean allowed=!pv_main422_25p_enabled() || (guint64)num==25ULL*den;
  assert(tap->rate_active==allowed);
  if(!allowed) assert(!g_strcmp0(tap->failure_reason,"au-caps-rate-conflict"));
  /* 25 passes only the rate gate: malformed metadata still fails before VT. */
@@ -33,7 +34,7 @@ static void check(unsigned num,unsigned den)
 }
 int main(void)
 {
- gst_init(NULL,NULL);assert(pv_main422_25p_enabled());
+ gst_init(NULL,NULL);assert(!pv_main422_25p_enabled()); /* normal builds refuse Main 4:2:2 10 */
  check(24000,1001);check(24,1);check(25,1);check(30000,1001);check(30,1);
  return 0;
 }

@@ -3,6 +3,7 @@
 #include <gst/app/gstappsink.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 static unsigned released;
 static gboolean deliver(void *p,GstSample *s,const struct pv_native422_frame *f)
 { (void)p;(void)s;(void)f;assert(!"ordinary media entered native decode");return FALSE; }
@@ -56,6 +57,7 @@ static void native_dependency_failure(void)
  gst_element_set_state(pipe,GST_STATE_PLAYING);
  GstPluginFeature *queue=GST_PLUGIN_FEATURE(gst_element_factory_find("queue"));assert(queue);
  gst_registry_remove_feature(gst_registry_get(),queue);gst_object_unref(queue);
+ pv_native422_filter_admit_native(filter,TRUE);
  GstPad *input=gst_element_get_static_pad(filter,"sink");
  gst_pad_send_event(input,gst_event_new_stream_start("native-missing-queue"));
  GstCaps *caps=gst_caps_from_string("video/x-h265,profile=main-422-10,stream-format=hvc1,alignment=au,width=16,height=16,framerate=25/1");
@@ -67,4 +69,39 @@ static void native_dependency_failure(void)
  assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
-int main(void) { gst_init(NULL,NULL);test_profile("main");test_profile("main-10");missing_profile_failure();native_dependency_failure();assert(released==4);puts("Main/Main10: no native tap/queue, all 64 compressed AUs unchanged; missing native dependency fails closed"); }
+/* Normal-build policy: a sender on HEVC 4:2:2 10-bit (or any non-Main profile)
+ * is refused before its first AU with the typed reason the frontend maps to
+ * "use HEVC Main or Main10". No native tap, queue or decoder is created. */
+static void unsupported_profile_refusal(const char *profile,const char *reason,gboolean admit)
+{
+ GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_native422_filter_new(deliver,NULL,release);
+ GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
+ gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));gst_element_set_state(pipe,GST_STATE_PLAYING);
+ if(admit) pv_native422_filter_admit_native(filter,admit);
+ GstPad *input=gst_element_get_static_pad(filter,"sink");gst_pad_send_event(input,gst_event_new_stream_start(profile));
+ char *text=g_strdup_printf("video/x-h265,stream-format=hvc1,alignment=au,profile=%s,width=1920,height=1080,framerate=25/1",profile);
+ GstCaps *caps=gst_caps_from_string(text);g_free(text);
+ gst_pad_send_event(input,gst_event_new_caps(caps));gst_caps_unref(caps); /* dropped by the probe: reported as handled */
+ GstSegment segment;gst_segment_init(&segment,GST_FORMAT_TIME);gst_pad_send_event(input,gst_event_new_segment(&segment));
+ assert(gst_pad_chain(input,gst_buffer_new_allocate(NULL,1,NULL))==GST_FLOW_NOT_NEGOTIATED);
+ GstBus *bus=gst_element_get_bus(pipe);GstMessage *error=gst_bus_timed_pop_filtered(bus,GST_SECOND,GST_MESSAGE_ERROR);assert(error);
+ GError *err=NULL;gchar *debug=NULL;gst_message_parse_error(error,&err,&debug);
+ assert(err && err->domain==GST_STREAM_ERROR && err->code==GST_STREAM_ERROR_WRONG_TYPE);
+ assert(strstr(err->message,"HEVC Main or Main10"));
+ const GstStructure *details=NULL;gst_message_parse_error_details(error,&details);
+ assert(details && gst_structure_has_name(details,PV_UNSUPPORTED_PROFILE_DETAILS));
+ assert(!g_strcmp0(gst_structure_get_string(details,"reason"),reason));
+ g_clear_error(&err);g_free(debug);gst_message_unref(error);gst_object_unref(bus);
+ assert(!gst_bin_get_by_name(GST_BIN(filter),"preview") && !gst_bin_get_by_name(GST_BIN(filter),"native-transform"));
+ assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
+ gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
+}
+int main(void)
+{
+ gst_init(NULL,NULL);test_profile("main");test_profile("main-10");missing_profile_failure();native_dependency_failure();
+ unsupported_profile_refusal("main-422-10",PV_UNSUPPORTED_HEVC_MAIN_422_10,FALSE);
+ unsupported_profile_refusal("main-422-12",PV_UNSUPPORTED_HEVC_PROFILE,FALSE);
+ unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_PROFILE,TRUE); /* admission covers main-422-10 only */
+ assert(released==7);
+ puts("Main/Main10: no native tap/queue, all 64 compressed AUs unchanged; missing native dependency fails closed; 4:2:2/4:4:4 refused with typed Main/Main10 guidance");
+}

@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #define PIXELVIEW_WHEP_TEST
 #include "../native-422-filter.h"
+/* Fidelity fixture drives the production request-encoded-filter hook with the
+ * native path enabled; normal-build policy (main422-25p.h) is FALSE. */
+#include "../main422-25p.h"
+#define pv_main422_25p_enabled() TRUE
 /* Elementary-file fidelity fixture has no RTP and is not admission evidence. */
 #define pv_native422_filter_require_rtp(filter, receiver) ((void)(filter), (void)(receiver))
 #include "../pixelview-whep.c"

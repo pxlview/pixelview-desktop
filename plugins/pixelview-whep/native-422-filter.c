@@ -272,7 +272,7 @@ struct route_selector {
  void *opaque;
  GDestroyNotify destroy;
  struct rate_observer *rate;
- gboolean require_rtp, preview_nv12, selected;
+ gboolean require_rtp, preview_nv12, selected, admit_native;
 };
 static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
 {
@@ -297,6 +297,7 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
  (void)pad;
  if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))!=GST_EVENT_CAPS) return GST_PAD_PROBE_OK;
  struct route_selector *s=opaque;
+ const char *unsupported=NULL;
  GstCaps *caps;gst_event_parse_caps(GST_PAD_PROBE_INFO_EVENT(info),&caps);
  const GstStructure *wire=gst_caps_is_fixed(caps)?gst_caps_get_structure(caps,0):NULL;
  if(!wire) goto failed;
@@ -315,7 +316,12 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
   /* Pin the actual profile. Never route a later native stream into stock 420
    * decoding or silently enable native admission on a populated ordinary path. */
   const char *profile=gst_structure_get_string(wire,"profile");
-  if(!profile || (g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !native)) {
+  if(!profile) { gst_caps_unref(policy);goto failed; }
+  if(g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !(native && s->admit_native)) {
+   /* A sender configured for HEVC 4:2:2 10-bit (or another non-Main profile)
+    * is refused with a canonical reason before any AU; the profile string
+    * itself is never copied into the message. */
+   unsupported=native?PV_UNSUPPORTED_HEVC_MAIN_422_10:PV_UNSUPPORTED_HEVC_PROFILE;
    gst_caps_unref(policy);goto failed;
   }
   gst_caps_set_simple(policy,"profile",G_TYPE_STRING,profile,NULL);
@@ -342,7 +348,12 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
  return GST_PAD_PROBE_OK;
 failed:
  gst_pad_add_probe(pad,GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST,refuse_route,NULL,NULL);
- GST_ELEMENT_ERROR(s->bin,CORE,NEGOTIATION,("Native receive branch unavailable"),(NULL));
+ if(unsupported)
+  gst_element_message_full_with_details(s->bin,GST_MESSAGE_ERROR,GST_STREAM_ERROR,GST_STREAM_ERROR_WRONG_TYPE,
+   g_strdup("Unsupported HEVC profile received: use the HEVC Main or Main10 profile"),g_strdup(unsupported),
+   __FILE__,GST_FUNCTION,__LINE__,gst_structure_new(PV_UNSUPPORTED_PROFILE_DETAILS,"reason",G_TYPE_STRING,unsupported,NULL));
+ else
+  GST_ELEMENT_ERROR(s->bin,CORE,NEGOTIATION,("Native receive branch unavailable"),(NULL));
  return GST_PAD_PROBE_DROP;
 }
 GstElement *pv_native422_filter_new(pv_native422_delivery delivery,void *opaque,GDestroyNotify destroy)
@@ -395,4 +406,9 @@ void pv_native422_filter_preview_format(GstElement *filter, gboolean nv12)
 {
  struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
  if(s) s->preview_nv12=nv12;
+}
+void pv_native422_filter_admit_native(GstElement *filter, gboolean admit)
+{
+ struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
+ if(s) s->admit_native=admit;
 }

@@ -14,6 +14,7 @@
 #include "profile-offer.h"
 #include "native-422-filter.h"
 #include "native-422-diagnostic.h"
+#include "main422-25p.h"
 #include "source-feed-queue.h"
 #include <math.h>
 #ifndef PIXELVIEW_WHEP_TEST
@@ -29,6 +30,7 @@ struct receiver {
  GRecMutex delivery;
  uint64_t generation, active_generation;
  struct pv422_diagnostic native422_failure; /* lock; first failure per generation */
+ const char *failure; /* lock; canonical allowlisted reason for the current generation, or NULL */
  GCond wake;
  GThread *thread;
  /* One source-owned preview worker: latest owned RAW sample plus one in flight.
@@ -118,6 +120,19 @@ static void native422_failure_locked(struct receiver *r,GstMessage *msg)
   blog(LOG_WARNING,"[pixelview-whep] native422 %s",text);g_free(text);
  }
 }
+/* Typed refusal from the route selector (native-422-filter.h). Only the two
+ * canonical reasons are retained; arbitrary error text is never consumed. */
+static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
+{
+ if(!msg || GST_MESSAGE_TYPE(msg)!=GST_MESSAGE_ERROR) return;
+ if(r->quit || r->changed || r->generation!=r->active_generation || r->failure) return;
+ const GstStructure *s=NULL;gst_message_parse_error_details(msg,&s);
+ if(!s || !gst_structure_has_name(s,PV_UNSUPPORTED_PROFILE_DETAILS)) return;
+ const char *reason=gst_structure_get_string(s,"reason");
+ if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_MAIN_422_10)) r->failure=PV_UNSUPPORTED_HEVC_MAIN_422_10;
+ else if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_PROFILE)) r->failure=PV_UNSUPPORTED_HEVC_PROFILE;
+ if(r->failure) blog(LOG_ERROR,"[pixelview-whep] %s: the sender must use the HEVC Main or Main10 profile",r->failure);
+}
 static void log_media_stop(GstMessage *msg,bool stale)
 {
  if(msg) {
@@ -154,6 +169,7 @@ static void status_proc(void *opaque, calldata_t *cd)
  calldata_set_int(cd, "jitter_latency", r->jitter_latency);
  char *diagnostic=pv422_diagnostic_text(&r->native422_failure,r->generation);
  calldata_set_string(cd,"native422_diagnostic",diagnostic);g_free(diagnostic);
+ calldata_set_string(cd,"failure",r->failure?r->failure:"");
  g_mutex_unlock(&r->lock);
 }
 static void wipe(char **text)
@@ -186,7 +202,7 @@ static void connect_proc(void *opaque, calldata_t *cd)
  bool latency_override = calldata_get_int(cd, "latency", &latency);
  g_mutex_lock(&r->lock);
  r->generation++;
- r->native422_failure=(struct pv422_diagnostic){0};
+ r->native422_failure=(struct pv422_diagnostic){0}; r->failure=NULL;
  pv_feed_reset(&r->feed);
  wipe(&r->endpoint);
  bool valid = valid_endpoint(endpoint) && (!latency_override || (latency >= 0 && latency <= 2000));
@@ -204,7 +220,7 @@ static void disconnect_proc(void *opaque, calldata_t *cd)
  (void)cd; struct receiver *r = opaque;
  g_mutex_lock(&r->lock);
  r->generation++;
- r->native422_failure=(struct pv422_diagnostic){0};
+ r->native422_failure=(struct pv422_diagnostic){0}; r->failure=NULL;
  pv_feed_reset(&r->feed);
  wipe(&r->endpoint); r->state = "idle"; r->changed = true; r->accept_samples = false;
  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
@@ -624,6 +640,7 @@ static GstElement *request_encoded_filter(GstElement *rx, const char *peer, cons
    attempt_ref(a),attempt_unref,0);
   gst_object_unref(policy);
   pv_native422_filter_require_rtp(filter,rx);
+  pv_native422_filter_admit_native(filter,pv_main422_25p_enabled());
   const char *format = caps && gst_caps_get_size(caps) ? gst_structure_get_string(gst_caps_get_structure(caps, 0), "format") : NULL;
   pv_native422_filter_preview_format(filter, !g_strcmp0(format, "NV12"));
   /* The signal's object GValue transfers an owned reference to Rust. A floating
@@ -788,6 +805,7 @@ static gpointer worker(gpointer opaque)
    g_mutex_lock(&r->lock);
    uint64_t last = r->native422_frames ? r->last_native_video : r->last_video;
    native422_failure_locked(r,msg);
+   unsupported_profile_locked(r,msg);
    bool stale = os_gettime_ns() - last > 15ULL * 1000000000;
    if ((msg || stale) && !r->changed) {
     r->accept_samples = false;
@@ -824,7 +842,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
  proc_handler_add(ph, "void set_native_preview(bool enabled)", native_preview_proc, r);
  proc_handler_add(ph, "void connect(string endpoint, int latency)", connect_proc, r);
  proc_handler_add(ph, "void disconnect()", disconnect_proc, r);
- proc_handler_add(ph, "void get_status(out bool ready, out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency, out int native422_frames, out int native_audio_frames, out string native422_diagnostic)", status_proc, r);
+ proc_handler_add(ph, "void get_status(out bool ready, out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency, out int native422_frames, out int native_audio_frames, out string native422_diagnostic, out string failure)", status_proc, r);
  r->thread = g_thread_new("pixelview-whep", worker, r);
  return r;
 }
@@ -834,7 +852,7 @@ static void destroy(void *opaque)
  source_controls_disconnect(r);
  g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock); r->quit = true; r->generation++;
- r->native422_failure=(struct pv422_diagnostic){0}; r->accept_samples = false; g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
+ r->native422_failure=(struct pv422_diagnostic){0}; r->failure=NULL; r->accept_samples = false; g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
  g_rec_mutex_unlock(&r->delivery);
  g_thread_join(r->thread); wipe(&r->endpoint);
  if (r->preview_thread) g_thread_join(r->preview_thread);

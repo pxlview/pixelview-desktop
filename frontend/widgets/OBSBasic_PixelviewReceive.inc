@@ -307,8 +307,16 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 			const bool fresh = frames > pixelviewReceiveFrames;
 			pixelviewReceiveFrames = frames;
 			if (state && (strcmp(state, "error") == 0 || strcmp(state, "ended") == 0)) {
+				// Bounded plugin reasons only; the profile string itself is never rendered.
+				const char *failure = calldata_string(&data, "failure");
+				const bool hevc422 = failure && strcmp(failure, "unsupported-hevc-main-422-10") == 0;
+				const bool hevcOther = failure && strcmp(failure, "unsupported-hevc-profile") == 0;
 				StopPixelviewReceive(true);
-				SetPixelviewReceiveStatus(QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
+				SetPixelviewReceiveStatus(hevc422 ?
+					QStringLiteral("The sender is streaming HEVC 4:2:2 10-bit, which cannot be received. Please use the HEVC Main or Main10 profile on the sender.") :
+					hevcOther ?
+					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
+					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
 			} else if (state && strcmp(state, "playing") == 0 && fresh) {
 				SetPixelviewReceiveStatus(QStringLiteral("Receiving"), ReceiveStatusTone::Receiving);
 			} else {

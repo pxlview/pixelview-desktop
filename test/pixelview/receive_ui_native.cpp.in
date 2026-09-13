@@ -312,13 +312,13 @@ int main(int argc,char **argv) {
     layout.pixelviewReceiveStorageStatus->hide();
    }
    // Synthetic native source reports the production get_status schema.
-   static const char *mediaState="playing";
+   static const char *mediaState="playing", *mediaFailure="";
    static int64_t frames=0,nativeFrames=0;
    obs_source_info media={}; media.id="pixelview_whep_source"; media.type=OBS_SOURCE_TYPE_INPUT;
    media.get_name=[](void*){return "Offline media telemetry";};
    media.create=[](obs_data_t*,obs_source_t *source)->void* {
-    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out int native422_frames)",
-     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_int(data,"native422_frames",nativeFrames);},nullptr);
+    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out int native422_frames, out string failure)",
+     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_int(data,"native422_frames",nativeFrames); calldata_set_string(data,"failure",mediaFailure);},nullptr);
     return source;
    };
    media.destroy=[](void*){}; obs_register_source(&media);
@@ -354,7 +354,19 @@ int main(int argc,char **argv) {
    nativeFrames=31; frames=0; poll(); assert(green());
    poll(); assert(!green()); // Native stall cannot be concealed by a stale preview.
    nativeFrames=32; poll(); assert(green());
-   mediaState="error"; poll(); assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed"));
+   // A sender on HEVC 4:2:2 10-bit stops the attempt with Main/Main10 guidance.
+   mediaState="error"; mediaFailure="unsupported-hevc-main-422-10"; poll();
+   assert(!green() && !layout.pixelviewReceiveIntent && layout.pixelviewReceiveStatus->text().contains("HEVC 4:2:2 10-bit"));
+   assert(layout.pixelviewReceiveStatus->text().contains("HEVC Main or Main10"));
+   assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585"));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true; mediaFailure="unsupported-hevc-profile"; poll();
+   assert(!green() && layout.pixelviewReceiveStatus->text().contains("unsupported HEVC profile") && layout.pixelviewReceiveStatus->text().contains("HEVC Main or Main10"));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true; mediaFailure="not-a-known-reason"; poll();
+   assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed") && !layout.pixelviewReceiveStatus->text().contains("not-a-known-reason"));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true; mediaFailure=""; poll(); assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed"));
    layout.StopPixelviewReceive(true); app.processEvents(); assert(!green());
    assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==app.palette().color(QPalette::WindowText));
    auto red=[&]{app.processEvents(); return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585");};
