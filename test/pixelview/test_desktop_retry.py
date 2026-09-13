@@ -33,7 +33,7 @@ class DesktopRetry(unittest.TestCase):
     def test_compiled_frontend_drain(self):
         inc = (ROOT/'frontend/widgets/OBSBasic_PixelviewDesktop.inc').read_text()
         methods = inc[inc.index('void OBSBasic::PixelviewOutputStopped()'):inc.index('bool OBSBasic::SavePixelviewIdentity()')]
-        halt = inc[inc.index(' pixelviewLease.error='):inc.index(' pixelviewLease.send=')] + inc[inc.index(' pixelviewLease.halt='):inc.index(' pixelviewLease.publish=')]
+        halt = inc[inc.index(' pixelviewLease.error='):inc.index(' pixelviewLease.send=')] + inc[inc.index(' pixelviewLease.report='):inc.index(' pixelviewLease.publish=')]
         disconnected = inc[inc.index(' pixelviewDesktop->disconnected='):inc.index(' pixelviewDesktop->paired=')]
         message = inc[inc.index(' pixelviewDesktop->message='):inc.index(' pixelviewDesktop->disconnected=')]
         publish_gate = inc[inc.index(' pixelviewLease.publish='):inc.index('  OBSDataAutoRelease settings=')] + '(void)endpoint;(void)bearer;};\n'
@@ -51,11 +51,11 @@ class DesktopRetry(unittest.TestCase):
         methods += basic[basic.index('void OBSBasic::closeWindow()'):basic.index('\n\t/* While closing,', basic.index('void OBSBasic::closeWindow()'))] + '\n++teardowns;\n}\n'
         connect = inc[inc.index('void OBSBasic::ConnectPixelviewDesktop()'):inc.index(' QString token=')]
         methods += connect + '\n++authentications;\n}\n'
+        methods += inc[inc.index('void OBSBasic::PixelviewDeviceRevoked()'):inc.index('bool OBSBasic::PixelviewLeaseValid()')]
         methods += inc[inc.index('bool OBSBasic::PixelviewLeaseValid()'):inc.index('void OBSBasic::PixelviewOutputStopped()')]
         methods += stream[stream.index('void OBSBasic::StartStreaming()'):stream.index('\n\tif (!pixelviewDesktop && auth')] + '\n++nativePreparations;\n}\n'
         for name, marker, end in (
-            ('Watchdog', 'connect(pixelviewWatchdog,&QTimer::timeout,this,[this]{', ' }); pixelviewWatchdog->start();'),
-            ('Heartbeat', 'connect(pixelviewHeartbeat,&QTimer::timeout,this,[this]{', '\n });')):
+            ('Watchdog', 'connect(pixelviewWatchdog,&QTimer::timeout,this,[this]{', ' }); pixelviewWatchdog->start();'),):
             body = inc.split(marker, 1)[1].split(end, 1)[0]
             methods += '\nvoid OBSBasic::' + name + '(){' + body + '\n}\n'
         source = (ROOT/'test/pixelview/desktop_retry_frontend.cpp').read_text().replace('// PRODUCTION_METHODS', methods)

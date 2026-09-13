@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #include <QtCore/QPointer>
+#include <QtCore/QUrlQuery>
 @interface PVDesktopSocket : NSObject <NSURLSessionWebSocketDelegate> {
 @public
  QPointer<pixelview::DesktopConnection> owner;
@@ -11,7 +12,6 @@
 }
 @property NSURLSession *session;
 @property NSURLSessionWebSocketTask *task;
-@property NSString *auth;
 -(void)receive;
 -(void)failed:(NSInteger)code;
 @end
@@ -47,9 +47,7 @@
  }];
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didOpenWithProtocol:(NSString *)protocol {
- if(!owner) return; // A cancelled attempt must not send a delayed authentication.
- [task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:self.auth] completionHandler:^(NSError *error){ if(error) [self failed:0]; }];
- self.auth=nil;
+ if(!owner) return; // A cancelled attempt must not arm a receive loop.
  __weak PVDesktopSocket *weakSelf=self;
  watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVDesktopSocket *s=weakSelf;if(s) [s failed:0];});
  [self receive];
@@ -61,8 +59,11 @@
 -(void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))handler { handler(nil); }
 @end
 namespace pixelview {
-void DesktopConnection::openSocket(QUrl url,QString token,double resumeFence) {
+void DesktopConnection::openSocket(QUrl url,QString token) {
  closeSocket();
+ // The device token authenticates the upgrade itself; there is no first message.
+ QUrlQuery query; query.addQueryItem("token",token);
+ url.setQuery(query);
  PVDesktopSocket *s=[PVDesktopSocket new]; s->owner=this;
  NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
  config.timeoutIntervalForRequest=10; config.HTTPCookieStorage=nil; config.URLCredentialStorage=nil; config.URLCache=nil;
@@ -70,9 +71,6 @@ void DesktopConnection::openSocket(QUrl url,QString token,double resumeFence) {
  s.session=[NSURLSession sessionWithConfiguration:config delegate:s delegateQueue:NSOperationQueue.mainQueue];
  s.task=[s.session webSocketTaskWithURL:[NSURL URLWithString:url.toString().toNSString()]];
  s.task.maximumMessageSize=16384;
- QJsonObject auth{{"type","auth"},{"device_token",token}};
- if(resumeFence>0) auth["resume_fence"]=resumeFence;
- s.auth=QString::fromUtf8(QJsonDocument(auth).toJson(QJsonDocument::Compact)).toNSString();
  socket=(__bridge_retained void *)s;
  [s.task resume];
 }
@@ -86,9 +84,8 @@ void DesktopConnection::closeSocket(bool normal) {
  PVDesktopSocket *s=CFBridgingRelease(socket); socket=nullptr;
  s->owner=nullptr;
  s->watchdog.reset();
- s.auth=nil;
  if(normal) [s.task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
- else [s.task cancel]; // A control timeout must not explicitly release a resumable lease.
+ else [s.task cancel];
  [s.session invalidateAndCancel];
 }
 }

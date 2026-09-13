@@ -66,18 +66,22 @@ int main(){
             source = source.replace('void DisplayStreamStartError(){pixelviewLease.fail("setup error");}', setup_body.replace('OBSBasic::', ''))
             source = source[:source.index('int main() {')] + r'''
 int main() {
+ const QByteArray READY=R"({"mutation":"DESKTOP_READY","data":{"node_id":"fixture-node","desktop_id":"fixture-desktop"}})";
+ const QByteArray PING=R"({"mutation":"SOCKET_SEND_PING","data":{}})";
+ const QByteArray STARTED=R"({"mutation":"DESKTOP_STARTED","data":{"config":{"whip":{"endpoint":"https://fixture.invalid/whip","bearer_token":"synthetic-test-only"},"srt":{}}}})";
  for(bool setupFailure : {false,true}) {
  OBSBasic w;w.bind();Output output;w.handler.streamOutput=&output;
  Tray tray;w.sysTrayStream=&tray;
- std::vector<QString> sent;
- w.pixelviewLease.send=[&](QJsonObject o){sent.push_back(o["type"].toString());};
+ std::vector<QString> sent; std::vector<bool> pongs;
+ auto send=w.pixelviewLease.send;
+ w.pixelviewLease.send=[&](QJsonObject o){sent.push_back(o["message"].toString());if(o["message"]=="PONG_RESPONSE") pongs.push_back(o["data"].toObject()["streaming"].toBool());send(o);};
  // Accepted ready is delivered by the in-memory authenticated control socket.
  // No disconnect/error callback is delivered anywhere in this scenario.
- w.connection.message(R"({"type":"ready","node_id":"fixture-node","desktop_id":"fixture-desktop","heartbeat_interval":15,"lease_seconds":45})");
- assert(w.pixelviewPairingDurable && w.pixelviewLease.ready && w.heartbeat.active);
+ w.connection.message(READY);
+ assert(w.pixelviewPairingDurable && w.pixelviewLease.ready);
  assert(w.button.enabled && tray.enabled);
  assert(w.pixelviewLease.requestStart(0));
- w.connection.message(R"({"type":"started","fence":1,"lease_expires_at":45000,"config":{"whip":{"endpoint":"https://fixture.invalid/whip","bearer_token":"synthetic-test-only"}}})");
+ w.connection.message(STARTED);
  assert(w.pixelviewLease.authorized(0));
  const auto failedGeneration=w.pixelviewLease.generation;
  w.pixelviewNativeAttempt=true;w.pixelviewStreamingBusy=true;
@@ -86,60 +90,55 @@ int main() {
  if(setupFailure) w.MakeSetup()(false);else w.MediaStopped(OBS_OUTPUT_INVALID_STREAM);
  assert(!w.pixelviewNativeAttempt && !w.pixelviewLease.intent);
  assert(!w.pixelviewLease.acceptSetup(failedGeneration,0));
- assert(!w.button.enabled && !tray.enabled && w.heartbeat.active);
+ assert(!w.button.enabled && !tray.enabled && w.pixelviewLease.ready);
  assert(!w.pixelviewLease.authorized(0));
  std::promise<void> setup;w.setupStreamingGuard=setup.get_future().share();
  auto staleSetup=w.MakeSetup();
  w.MediaStopped(OBS_OUTPUT_INVALID_STREAM); // Duplicate native stop is ignored.
- w.connection.message(R"({"type":"started","fence":1})"); // Queued stale grant cannot revive or disconnect.
+ w.connection.message(STARTED); // Queued stale grant cannot revive or disconnect.
  Timer::run();
  assert(w.pixelviewStopPending && w.pixelviewLease.ready && w.connection.closes==0);
- assert(std::count(sent.begin(),sent.end(),QString("stop"))==0);
- w.Heartbeat();
- assert(w.pixelviewLease.heartbeatRequest==0);
- w.connection.message(R"({"type":"heartbeat","lease_expires_at":45000})");
- assert(w.pixelviewLease.ready && !w.pixelviewLease.authorized(0));
+ assert(std::count(sent.begin(),sent.end(),QString("DESKTOP_STOP"))==0);
+ w.connection.message(PING); // Server liveness continues through the drain and reports no stream.
+ assert(pongs.size()==1 && !pongs[0] && w.pixelviewLease.ready && !w.pixelviewLease.authorized(0));
  staleSetup(true);assert(w.handler.starts==0);
  setup.set_value();
  Timer::run();
- assert(w.pixelviewLease.stopping && !w.button.enabled && !tray.enabled);
- assert(!w.pixelviewLease.requestStart(0));
+ assert(!w.pixelviewLease.started && !w.pixelviewLease.pending);
  assert(!w.pixelviewStopPending && !w.pixelviewStreamingBusy);
  assert(output.forceStops==0 && w.service==&w.oldService);
  assert(w.pixelviewPairingDurable && w.pixelviewIdentity.nodeId=="fixture-node");
  assert(!w.pixelviewLease.authorized(0)); // Never retain failed ingest authority.
  const auto failureDetail=w.label.text;
- // If stop acknowledgement is pending, settle it before checking manual Start.
- if(w.pixelviewLease.stopping) w.connection.message(R"({"type":"stopped"})");
  w.RefreshPixelviewReconnect();
  assert(w.label.text==failureDetail);
  std::cerr << "after media failure: identity=" << w.identityLabel.text.toStdString()
            << ", ready=" << w.pixelviewLease.ready << ", socket closes=" << w.connection.closes
-           << ", heartbeat=" << w.heartbeat.active << ", Start=" << w.button.enabled
+           << ", Start=" << w.button.enabled
            << ", tray Start=" << tray.enabled << ", reconnectAt=" << w.pixelviewReconnectAt
            << ", retryAt=" << w.pixelviewLease.retryAt << ", status=" << w.label.text.toStdString() << '\n';
- const bool connectedRetry = w.connection.closes==0 && w.pixelviewLease.ready && w.heartbeat.active &&
+ const bool connectedRetry = w.connection.closes==0 && w.pixelviewLease.ready &&
      w.identityLabel.text=="Node fixture-node · Connected" && w.button.enabled && tray.enabled;
  assert(connectedRetry && "media rejection must preserve authenticated control and usable manual Start");
- assert(std::count(sent.begin(),sent.end(),QString("stop"))==1);
+ assert(std::count(sent.begin(),sent.end(),QString("DESKTOP_STOP"))==1);
  assert(w.pixelviewLease.requestStart(0));
  assert(w.pixelviewLease.pending && !w.pixelviewLease.authorized(0));
- assert(std::count(sent.begin(),sent.end(),QString("start"))==2);
+ assert(std::count(sent.begin(),sent.end(),QString("DESKTOP_START"))==2);
  assert(!w.pixelviewLease.acceptSetup(failedGeneration,0));
  Timer::run();
  }
- // Control revocation/expiry must still fail closed during a media drain.
+ // Control revocation or ping silence must still fail closed during a media drain.
  for(bool revoked : {false,true}) {
-  OBSBasic guard;guard.bind();guard.pixelviewLease.ready=true;guard.pixelviewLease.deadline=30000;
+  OBSBasic guard;guard.bind();guard.pixelviewLease.ready=true;
   guard.connection.authorizedToken="synthetic-retained-token";
   guard.pixelviewIdentity.accept({{"node_id","retained-node"},{"desktop_id","retained-desktop"}});
-  assert(guard.pixelviewLease.requestStart(0));guard.pixelviewLease.pending=false;guard.pixelviewLease.leased=true;
+  assert(guard.pixelviewLease.requestStart(0));guard.pixelviewLease.pending=false;guard.pixelviewLease.started=true;
   guard.pixelviewNativeAttempt=true;
   std::promise<void> pending;guard.setupStreamingGuard=pending.get_future().share();
   guard.MediaStopped(OBS_OUTPUT_INVALID_STREAM);
   if(revoked) guard.connection.disconnected(4401);
-  else {guard.pixelviewClock.now=30000;guard.Watchdog();}
-  assert(!guard.pixelviewLease.ready && !guard.pixelviewLease.intent && !guard.heartbeat.active);
+  else {guard.pixelviewLease.pingDeadline=30000;guard.pixelviewClock.now=30000;guard.Watchdog();}
+  assert(!guard.pixelviewLease.ready && !guard.pixelviewLease.intent);
   Timer::run();assert(guard.pixelviewStopPending && guard.connection.closes==0);
   pending.set_value();Timer::run();
   assert(!guard.pixelviewStopPending && guard.connection.closes==1 && !guard.button.enabled);
@@ -151,24 +150,23 @@ int main() {
    assert(guard.pixelviewIdentity.nodeId=="retained-node" && guard.pixelviewIdentity.desktopId=="retained-desktop");
    guard.ConnectPixelviewDesktop();assert(guard.authentications==0);
    application.config.booleans.clear(); // Remaining scenarios are independent installations.
-  } else assert(guard.connection.authorizedToken=="synthetic-retained-token" && guard.pixelviewPairingDurable);
+  } else assert(guard.connection.authorizedToken=="synthetic-retained-token" && guard.pixelviewPairingDurable && guard.pixelviewReconnectAt>0);
  }
- // A synchronous stop ACK observes cleared authority, not a still-leased session.
- pixelview::Desktop ack;ack.ready=true;ack.deadline=30000;
- assert(ack.requestStart(0));ack.pending=false;ack.leased=true;
- ack.send=[&](QJsonObject o){assert(o["type"]=="stop");ack.receive({{"type","stopped"}},0);};
+ // A stop release observes cleared authority immediately; DESKTOP_STOPPED needs no wait.
+ pixelview::Desktop ack;ack.ready=true;
+ assert(ack.requestStart(0));ack.pending=false;ack.started=true;
+ ack.send=[&](QJsonObject o){assert(o["message"]=="DESKTOP_STOP");assert(!ack.started);ack.receive({{"mutation","DESKTOP_STOPPED"},{"data",QJsonObject{}}},0);};
  ack.mediaStopped("Streaming failed");ack.outputStopped();
- assert(ack.ready && !ack.stopping && !ack.leased);
- // Healthy heartbeats cannot postpone missing stop acknowledgement forever.
- OBSBasic timeout;timeout.bind();timeout.pixelviewLease.ready=true;timeout.pixelviewLease.deadline=30000;
- assert(timeout.pixelviewLease.requestStart(0));
- timeout.pixelviewLease.pending=false;timeout.pixelviewLease.leased=true;
- timeout.pixelviewNativeAttempt=true;timeout.MediaStopped(OBS_OUTPUT_INVALID_STREAM);Timer::run();
- timeout.pixelviewClock.now=20000;timeout.Heartbeat();
- timeout.connection.message(R"({"type":"heartbeat"})");
- timeout.pixelviewClock.now=30000;timeout.Watchdog();Timer::run();
- assert(!timeout.pixelviewLease.ready && !timeout.pixelviewLease.intent && timeout.connection.closes==1);
- assert(timeout.pixelviewReconnectAt>0);
+ assert(ack.ready && !ack.started && !ack.pending);
+ // Healthy server pings after a media failure keep the socket and never revive intent.
+ OBSBasic quiet;quiet.bind();quiet.pixelviewLease.ready=true;
+ assert(quiet.pixelviewLease.requestStart(0));
+ quiet.pixelviewLease.pending=false;quiet.pixelviewLease.started=true;
+ quiet.pixelviewNativeAttempt=true;quiet.MediaStopped(OBS_OUTPUT_INVALID_STREAM);Timer::run();
+ quiet.pixelviewClock.now=20000;quiet.connection.message(PING);
+ quiet.pixelviewClock.now=50000;quiet.Watchdog();Timer::run();
+ assert(quiet.pixelviewLease.ready && !quiet.pixelviewLease.intent && quiet.connection.closes==0);
+ assert(quiet.pixelviewReconnectAt==0);
 }
 '''
             try:

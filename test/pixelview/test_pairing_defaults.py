@@ -27,6 +27,7 @@ class PairingDefaults(unittest.TestCase):
 #include <QtCore/QUrl>
 #include <cassert>
 #include "frontend/utility/PixelviewDesktop.hpp"
+#include "frontend/utility/PixelviewBackend.hpp"
 int main(int argc,char **argv) {
  QApplication app(argc,argv); QWidget parent;
  const QString mode=argv[1];

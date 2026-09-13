@@ -18,6 +18,7 @@ class Desktop(unittest.TestCase):
                         with conn:
                             request=b''
                             while b'\r\n\r\n' not in request: request+=conn.recv(4096)
+                            assert request.startswith(b'GET /desktop/ws?token=fixture-secret HTTP/1.1'), request[:80]
                             key=next(x.split(b':',1)[1].strip() for x in request.split(b'\r\n') if x.lower().startswith(b'sec-websocket-key:'))
                             accept=base64.b64encode(hashlib.sha1(key+b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
                             conn.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+accept+b'\r\n\r\n')
@@ -25,11 +26,7 @@ class Desktop(unittest.TestCase):
                                 data=b''
                                 while len(data)<n: data+=conn.recv(n-len(data))
                                 return data
-                            frame=read(2); length=frame[1]&127
-                            mask=read(4); payload=read(length)
-                            obj=json.loads(bytes(v^mask[i%4] for i,v in enumerate(payload)))
-                            assert obj=={'type':'auth','device_token':'fixture-secret'}
-                            body=b'{"type":"ready"}'
+                            body=b'{"mutation":"DESKTOP_READY","data":{"desktop_id":"test","node_id":"test"}}'
                             conn.sendall(bytes([129,len(body)])+body)
                             conn.recv(4096)
                             conn.sendall(bytes([136,2])+int(4401).to_bytes(2,'big'))
@@ -42,7 +39,7 @@ class Desktop(unittest.TestCase):
         streaming=(ROOT/'frontend/widgets/OBSBasic_Streaming.cpp').read_text()
         self.assertIn('RequestPixelviewStart()',streaming)
         self.assertIn('PixelviewLeaseValid()',streaming)
-        self.assertIn('if (pixelviewLease.leased) PixelviewOutputStopped();',streaming)
+        self.assertIn('if (pixelviewLease.started) PixelviewOutputStopped();',streaming)
         self.assertIn('!pixelviewDesktop && auth && auth->broadcastFlow()',streaming)
         service=(ROOT/'frontend/widgets/OBSBasic_Service.cpp').read_text()
         self.assertIn('pixelviewDesktop',service)

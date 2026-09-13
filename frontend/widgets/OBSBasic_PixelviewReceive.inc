@@ -6,6 +6,7 @@
 #include <QSysInfo>
 #include <QUuid>
 #include <utility/PixelviewKeychainTask.hpp>
+#include <utility/PixelviewBackend.hpp>
 #include <obs-module.h>
 
 // In-memory exact-source binding; no source UUID or receive authority is saved.
@@ -63,7 +64,7 @@ bool OBSBasic::SetPixelviewReceivePrecision(bool enabled)
 bool OBSBasic::PixelviewModeBusy() const
 {
 	return isClosing() || pixelviewShutdownPending || pixelviewReceiveCredentialBusy || pixelviewReceivePrecisionFault || pixelviewReceiveIntent || PixelviewSettingsBusy() ||
-	       pixelviewLease.intent || pixelviewLease.pending || pixelviewLease.leased || pixelviewStopPending ||
+	       pixelviewLease.intent || pixelviewLease.pending || pixelviewLease.started || pixelviewStopPending ||
 	       pixelviewUnpairPending || (pixelviewDesktop && pixelviewDesktop->exchanging);
 }
 
@@ -397,9 +398,7 @@ void OBSBasic::SelectPixelviewMode(int index)
 
 QString OBSBasic::PixelviewReceiveOrigin() const
 {
-	QUrl origin = pixelviewOrigin.isEmpty() ? QUrl(QStringLiteral("https://api4.pixelview.io")) : pixelviewOrigin;
-	if (origin.path() == QStringLiteral("/")) origin.setPath(QString());
-	return origin.toString(QUrl::FullyEncoded);
+	return pixelview::defaultBackendOrigin();
 }
 
 bool OBSBasic::SavePixelviewReceive()
@@ -446,7 +445,7 @@ void OBSBasic::StartPixelviewReceive()
 	if (!pixelviewReceiving || !pixelviewReceiver || PixelviewModeBusy()) return;
 	const QString id = pixelviewReceiveId->text().trimmed(), name = pixelviewReceiveName->text().trimmed();
 	if (id.isEmpty() || name.isEmpty()) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Enter a session ID and receiver name."), ReceiveStatusTone::Error); return; }
-	if (!pixelviewReceiver->setOrigin(QUrl(PixelviewReceiveOrigin()), pixelviewDev)) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Invalid backend origin."), ReceiveStatusTone::Error); return; }
+	if (!pixelviewReceiver->setOrigin(QUrl(PixelviewReceiveOrigin()), pixelview::localDevelopmentEnabled())) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Invalid backend origin."), ReceiveStatusTone::Error); return; }
 	if (pixelviewReceivePasswordOrigin != PixelviewReceiveOrigin()) {
 		SavePixelviewReceive(); // Apply the existing origin-bound password reset before snapshotting work.
 		SetPixelviewReceiveStatus(QStringLiteral("Backend changed. Enter the receiver password again."), ReceiveStatusTone::Error);

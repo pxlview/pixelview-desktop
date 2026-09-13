@@ -346,7 +346,7 @@ private:
 	std::unique_ptr<pixelview::DesktopConnection> pixelviewDesktop;
 	pixelview::Desktop pixelviewLease;
 	QElapsedTimer pixelviewClock;
-	QTimer *pixelviewHeartbeat=nullptr, *pixelviewWatchdog=nullptr;
+	QTimer *pixelviewWatchdog=nullptr;
 	QLabel *pixelviewConnectionStatus=nullptr;
 	QLabel *pixelviewIdentityStatus=nullptr;
 	pixelview::DesktopIdentity pixelviewIdentity;
@@ -365,6 +365,7 @@ private:
 	// Starts native shutdown once; true when scene teardown may proceed.
 	bool PixelviewShutdownReady();
 	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
+	void PixelviewDeviceRevoked();
 	int pixelviewBackoff=1000;
 	OBSService pixelviewPreviousService;
 	void InitPixelviewStreaming(QWidget *sidebar);

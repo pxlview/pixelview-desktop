@@ -23,7 +23,7 @@ public:
  std::function<void(QByteArray)> message=[](QByteArray){};
  std::function<void(int)> disconnected=[](int){};
  void *socket=nullptr;
- void openSocket(QUrl url,QString token,double resumeFence=0);
+ void openSocket(QUrl url,QString token);
  void sendSocket(QByteArray body);
  void closeSocket(bool normal=true);
  ~DesktopConnection() override { closeSocket(); }

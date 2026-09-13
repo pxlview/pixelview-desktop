@@ -15,7 +15,7 @@ int main(int argc,char **argv) {
  desktop.message=[](QByteArray){};
  desktop.disconnected=[&](int code){assert(denied ? code==4403 : (code==0 || code==1006));++lost;desktop.closeSocket(false);};
  receiver.onEndpoint=[&](const QString &){++endpoints;}; receiver.onStopped=[&]{++stopped;};
- if(sender) {QUrl ws(QString::fromUtf8(argv[1])+"/desktop/ws");ws.setScheme("ws");desktop.openSocket(ws,"fixture",17);}
+ if(sender) {QUrl ws(QString::fromUtf8(argv[1])+"/desktop/ws");ws.setScheme("ws");desktop.openSocket(ws,"fixture");}
  else {assert(receiver.setOrigin(QUrl(QString::fromUtf8(argv[1])),true));receiver.start("fixture-session","fixture-password","test");}
  QElapsedTimer clock; clock.start();
  while(clock.elapsed()<(delayed ? 64500 : 44500)) {

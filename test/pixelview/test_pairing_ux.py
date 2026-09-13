@@ -81,7 +81,7 @@ int main(int argc,char **argv) {
  bool pixelviewPairingDurable=false, pixelviewUnpairRetry=false, nativeBusy=false, closing=false;
  bool pixelviewActualStreaming=false;
  bool pixelviewShutdownPending=false,pixelviewUnpairPending=false,pixelviewClosingSocket=false,pixelviewStopPending=false;
- struct {bool intent=false,ready=false,pending=false,leased=false;} pixelviewLease;
+ struct {bool intent=false,ready=false,pending=false,started=false;} pixelviewLease;
  struct {QString authorizedToken;bool exchanging=false;void closeSocket(){}} desktop; auto *pixelviewDesktop=&desktop;
  struct Identity {QString nodeId="707880";void clear(){nodeId.clear();}} pixelviewIdentity,pixelviewExpectedIdentity;
  auto PixelviewSettingsBusy=[&]{return nativeBusy;};
@@ -129,12 +129,12 @@ int main(int argc,char **argv) {
  desktop.authorizedToken="synthetic-secret"; refresh();
  assert(pair.isHidden() && !unpair.isHidden() && "Transient disconnect must not expose a pairing/authorization button");
  assert(!identity.styleSheet().contains("#"));
- pixelviewLease.ready=true; connection.setText("Connected · WHIP ready to request"); refresh();
+ pixelviewLease.ready=true; connection.setText("Connected · ready to stream"); refresh();
  assert(connection.isHidden()); assert(identity.text().contains("Connected")); assert(identity.styleSheet().contains("#"));
  pixelviewLease.ready=false; pixelviewLease.intent=true; refresh();
  assert(identity.text().contains("Reconnecting") && !unpair.isEnabled());
  pixelviewLease.intent=false;
- for(bool *state : {&nativeBusy,&pixelviewStopPending,&pixelviewShutdownPending,&pixelviewClosingSocket,&pixelviewUnpairPending,&desktop.exchanging,&closing,&pixelviewLease.pending,&pixelviewLease.leased}) {
+ for(bool *state : {&nativeBusy,&pixelviewStopPending,&pixelviewShutdownPending,&pixelviewClosingSocket,&pixelviewUnpairPending,&desktop.exchanging,&closing,&pixelviewLease.pending,&pixelviewLease.started}) {
   *state=true; refresh(); assert(!unpair.isEnabled()); *state=false;
  }
  pixelviewPairingDurable=false; nativeBusy=true; refresh(); assert(!pair.isEnabled());
@@ -144,7 +144,6 @@ int main(int argc,char **argv) {
  assert(identity.text().contains("Unpair") && !identity.text().contains("Pair first"));
  pixelviewUnpairRetry=false; refresh(); assert(unpair.isHidden() && pair.isEnabled());
  // Execute the actual cleanup transition with fault-injected storage boundaries.
- struct Timer {void stop(){}} heartbeat; auto *pixelviewHeartbeat=&heartbeat;
  int pixelviewReconnectAt=1,pixelviewAuthDeadline=1;
  struct Origin {QString toString() const{return "fixture.invalid";}} pixelviewOrigin;
  QString credential="synthetic-secret"; int removals=0;
@@ -208,7 +207,7 @@ int main(int argc,char **argv) {
 using pixelview::runKeychainUserAction;
 int main(int argc,char **argv) {
  QApplication app(argc,argv);
- QUrl requestOrigin("https://fixture.invalid");
+ QUrl requestOrigin(argc>1 ? argv[1] : "https://fixture.invalid");
  QString secret="existing-secret",statusText,authorizedToken; bool exchanging=false,storageOK=false; int pairedCalls=0;
  pixelview::DesktopIdentity identity;
  auto status=[&](QString s){statusText=s;}; auto paired=[&]{++pairedCalls;};
@@ -224,7 +223,7 @@ int main(int argc,char **argv) {
  storageOK=true; complete(exchange); while(exchanging) app.processEvents();
  assert(pairedCalls==1 && secret=="new-secret" && identity.nodeId=="node");
  bool pixelviewShutdownPending=false,pixelviewStopPending=false,pixelviewClosingSocket=false,pixelviewUnpairPending=false;
- bool pixelviewPairingDurable=false,pixelviewUnpairRetry=false,pixelviewDev=false;
+ bool pixelviewPairingDurable=false,pixelviewUnpairRetry=false,pixelviewDev=requestOrigin.scheme()=="http";
  auto isClosing=[]{return false;};
  pixelview::DesktopIdentity pixelviewIdentity,pixelviewExpectedIdentity=identity;
  pixelview::Desktop pixelviewLease;
@@ -232,25 +231,26 @@ int main(int argc,char **argv) {
  pixelviewLease.error=[&](QString s){label.setText(s);};
  struct Clock {qint64 elapsed(){return 100;}} pixelviewClock;
  int pixelviewAuthDeadline=0,pixelviewReconnectAt=0,pixelviewBackoff=0;
- struct Timer {bool active=false;void start(){active=true;}} timer; auto *pixelviewHeartbeat=&timer;
+ auto PixelviewDeviceRevoked=[]{};
  int saves=0; bool configOK=true;
  auto SavePixelviewIdentity=[&]{++saves;return configOK;};
  auto RefreshPixelviewReconnect=[]{};
  bool pixelviewActualStreaming=false;
  auto PixelviewLeaseValid=[&]{return pixelviewLease.authorized(pixelviewClock.elapsed());};
  auto PixelviewReportedSettings=[]{return QJsonObject{};};
- auto receive=[&](QByteArray body){READY};
- const QByteArray valid=R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})";
+ int opens=0;
+ struct Transport {int *opens;QString authorizedToken;bool exchanging=false;QUrl opened;void openSocket(QUrl url,QString token){assert(token=="new-secret");opened=url;++*opens;}void closeSocket(){}} client{&opens};
+ auto *pixelviewDesktop=&client;
+ auto receive=[&](QByteArray body){READY_BODY};
+ const QByteArray valid=R"({"mutation":"DESKTOP_READY","data":{"node_id":"node","desktop_id":"desktop"}})";
  receive(valid);
  assert(pixelviewPairingDurable && pixelviewLease.ready && saves==1);
  // A later inaccessible read must not erase the established identity or record.
- bool inaccessible=true,disabled=false; int opens=0;
+ bool inaccessible=true,disabled=false;
  auto loadDevice=[&](QString origin){assert(origin==requestOrigin.toString());return inaccessible ? QString{} : secret;};
  struct AppStub {int GetUserConfig(){return 0;}} appStub; auto App=[&]{return &appStub;};
  auto config_get_bool=[&](int,const char *,const char *){return disabled;};
  QUrl pixelviewOrigin=requestOrigin;
- struct Transport {int *opens;QString authorizedToken;bool exchanging=false;double fence=0;void openSocket(QUrl,QString token,double resume){assert(token=="new-secret");fence=resume;++*opens;}} client{&opens};
- auto *pixelviewDesktop=&client;
  auto connect=[&]{CONNECT};
  connect();
  assert(opens==0 && saves==1 && pixelviewPairingDurable && pixelviewIdentity.nodeId=="node" && secret=="new-secret");
@@ -262,20 +262,28 @@ int main(int argc,char **argv) {
  inaccessible=true; connect(); assert(opens==2 && client.authorizedToken==secret);
  client.exchanging=true; connect(); assert(opens==2 && client.authorizedToken==secret);
  client.exchanging=false;
- // Execute the entire production Connect body with healthy media authority held.
- pixelviewLease.recoveringControl=true;pixelviewLease.leased=true;pixelviewLease.fence=17;pixelviewLease.deadline=12345;
- connect();assert(opens==3 && client.fence==17 && pixelviewLease.leased && pixelviewLease.deadline==12345);
- pixelviewLease.recoveringControl=false;pixelviewLease.leased=false;
+ // A reconnect while streaming keeps media authority; only socket state resets.
+ pixelviewLease.started=true;pixelviewLease.ready=true;pixelviewLease.pending=true;
+ connect();assert(opens==3 && pixelviewLease.started && !pixelviewLease.ready && !pixelviewLease.pending);
+ pixelviewLease.started=false;
+ // Environment changes must never retarget an already-authorized device token.
+ for(const char *environment : {"0","1"}) {
+  qputenv("PIXELVIEW_LOCAL_DEVELOPMENT",environment); connect();
+  QUrl expected=requestOrigin; expected.setScheme(pixelviewDev ? "ws" : "wss"); expected.setPath("/desktop/ws");
+  assert(client.opened==expected && pixelviewLease.development==pixelviewDev);
+  assert(pixelviewOrigin==requestOrigin && client.authorizedToken==secret);
+ }
  // A failed durable identity write cannot advertise a successful pairing.
  pixelviewLease.ready=false; configOK=false; receive(valid);
  assert(!pixelviewPairingDurable && pixelviewUnpairRetry && !pixelviewLease.ready);
  assert(label.text().contains("Click Unpair") && !label.text().contains("cleanup"));
-}'''.replace('COMPLETION',completion).replace('READY',ready).replace('CONNECT',connect_body)
+}'''.replace('COMPLETION',completion).replace('READY_BODY',ready).replace('CONNECT',connect_body)
         with tempfile.TemporaryDirectory() as tmp:
             src=pathlib.Path(tmp)/'completion.cpp'; src.write_text(code)
             qt=ROOT/'.deps/obs-deps-qt6-2026-08-26-universal/lib'
             subprocess.run(['clang++','-std=c++17','-I'+str(ROOT),'-F'+str(qt),'-framework','QtCore','-framework','QtGui','-framework','QtWidgets','-Wl,-rpath,'+str(qt),str(src),'-o',tmp+'/completion'],check=True)
-            subprocess.run([tmp+'/completion'],check=True,env={**os.environ,'QT_QPA_PLATFORM':'offscreen'})
+            for origin in ('https://fixture.invalid', 'http://localhost:9000'):
+                subprocess.run([tmp+'/completion',origin],check=True,env={**os.environ,'QT_QPA_PLATFORM':'offscreen'})
 
     def test_explicit_sender_reauthorization_preserves_identity_and_retries(self):
         code = r'''#include <QtCore/QCoreApplication>

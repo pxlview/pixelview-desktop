@@ -57,7 +57,7 @@ void OBSBasic::StartStreaming()
 	}
 	if (disableOutputsRef) {
 		if (pixelviewDesktop) pixelviewLease.fail("Streaming is disabled by the current lifecycle.");
-		if (pixelviewLease.leased) PixelviewOutputStopped();
+		if (pixelviewLease.started) PixelviewOutputStopped();
 		return;
 	}
 	if (!RequestPixelviewStart()) return;

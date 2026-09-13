@@ -30,13 +30,26 @@ media resource has the same origin. Unchecking the box requires HTTPS. HTTP is
 still allowed only on loopback; TLS trust and resource-origin validation are not
 bypassed.
 
-This switch changes **new pairing form defaults only**. Saved pairings reconnect
+For sending, this switch changes **new pairing form defaults only**. Saved pairings reconnect
 using their original origin and stored development flag, with the same Keychain
 account and authorization flow, even if the launch environment changes. To switch
 an existing pairing between environments, first explicitly Unpair successfully,
 then Pair with a fresh admin code. No credential migration, deletion or replacement
 is triggered by the environment variable. Form overrides are saved only through
 the existing successful pairing flow; cancellation changes nothing.
+
+Receiving independently uses the same runtime switch: exact
+`PIXELVIEW_LOCAL_DEVELOPMENT=1` selects `http://localhost:8000` and permits
+loopback HTTP; all other values select `https://api4.pixelview.io` and require
+HTTPS. It never reads the saved sending origin or development permission, and
+editing a development pairing form does not override the receiver backend.
+The tiny native `PixelviewBackend.hpp` helper supplies both defaults.
+
+The receiver's Keychain record remains bound to its own backend, session ID and
+revision. Changing the launch environment does not migrate that password to the
+other backend: re-enter it there. Changing or removing the sending pairing does
+not clear or retarget receiver credentials. Saved sending device tokens keep
+their original Keychain account and socket origin regardless of this switch.
 
 - A completed pairing requires secure device-credential storage, an authenticated
   `ready` message matching the exchanged identity, and a successful identity save.
@@ -50,10 +63,41 @@ the existing successful pairing flow; cancellation changes nothing.
 - A credential that cannot be read is not treated as proof that pairing was removed:
   the saved node stays Offline and its identity is preserved. Unpair is an explicit
   local removal request, not revocation of the admin registration.
-- Native output/setup, stopping, shutdown, exchange and lease/recovery guards remain
+- Native output/setup, stopping, shutdown, exchange and start/recovery guards remain
   in force. Internal removal and persistence checks are unchanged.
 
 ## Verification and limits
+
+### Independent backend follow-up
+
+The receiver selection regression compiled the actual frontend origin and Start
+configuration with the real Qt controller. It first failed for inherited sending
+origin, then (after fixing origin) for inherited loopback permission, then passed.
+It exercises unset/empty/nonexact/exact environment values against saved sending
+origins and both development flags, actual login/socket destinations and
+server-returned HTTP endpoint validation. Updated real-Qt/libobs receive fixtures
+cover startup password restoration when pairing differs and refusal to restore
+or transmit a password after the receiver backend changes. Sender reconnect
+fixtures retain both saved HTTPS and loopback origins under both flag values.
+
+The focused command below passes 24 tests (native C++/Objective-C++ compilation,
+Qt offscreen widgets, loopback NSURLSession transport and isolated receiver
+Keychain fixtures, which are removed and checked absent afterward):
+
+```sh
+PYTHONPATH=test/pixelview python3 -m unittest test_backend_selection test_pairing_defaults test_pairing_ux test_receiver test_receive_ui -v
+```
+
+The full `python3 -m unittest discover -s test/pixelview -v` run completed 210
+tests with two errors and one live-backend opt-in skip. Missing Pillow was
+resolved for a separate four-test icon rerun using an isolated temporary venv;
+the pre-existing corresponding-source inventory size/hash mismatches for
+`CMakePresets.json` and `plugins/pixelview-whep/scripts/fetch-gstreamer.py` remain.
+No release inventory was rewritten to conceal that gate. Expected headless Qt
+font/plugin messages remain. No integrated app build, replacement/restart,
+live media or hardware acceptance was performed for this follow-up.
+
+### Earlier pairing-dialog evidence
 
 `test_pairing_defaults.py` compiles and executes the production Qt dialog and
 submit path offscreen. Production and development behavior each failed before

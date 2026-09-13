@@ -33,7 +33,7 @@ struct Producer {
 };
 void check(Producer &p, bool retry) {
  pixelview::Desktop pixelviewLease;
- pixelviewLease.ready=true;pixelviewLease.deadline=30000;
+ pixelviewLease.ready=true;
  assert(pixelviewLease.requestStart(0));
  int code=p.code;
  DISPATCH
@@ -42,7 +42,7 @@ void check(Producer &p, bool retry) {
  if(retry) {
   assert(!pixelviewLease.authorized(0));
   assert(pixelviewLease.takeRetry(2000,true));
-  pixelviewLease.receive({{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45}},2000);
+  pixelviewLease.receive({{"mutation","DESKTOP_READY"},{"data",QJsonObject{}}},2000);
   assert(pixelviewLease.pending && !pixelviewLease.authorized(2000));
  }
 }

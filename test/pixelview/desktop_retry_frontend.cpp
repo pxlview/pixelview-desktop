@@ -65,7 +65,7 @@ public:
  int authentications=0,teardowns=0,nativePreparations=0;
  void StartStreaming();
  void closeWindow();void ConnectPixelviewDesktop();bool RequestPixelviewStart();
- void Watchdog();void Heartbeat();
+ void Watchdog();void PixelviewDeviceRevoked();
  QJsonObject PixelviewReportedSettings(){return {};}
  quint64 pixelviewStopGeneration=0;
  qint64 pixelviewReconnectAt=0,pixelviewAuthDeadline=0;
@@ -77,7 +77,7 @@ public:
  bool pixelviewUnpairRetry=false;
  pixelview::DesktopIdentity pixelviewExpectedIdentity;
  bool SavePixelviewIdentity(){return identitySaveSucceeds;}
- Timer heartbeat,watchdog;Timer *pixelviewHeartbeat=&heartbeat,*pixelviewWatchdog=&watchdog;
+ Timer watchdog;Timer *pixelviewWatchdog=&watchdog;
  Handler handler;Handler *outputHandler=&handler;
  Connection connection;Connection *pixelviewDesktop=&connection;
  std::shared_future<void> setupStreamingGuard;
@@ -114,28 +114,68 @@ public:
 } // namespace fixture: avoid interposing real Qt symbols at link time.
 using namespace fixture;
 int main() {
+ const QByteArray READY=R"({"mutation":"DESKTOP_READY","data":{"node_id":"node","desktop_id":"desktop"}})";
+ const QByteArray PING=R"({"mutation":"SOCKET_SEND_PING","data":{}})";
+ const QByteArray STARTED=R"({"mutation":"DESKTOP_STARTED","data":{"config":{"whip":{"endpoint":"https://fixture.invalid/whip","bearer_token":"new"},"srt":{}}}})";
+ const QByteArray DENIED=R"({"mutation":"DESKTOP_ERROR","data":{"code":"active_session_required"}})";
+ auto grant=[](OBSBasic &w){w.pixelviewLease.ready=true;assert(w.pixelviewLease.requestStart(0));w.pixelviewLease.pending=false;w.pixelviewLease.started=true;};
  { OBSBasic live; live.bind(); Output output; output.active=true; live.handler.streamOutput=&output;
-   live.pixelviewLease.receive({{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45},{"resumed",false}},0);
-   live.pixelviewLease.requestStart(0);
-   live.pixelviewLease.receive({{"type","started"},{"fence",7},{"lease_expires_at",9999999},
-     {"config",QJsonObject{{"whip",QJsonObject{{"endpoint","https://fixture.invalid/whip"},{"bearer_token","t"}}}}}},0);
+   int requests=0; std::vector<QJsonObject> pongs;
+   auto send=live.pixelviewLease.send;
+   live.pixelviewLease.send=[&](QJsonObject o){if(o["message"]=="DESKTOP_START") ++requests; if(o["message"]=="PONG_RESPONSE") pongs.push_back(o["data"].toObject()); send(o);};
+   live.connection.message(READY);
+   live.pixelviewLease.requestStart(0); assert(requests==1);
+   live.connection.message(STARTED);
    live.pixelviewActualStreaming=true; live.pixelviewNativeAttempt=true; live.pixelviewStreamingBusy=true;
+   live.connection.message(PING);
+   assert(pongs.size()==1 && pongs[0]["streaming"].toBool() && pongs[0]["settings"].isNull());
+   // Transient control loss while streaming: media continues, reconnect is scheduled.
    live.connection.disconnected(1006);
-   assert(output.forceStops==0 && output.active && live.PixelviewLeaseValid());
-   assert(!live.pixelviewStopPending);
+   assert(output.forceStops==0 && output.active && live.PixelviewLeaseValid() && !live.pixelviewLease.ready);
+   assert(!live.pixelviewStopPending && live.connection.closes==1 && live.pixelviewReconnectAt==1000);
+   live.pixelviewClock.now=999; live.Watchdog(); assert(live.authentications==0);
    live.pixelviewClock.now=1000; live.Watchdog(); assert(live.authentications==1);
-   int renewals=0; live.pixelviewLease.send=[&](QJsonObject o){assert(o["type"]=="heartbeat");++renewals;};
    live.pixelviewClock.now=2000;
-   live.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45,"resumed":true,"fence":8,"lease_expires_at":9999999})");
-   assert(renewals==1 && live.pixelviewLease.heartbeatRequest==2000);
-   assert(live.pixelviewLease.deadline==30000 && live.pixelviewLease.fence==8);
-   assert(output.forceStops==0 && output.active && live.pixelviewLease.ready);
+   live.connection.message(READY);
+   assert(requests==1 && live.pixelviewLease.ready && live.pixelviewLease.started && live.label.text=="Control reconnected · streaming");
+   assert(output.forceStops==0 && output.active && live.pixelviewBackoff==1000);
+   live.connection.message(PING); assert(pongs.size()==2 && pongs[1]["streaming"].toBool());
+   // Server silence for the ping budget reconnects again without stopping media.
+   live.pixelviewClock.now=2000+pixelview::Desktop::PING_SILENCE_MS; live.Watchdog();
+   assert(!live.pixelviewLease.ready && live.connection.closes==2 && output.forceStops==0 && live.pixelviewLease.intent);
+   live.pixelviewClock.now+=1000; live.Watchdog(); assert(live.authentications==2);
+   live.connection.message(READY); assert(requests==1 && live.pixelviewLease.ready);
    live.connection.disconnected(4401); assert(output.forceStops==1 && !live.pixelviewLease.intent);
+   assert(live.connection.authorizedToken.isEmpty() && config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
    Timer::run(); application.config.booleans.clear();
  }
+ { OBSBasic replaced; replaced.bind(); Output output; output.active=true; replaced.handler.streamOutput=&output;
+   replaced.connection.message(READY); replaced.pixelviewLease.requestStart(0); replaced.connection.message(STARTED);
+   replaced.pixelviewActualStreaming=true; replaced.pixelviewNativeAttempt=true;
+   replaced.connection.message(R"({"mutation":"SOCKET_DESKTOP_REPLACED","data":{}})");
+   assert(replaced.pixelviewLease.replaced && !replaced.pixelviewLease.ready && replaced.PixelviewLeaseValid());
+   assert(output.forceStops==0 && replaced.connection.closes==1 && replaced.pixelviewReconnectAt==0);
+   replaced.connection.disconnected(1000);
+   assert(replaced.pixelviewLease.intent && output.forceStops==0 && !replaced.pixelviewStopPending);
+   replaced.pixelviewClock.now=99999; replaced.Watchdog(); assert(replaced.authentications==0);
+   assert(replaced.label.text.contains("took over control"));
+   Timer::run();
+ }
+ { OBSBasic revoked; revoked.bind(); Output output; output.active=true; revoked.handler.streamOutput=&output;
+   revoked.connection.authorizedToken="synthetic-token";
+   revoked.connection.message(READY); revoked.pixelviewLease.requestStart(0); revoked.connection.message(STARTED);
+   revoked.pixelviewActualStreaming=true; revoked.pixelviewNativeAttempt=true;
+   revoked.connection.message(R"({"mutation":"SOCKET_DESKTOP_REVOKED","data":{}})");
+   assert(revoked.pixelviewLease.revoked && !revoked.pixelviewLease.intent && output.forceStops==1);
+   assert(revoked.connection.authorizedToken.isEmpty() && revoked.pixelviewUnpairRetry && !revoked.pixelviewPairingDurable);
+   assert(config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
+   revoked.connection.disconnected(1000); assert(!revoked.pixelviewLease.transientFailure && revoked.pixelviewReconnectAt==0);
+   Timer::run(); application.config.booleans.clear();
+ }
+ std::cout<<"control loss keeps media, replaced/revoked mutations decide before the close PASS\n";
  for (bool save : {false,true}) {
   OBSBasic first; first.bind(); first.pixelviewPairingDurable=false; first.identitySaveSucceeds=save;
-  first.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
+  first.connection.message(READY);
   assert(first.pixelviewPairingDurable==save);
   assert(first.pixelviewLease.ready==save);
   assert(first.pixelviewUnpairRetry==!save);
@@ -143,7 +183,7 @@ int main() {
  }
  { OBSBasic mismatch;mismatch.bind();mismatch.pixelviewPairingDurable=false;
  mismatch.pixelviewExpectedIdentity.accept({{"node_id","expected"},{"desktop_id","desktop"}});
- mismatch.connection.message(R"({"type":"ready","node_id":"other","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
+ mismatch.connection.message(R"({"mutation":"DESKTOP_READY","data":{"node_id":"other","desktop_id":"desktop"}})");
  assert(!mismatch.pixelviewPairingDurable && !mismatch.pixelviewLease.ready && mismatch.pixelviewUnpairRetry);
  Timer::run(); }
  // Drain callbacks deliberately run before the queued 100ms accepted close.
@@ -152,14 +192,12 @@ int main() {
   std::promise<void> setup;
   std::function<void(bool)> finish;
   if(mode<2) {
-   shutdown.pixelviewLease.ready=true;shutdown.pixelviewLease.deadline=30000;
-   assert(shutdown.pixelviewLease.requestStart(0));
-   shutdown.pixelviewLease.pending=false;shutdown.pixelviewLease.leased=true;
+   grant(shutdown);
    shutdown.setupStreamingGuard=setup.get_future().share();
    shutdown.pixelviewStreamingBusy=true;finish=shutdown.MakeSetup();
    if(mode==1) {shutdown.handler.streamOutput=&output;output.active=true;shutdown.pixelviewNativeAttempt=true;}
    shutdown.pixelviewLease.retryDelay=0;
-   shutdown.pixelviewClock.now=30000;shutdown.pixelviewLease.tick(30000);
+   shutdown.pixelviewClock.now=30000;shutdown.connection.disconnected(1006);
    assert(shutdown.pixelviewClosingSocket && shutdown.pixelviewStopPending);
   } else if(mode==2) {
    shutdown.pixelviewLease.intent=true;shutdown.pixelviewLease.fail("lost",true);
@@ -171,8 +209,8 @@ int main() {
   shutdown.closeWindow();
   assert(!shutdown.pixelviewLease.intent && shutdown.pixelviewLease.retryAt==-1);
   assert(shutdown.pixelviewLease.generation>generation);
-  assert(!shutdown.pixelviewLease.pending && !shutdown.pixelviewLease.leased);
-  assert(!shutdown.heartbeat.active && !shutdown.watchdog.active);
+  assert(!shutdown.pixelviewLease.pending && !shutdown.pixelviewLease.started);
+  assert(!shutdown.watchdog.active);
   assert(shutdown.pixelviewReconnectAt==0 && shutdown.pixelviewAuthDeadline==0);
   assert(output.forceStops==forces);
   if(mode<2) {
@@ -186,14 +224,14 @@ int main() {
   assert(!shutdown.button.enabled);
   shutdown.pixelviewClock.now=99999;
   const auto shutdownGeneration=shutdown.pixelviewLease.generation;
-  shutdown.Watchdog();shutdown.Heartbeat();shutdown.ConnectPixelviewDesktop();
+  shutdown.Watchdog();shutdown.ConnectPixelviewDesktop();
   shutdown.connection.disconnected(0);shutdown.connection.disconnected(4401);
-  shutdown.connection.message(R"({"type":"error","code":"busy"})");
-  shutdown.connection.message(R"({"type":"ready","node_id":"node","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
-  assert(!shutdown.pixelviewLease.ready && !shutdown.heartbeat.active);
+  shutdown.connection.message(DENIED);
+  shutdown.connection.message(READY);
+  assert(!shutdown.pixelviewLease.ready);
   assert(!shutdown.RequestPixelviewStart());
   shutdown.StartStreaming();
-  shutdown.connection.message(R"({"type":"started","fence":1,"lease_expires_at":9999999,"config":{"whip":{"endpoint":"https://fixture.invalid/whip","bearer_token":"new"}}})");
+  shutdown.connection.message(STARTED);
   if(finish) finish(true);
   assert(shutdown.pixelviewLease.generation==shutdownGeneration);
   assert(!shutdown.pixelviewUnpairPending && shutdown.nativePreparations==0);
@@ -207,13 +245,13 @@ int main() {
  for(bool terminal : {false,true}) {
   OBSBasic pending;pending.bind();Tray tray;pending.sysTrayStream=&tray;
   pending.pixelviewLease.intent=true;pending.pixelviewLease.retries=2;pending.pixelviewLease.maxRetries=5;
-  pending.pixelviewLease.ready=true;pending.pixelviewLease.leased=true;pending.pixelviewLease.deadline=30000;
+  pending.pixelviewLease.ready=true;pending.pixelviewLease.started=true;
   pending.pixelviewStreamingBusy=true;
   std::promise<void> setup;pending.setupStreamingGuard=setup.get_future().share();
   auto finish=pending.MakeSetup();
   tray.text="Basic.Main.PreparingStream";tray.enabled=false;
   pending.RefreshPixelviewReconnect();assert(pending.button.text.contains("Reconnecting 2/5"));
-  if(terminal) pending.connection.message(R"({"type":"error","code":"busy"})");
+  if(terminal) pending.connection.message(DENIED);
   else pending.CancelPixelviewStart();
   assert(!pending.pixelviewLease.intent && pending.pixelviewStopPending);
   assert(pending.button.text=="Basic.Main.StoppingStreaming" && !pending.button.enabled);
@@ -231,8 +269,7 @@ int main() {
  }
  std::cout<<"Stop and terminal denial: pending setup button/tray reconcile before and after drain PASS\n";
  OBSBasic w;w.bind();Output output;w.handler.streamOutput=&output;
- w.pixelviewLease.ready=true;w.pixelviewLease.deadline=30000;assert(w.pixelviewLease.requestStart(0));
- w.pixelviewLease.pending=false;w.pixelviewLease.leased=true;
+ grant(w);
  w.pixelviewStreamingBusy=true;
  // A native failure has already completed. Halting must NOT force-stop it again:
  // libobs force_stop resets its completion event even on an unused output.
@@ -243,7 +280,7 @@ int main() {
  assert(w.connection.closes==1 && !w.pixelviewStopPending && w.pixelviewLease.intent);
  assert(w.stoppedSignals==1 && w.service==&w.oldService);
  w.pixelviewClock.now=2000;assert(w.pixelviewLease.takeRetry(2000,true));
- w.pixelviewLease.receive({{"type","ready"},{"heartbeat_interval",15},{"lease_seconds",45}},2000);
+ w.connection.message(READY);
  assert(w.pixelviewLease.pending);
  w.pixelviewStartPermit=true;w.pixelviewPreviousService=&w.oldService;w.service=&w.newService;
  for(auto &f:oldCallbacks) f();
@@ -287,29 +324,33 @@ int main() {
  // The following scenarios represent independent installations.
  application.config.booleans.clear();
  std::cout<<"revocation after generic disconnect cancels queued retry: PASS\n";
- OBSBasic callback;callback.bind();callback.pixelviewLease.ready=true;callback.pixelviewLease.deadline=30000;
- assert(callback.pixelviewLease.requestStart(0));callback.pixelviewLease.pending=false;callback.pixelviewLease.leased=true;
+ // An upgrade refused with HTTP 403 is terminal but not a revocation: no retry loop, pairing kept.
+ OBSBasic refused;refused.bind();refused.connection.authorizedToken="kept";refused.pixelviewLease.intent=true;
+ refused.connection.disconnected(4403);
+ assert(!refused.pixelviewLease.intent && !refused.pixelviewLease.transientFailure && refused.pixelviewPairingDurable);
+ assert(refused.connection.authorizedToken=="kept" && refused.label.text.contains("refused"));
+ Timer::run();assert(refused.pixelviewReconnectAt==0);
+ OBSBasic callback;callback.bind();grant(callback);
  auto finish=callback.MakeSetup();auto copy=finish;
  finish(true);copy(true);assert(callback.handler.starts==1);
  callback.CancelPixelviewStart();finish(true);assert(callback.handler.starts==1);
- // A newer lease cannot authorize the old callback, even after the old setup settles.
+ // A newer grant cannot authorize the old callback, even after the old setup settles.
  callback.pixelviewStopPending=false;callback.pixelviewClosingSocket=false;
- callback.pixelviewLease.ready=true;callback.pixelviewLease.deadline=30000;
- assert(callback.pixelviewLease.requestStart(0));callback.pixelviewLease.pending=false;callback.pixelviewLease.leased=true;
+ grant(callback);
  copy(true);assert(callback.handler.starts==1);
  auto fresh=callback.MakeSetup();fresh(true);assert(callback.handler.starts==2);
- callback.pixelviewClock.now=30000;auto expired=callback.MakeSetup();expired(true);assert(callback.handler.starts==2);
- std::cout<<"real native setup continuation: duplicate, Stop, new lease and deadline guards PASS\n";
- OBSBasic messages;messages.bind();messages.pixelviewLease.ready=true;messages.pixelviewLease.deadline=30000;
- assert(messages.pixelviewLease.requestStart(0));messages.label.text="Requesting exclusive WHIP lease…";
- messages.connection.message(R"({"type":"started","fence":1,"lease_expires_at":9999999,"config":{"whip":{"endpoint":"https://fixture.invalid/whip","bearer_token":"new"}}})");
+ callback.pixelviewLease.started=false;auto lost=callback.MakeSetup();lost(true);assert(callback.handler.starts==2);
+ std::cout<<"real native setup continuation: duplicate, Stop, new grant and lost-authority guards PASS\n";
+ OBSBasic messages;messages.bind();messages.pixelviewLease.ready=true;
+ assert(messages.pixelviewLease.requestStart(0));messages.label.text="Requesting stream start…";
+ messages.connection.message(STARTED);
  assert(messages.label.text=="Preparing WHIP stream…");
  messages.connection.disconnected(0);assert(messages.pixelviewLease.intent);
- messages.connection.message(R"({"type":"error","code":"busy"})");
+ messages.connection.message(DENIED);
  assert(!messages.pixelviewLease.intent);
- std::cout<<"started clears lease-request label; late terminal message cancels intent PASS\n";
- OBSBasic delayed;delayed.bind();delayed.pixelviewLease.ready=true;delayed.pixelviewLease.leased=true;
- delayed.pixelviewLease.intent=true;delayed.pixelviewLease.deadline=30000;delayed.pixelviewLease.retries=2;
+ std::cout<<"started clears start-request label; late terminal message cancels intent PASS\n";
+ OBSBasic delayed;delayed.bind();delayed.pixelviewLease.ready=true;delayed.pixelviewLease.started=true;
+ delayed.pixelviewLease.intent=true;delayed.pixelviewLease.retries=2;
  delayed.OutputStartedSignal(true);
  assert(!delayed.pixelviewActualStreaming && delayed.pixelviewLease.retries==2);
  delayed.OutputStartedSignal(false);assert(delayed.pixelviewActualStreaming && delayed.pixelviewLease.retries==0);
@@ -321,25 +362,23 @@ int main() {
  queuedDelay.StreamDelayStarting(5);
  assert(queuedDelay.pixelviewLease.intent && !queuedDelay.pixelviewActualStreaming);
  std::cout<<"queued native delay-start cannot cancel recovery after control loss PASS\n";
- OBSBasic reentrant;reentrant.bind();reentrant.pixelviewLease.ready=true;reentrant.pixelviewLease.deadline=30000;
- assert(reentrant.pixelviewLease.requestStart(0));reentrant.pixelviewLease.pending=false;reentrant.pixelviewLease.leased=true;
+ OBSBasic reentrant;reentrant.bind();grant(reentrant);
  reentrant.startingHook=[&]{reentrant.CancelPixelviewStart();};
  reentrant.MakeSetup()(true);
  assert(reentrant.handler.starts==0 && !reentrant.pixelviewNativeAttempt);
  std::cout<<"Stop from native Starting subscribers is rechecked before media starts PASS\n";
- OBSBasic denied;denied.bind();denied.pixelviewLease.ready=true;denied.pixelviewLease.deadline=30000;
- assert(denied.pixelviewLease.requestStart(0));denied.pixelviewLease.pending=false;denied.pixelviewLease.leased=true;
+ OBSBasic denied;denied.bind();grant(denied);
  auto deniedSetup=denied.MakeSetup();denied.disableOutputsRef=1;deniedSetup(true);
  assert(denied.handler.starts==0 && !denied.pixelviewLease.intent);
  std::cout<<"lifecycle denial arriving during setup is terminal PASS\n";
  OBSBasic mismatch;mismatch.bind();mismatch.pixelviewIdentity.accept({{"node_id","original"},{"desktop_id","desktop"}});
  mismatch.pixelviewLease.intent=true;
- mismatch.connection.message(R"({"type":"ready","node_id":"other","desktop_id":"desktop","heartbeat_interval":15,"lease_seconds":45})");
+ mismatch.connection.message(R"({"mutation":"DESKTOP_READY","data":{"node_id":"other","desktop_id":"desktop"}})");
  assert(!mismatch.pixelviewLease.intent && mismatch.pixelviewIdentity.nodeId=="original");
- std::cout<<"authenticated identity mismatch cannot replace pairing or resume PASS\n";
- OBSBasic idle;idle.bind();idle.pixelviewLease.ready=true;idle.pixelviewLease.deadline=30000;
- idle.pixelviewClock.now=30000;idle.pixelviewLease.tick(30000);
+ std::cout<<"authenticated identity mismatch cannot replace pairing PASS\n";
+ OBSBasic idle;idle.bind();idle.pixelviewLease.ready=true;idle.pixelviewLease.pingDeadline=30000;
+ idle.pixelviewClock.now=30000;idle.Watchdog();
  assert(!idle.pixelviewLease.intent && idle.pixelviewReconnectAt==31000);
  idle.pixelviewLease.fail("terminal protocol denial");assert(idle.pixelviewReconnectAt==0);
- std::cout<<"idle control timeout reconnects without inventing streaming intent PASS\n";
+ std::cout<<"idle ping silence reconnects without inventing streaming intent PASS\n";
 }

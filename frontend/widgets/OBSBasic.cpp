@@ -2659,14 +2659,14 @@ bool OBSBasic::PixelviewShutdownReady()
 	if (!pixelviewShutdownPending) {
 		// Accepted close is terminal, including an existing transient recovery drain.
 		pixelviewShutdownPending=true;
-		pixelviewWatchdog->stop(); pixelviewHeartbeat->stop();
+		pixelviewWatchdog->stop();
 		pixelviewLease.fail("Stopping before shutdown.");
 		pixelviewReconnectAt=0; pixelviewAuthDeadline=0;
 	}
 	QStringList waiting;
 	if (pixelviewStopPending) waiting << QStringLiteral("stop pending");
-	if (pixelviewLease.pending) waiting << QStringLiteral("lease pending");
-	if (pixelviewLease.leased) waiting << QStringLiteral("lease held");
+	if (pixelviewLease.pending) waiting << QStringLiteral("start pending");
+	if (pixelviewLease.started) waiting << QStringLiteral("stream authority held");
 	if (pixelviewClosingSocket) waiting << QStringLiteral("socket closing");
 	if (pixelviewStreamingBusy) waiting << QStringLiteral("streaming busy");
 	if (outputHandler && outputHandler->StreamingActive()) waiting << QStringLiteral("stream output active");
@@ -2689,7 +2689,7 @@ bool OBSBasic::PixelviewShutdownReady()
 		if (outputHandler && outputHandler->streamOutput && obs_output_active(outputHandler->streamOutput))
 			obs_output_force_stop(outputHandler->streamOutput);
 	}
-	pixelviewWatchdog->stop(); pixelviewHeartbeat->stop(); pixelviewDesktop->closeSocket();
+	pixelviewWatchdog->stop(); pixelviewDesktop->closeSocket();
 	return true;
 }
 

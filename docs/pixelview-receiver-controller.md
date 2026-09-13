@@ -8,9 +8,8 @@ Compile `PixelviewReceiver.cpp` and `PixelviewReceiverMac.mm` with QtCore and Fo
 
 ```cpp
 receiver = new pixelview::PixelviewReceiver(this);
-// Production default: https://api4.pixelview.io
-// Explicit development only, independent of publish pairing:
-// receiver->setOrigin(QUrl("http://127.0.0.1:8000"), true);
+// Include utility/PixelviewBackend.hpp. Independent of saved publish pairing:
+receiver->setOrigin(QUrl(pixelview::defaultBackendOrigin()), pixelview::localDevelopmentEnabled());
 receiver->onEndpoint = [this](const QString &url) {
     // Call source connect(endpoint=url) in memory only; omit latency for native GStreamer defaults.
 };
@@ -29,6 +28,17 @@ Public API: `setOrigin(QUrl, bool development=false)` returns false for unsafe o
 
 ## Protocol and credential boundaries
 
+The frontend selects `http://localhost:8000` only for exact runtime
+`PIXELVIEW_LOCAL_DEVELOPMENT=1`; unset/empty/other values select
+`https://api4.pixelview.io`. This is the same helper used for new pairing
+defaults, not the saved sending `PixelviewDesktop/Origin` or `LocalDevelopment`.
+Receiver startup Keychain lookup, edits, deep-link fill, save, explicit authorized
+read/write and Start all use this independent receiver origin. Loopback permission
+also comes from the runtime switch, including server-returned endpoint validation.
+No saved sender token or development override is passed into receiving. Existing
+sender reconnect still uses its persisted origin/permission and original Keychain
+account; switching the environment does not migrate either mode's credentials.
+
 Authoritative inspected files in backend-v4: `routes/login/player.py`, `routes/websocket/connections.py`, `routes/websocket/add_viewer.py`, `services/ws_manager.py`, `constants/urls.py`. Player reference: `src/api/playerSession.js`, `src/stores/store.js`.
 
 1. POST `/login/player` with session_id/password/name, `client_type="pixelview-desktop"`, explicit WEB device, MAC platform, GSTREAMER browser and mobile=false. Parse `player=WHEP`, `client_token`, `stream_url`. No destination reconstruction from session ID/password/node ID.
@@ -42,7 +52,7 @@ Server URLs can legitimately be on a different backend/engine origin: v3 uses th
 
 Native NSURLSession is ephemeral, with no cache/cookies/credential storage and default TLS verification. Login responses and WS messages are capped at256KiB. Requests have a15-second request timeout. The shared NSURLSession resource lifetime is24hours so it does not terminate a healthy WebSocket before the controller's23-hour authorization limit. Independent controller deadlines remain login30seconds, registration15seconds and missing server heartbeat65seconds (backend ping interval20seconds). Every asynchronous event captures an attempt generation and QPointer. Late events after cancel/restart/destruction cannot deliver endpoints. A normal websocket close is given up to2seconds to flush, then invalidated.
 
-Transient transport/HTTP408/429/502/503/504 loss triggers exponential1–30second reauthentication. An already-delivered media endpoint remains active for at most seven seconds after detected control loss, clamped to its original authorization deadline; retries never reset either monotonic budget. Successful re-registration with the same URL does not redeliver/rebuild media, while a changed authenticated URL is replaced after registration. Grace expiry, auth/TLS/protocol denial, kick or session deletion stop media, clear controller credentials and require manual Start; no background restart on launch. Both native control transports send RFC6455 PING every five seconds with a five-second pong timeout, separately from application heartbeat deadlines. Each login request starts a conservative absolute23-hour candidate deadline, shorter than the inspected backend's86000-second viewer token lifetime. Only completed valid registration promotes it; HTTP success alone cannot extend retained media authority. Automatic renewal starts at22hours from that login-request start through the existing control reconnect path, retaining media for no more than seven seconds and the old authority's remaining budget. The independent23-hour hard-expiry watchdog is not canceled by recovery or renewed by HTTP success. Successful registration schedules the next automatic renewal; there is no forced manual Start every23hours. Manual Start is required if automatic recovery fails terminally, grace expires, or the hard authorization deadline is reached. Readiness checks both old and candidate authority before accepting a late ACK, independently of queued timer delivery. Status messages are fixed/sanitized; server error bodies and URLs never appear in UI status. See `pixelview-control-recovery.md` for exact wire fields, safety rules and remaining integration gates.
+Transient transport/HTTP408/429/502/503/504 loss triggers exponential1–30second reauthentication. An already-delivered media endpoint remains active for at most seven seconds after detected control loss, clamped to its original authorization deadline; retries never reset either monotonic budget. Successful re-registration with the same URL does not redeliver/rebuild media, while a changed authenticated URL is replaced after registration. Grace expiry, auth/TLS/protocol denial, kick or session deletion stop media, clear controller credentials and require manual Start; no background restart on launch. Both native control transports send RFC6455 PING every 20 seconds with a 20-second pong timeout, separately from application liveness deadlines. Each login request starts a conservative absolute23-hour candidate deadline, shorter than the inspected backend's86000-second viewer token lifetime. Only completed valid registration promotes it; HTTP success alone cannot extend retained media authority. Automatic renewal starts at22hours from that login-request start through the existing control reconnect path, retaining media for no more than seven seconds and the old authority's remaining budget. The independent23-hour hard-expiry watchdog is not canceled by recovery or renewed by HTTP success. Successful registration schedules the next automatic renewal; there is no forced manual Start every23hours. Manual Start is required if automatic recovery fails terminally, grace expires, or the hard authorization deadline is reached. Readiness checks both old and candidate authority before accepting a late ACK, independently of queued timer delivery. Status messages are fixed/sanitized; server error bodies and URLs never appear in UI status. See `pixelview-desktop-control.md` for the sender control socket; the receiver wire fields are the player ones above.
 
 Controller credentials remain in memory for the active intent only; stop/failure still clears that controller copy. Independently, the frontend retains its masked password field across Start/Stop/new Start and login failure so an operator can retry or correct it. Session/password fields are disabled while busy and re-enabled afterward. Operator session-ID edits clear the form password; deep links replace both fields atomically without starting. Native close/shutdown clears the form copy, while the latest password is stored separately in macOS Keychain and restored only for its matching session, backend origin and saved revision. Session ID and receiver name are saved in normal settings as edited; passwords never enter those settings or logs. Keychain failures are reported separately without a plaintext fallback. QString/NSURLSession memory is not claimed to provide cryptographic zeroization. The media source can independently fail even when control remains Ready; frontend must display source status separately and retain an operational Stop.
 

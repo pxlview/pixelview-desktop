@@ -54,7 +54,7 @@ class ReceiveUI(unittest.TestCase):
                 run = subprocess.run([str(exe),td+'/receiver.ini',service],env={**os.environ,'QT_QPA_PLATFORM':'offscreen'},timeout=30,capture_output=True,text=True)
                 self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
                 restarts = []
-                for mode in ('restore', 'other-origin', 'missing', 'denied', 'corrupt'):
+                for mode in ('restore', 'other-pairing', 'other-origin', 'missing', 'denied', 'corrupt'):
                     if mode in ('denied', 'corrupt'):
                         # Only the corrupt-data fixture trusts the reader. The denied
                         # fixture deliberately belongs to security, exercising the

@@ -61,7 +61,7 @@ public:
  void InitSidebar() { // SIDEBAR SETUP
  }
  bool closing=false, nativeBusy=false, pixelviewShutdownPending=false, pixelviewStopPending=false, pixelviewUnpairPending=false;
- struct Lease {bool intent=false,pending=false,leased=false;} pixelviewLease;
+ struct Lease {bool intent=false,pending=false,started=false;} pixelviewLease;
  struct Desktop {bool exchanging=false;} desktop;
  Desktop *pixelviewDesktop=&desktop;
  QWidget *properties=nullptr;
@@ -161,6 +161,7 @@ static void assertCredentials(OBSBasic &w) {
  }
 int main(int argc,char **argv) {
  QApplication app(argc,argv); assert(argc==3 || argc==4);
+ qunsetenv("PIXELVIEW_LOCAL_DEVELOPMENT"); // Fixtures select their own backend, never inherit the runner's.
  testService=QString::fromUtf8(argv[2]);
  assert(testService.startsWith("com.pixelview.test.receiver."));
  if(argc==3 && !qEnvironmentVariableIsSet("PIXELVIEW_RECEIVE_OFFLINE")) assertInteractionPolicyPreserved();
@@ -177,7 +178,7 @@ int main(int argc,char **argv) {
  if(argc==4 && QString::fromUtf8(argv[3])=="credential-error") {
   // Error is an unreadable existing record, not an operator-requested deletion.
   for(const QString action : {"authorize", "name", "config-failure", "password", "clear", "session", "link", "link-clear"}) {
-   const QString origin="https://fixture.invalid", session="SavedSession", revision="saved-revision";
+   const QString origin=pixelview::defaultBackendOrigin(), session="SavedSession", revision="saved-revision";
    auto store=std::make_unique<MemoryStore>();
    assert(store->save(origin,session,revision,"old-secret"));
    config_set_string(application.config,"PixelviewReceive","SessionId",session.toUtf8().constData());
@@ -375,7 +376,8 @@ int main(int argc,char **argv) {
    layout.pixelviewReceiveId->setText("offline-session"); layout.pixelviewReceivePassword->selectAll(); layout.pixelviewReceivePassword->insert("synthetic-password");
    layout.pixelviewReceiveName->setText("Offline receiver");
    layout.pixelviewOrigin=QUrl("http://invalid.example"); layout.StartPixelviewReceive(); while(layout.pixelviewReceiveCredentialBusy) app.processEvents();
-   assert(red() && layout.pixelviewReceiveStatus->text()=="Invalid backend origin.");
+   assert(amber() && layout.pixelviewReceiveStatus->text().contains("Authenticating")); // Sending origin is irrelevant.
+   layout.StopPixelviewReceive(true);
    layout.pixelviewOrigin=QUrl("https://fixture.invalid");
    layout.StartPixelviewReceive(); while(layout.pixelviewReceiveCredentialBusy) app.processEvents(); assert(amber() && layout.pixelviewReceiveStatus->text().contains("Authenticating"));
    pixelview::Offline::events.closed(0);
@@ -402,11 +404,12 @@ int main(int argc,char **argv) {
    (new QPushButton("Start sending",restored.controlsDock))->setObjectName("streamButton");
    restored.storage.menuTools=new QMenu(&restored); restored.storage.preview=&restored.preview;
    restored.pixelviewOrigin=QUrl();
-   if(mode=="other-origin") restored.pixelviewOrigin=QUrl("https://other.invalid");
+   if(mode=="other-origin") qputenv("PIXELVIEW_LOCAL_DEVELOPMENT","1");
+   if(mode=="other-pairing") {restored.pixelviewOrigin=QUrl("http://other.invalid"); restored.pixelviewDev=true;}
    restored.InitSidebar();
    assert(restored.pixelviewReceiveId->text()=="restart-session");
    assert(restored.pixelviewReceiveName->text()=="Restart receiver");
-   if(mode=="restore") assert(restored.pixelviewReceivePassword->text()=="restart-password");
+   if(mode=="restore" || mode=="other-pairing") assert(restored.pixelviewReceivePassword->text()=="restart-password");
    else assert(restored.pixelviewReceivePassword->text().isEmpty());
    assert(restored.pixelviewReceiveStorageStatus->isHidden() == (mode!="corrupt" && mode!="denied"));
    assert(pixelview::Offline::logins==0 && !restored.pixelviewReceiveIntent);
@@ -471,7 +474,7 @@ int main(int argc,char **argv) {
  assert(w.pixelviewReceiveStore->load("https://other.invalid","ColdSession",initialRevision).state==pixelview::ReceiveCredentialStore::State::Missing);
  assert(w.pixelviewReceiveStore->load(w.PixelviewReceiveOrigin(),"OtherSession",initialRevision).state==pixelview::ReceiveCredentialStore::State::Missing);
  for(bool *busy : {&w.nativeBusy,&w.pixelviewReceiveIntent,&w.pixelviewLease.intent,&w.pixelviewLease.pending,
-                  &w.pixelviewLease.leased,&w.pixelviewStopPending,&w.pixelviewUnpairPending,&w.desktop.exchanging,
+                  &w.pixelviewLease.started,&w.pixelviewStopPending,&w.pixelviewUnpairPending,&w.desktop.exchanging,
                   &w.closing,&w.pixelviewShutdownPending}) {
   *busy=true; inbox.submit("pixelview://play/Rejected?token=Zg");
   assert(w.pixelviewReceiveId->text()=="ColdSession" && w.pixelviewReceivePassword->text()==QString::fromUtf8("päss"));
@@ -520,7 +523,7 @@ int main(int argc,char **argv) {
  assert(w.pixelviewReceiveName->text()==QSysInfo::machineHostName());
  assert(pixelview::Offline::logins==0 && !w.pixelviewReceiveIntent);
  assert(w.PixelviewManagedSource()==capture);
- for(bool *busy : {&w.nativeBusy,&w.pixelviewLease.intent,&w.pixelviewLease.pending,&w.pixelviewLease.leased,&w.pixelviewStopPending,&w.desktop.exchanging}) {
+ for(bool *busy : {&w.nativeBusy,&w.pixelviewLease.intent,&w.pixelviewLease.pending,&w.pixelviewLease.started,&w.pixelviewStopPending,&w.desktop.exchanging}) {
   *busy=true; w.SelectPixelviewMode(1); assert(!w.pixelviewReceiving); *busy=false;
  }
  w.SelectPixelviewMode(1); assert(w.pixelviewReceiving && w.pixelviewReceiveScene);
@@ -644,12 +647,15 @@ int main(int argc,char **argv) {
  assert(QDir().rmdir(QString::fromUtf8(argv[1])+".tmp"));
  assert(w.SavePixelviewReceive() && w.pixelviewReceiveStorageStatus->isHidden());
  w.pixelviewOrigin=QUrl("https://other.invalid");
+ assert(w.SavePixelviewReceive() && w.pixelviewReceivePassword->text()=="failed-password"); // Pairing cannot clear receiver credentials.
+ qputenv("PIXELVIEW_LOCAL_DEVELOPMENT","1");
  w.pixelviewReceiveCredentialsDirty=true; // Pending edit must not cross an origin change.
  const int beforeOriginChange=pixelview::Offline::logins;
  w.StartPixelviewReceive(); while(w.pixelviewReceiveCredentialBusy) app.processEvents();
  assert(w.pixelviewReceivePassword->text().isEmpty() && pixelview::Offline::logins==beforeOriginChange);
  w.pixelviewOrigin=QUrl();
  w.SelectPixelviewMode(0); assert(!w.pixelviewReceiving);
+ qunsetenv("PIXELVIEW_LOCAL_DEVELOPMENT");
  assert(w.PixelviewManagedSource()==capture);
  assert(!w.preview.Locked());
  for (bool locked : {false, true}) {

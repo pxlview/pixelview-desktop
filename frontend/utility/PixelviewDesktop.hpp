@@ -2,7 +2,6 @@
 #include <QtCore/QUrl>
 #include <QtCore/QJsonObject>
 #include <functional>
-#include <cmath>
 #include <algorithm>
 namespace pixelview {
 struct DesktopIdentity {
@@ -18,19 +17,28 @@ struct DesktopIdentity {
   return QStringLiteral("Paired · Node %1\n%2").arg(nodeId,streaming ? QStringLiteral("Streaming") : connected ? QStringLiteral("Connected") : QStringLiteral("Disconnected"));
  }
 };
+// Desktop control socket policy (standard player envelope). The server pings
+// every 20 s and the Desktop answers each ping with its streaming state; that
+// pong is the only liveness report. There is no lease: the engine rejects a
+// second publisher itself, and media outlives any control-socket loss.
 class Desktop {
 public:
+ static constexpr qint64 PING_SILENCE_MS=60000;
  std::function<void(QJsonObject)> send = [](QJsonObject){};
  std::function<void(QString,QString)> publish = [](QString,QString){};
  std::function<void()> halt = []{};
- bool ready=false, pending=false, leased=false, stopping=false;
+ std::function<QJsonObject()> report = []{return QJsonObject{{"streaming",false},{"settings",QJsonValue::Null}};};
+ std::function<void(QString)> error=[](QString){};
+ std::function<qint64()> monotonic=[] {return qint64(0);};
+ bool ready=false, pending=false, started=false;
  bool mediaDraining=false;
- qint64 stopDeadline=0;
+ // Terminal mutations arrive before the close that follows them.
+ bool revoked=false, replaced=false;
+ qint64 pingDeadline=0;
  // Media rejection is not a control failure. Invalidate setup immediately,
- // retaining lease bookkeeping until native output/setup have safely drained.
+ // retaining start bookkeeping until native output/setup have safely drained.
  void mediaStopped(QString message) {
   ++generation;intent=false;retryAt=-1;transientFailure=false;mediaDraining=true;
-  recoveringControl=false;controlRetryAt=-1;
   halt();error(message);
  }
  // Session-only intent: never persisted with pairing identity.
@@ -48,99 +56,91 @@ public:
   if(setupClaimed || !acceptSetup(attempt,now)) return false;
   setupClaimed=true;return true;
  }
- void outputStarted() {if(intent && leased) retries=0;}
+ void outputStarted() {if(intent && started) retries=0;}
+ // Only an upgrade rejected for the token (HTTP 401/403 mapped by the
+ // transport) is terminal by number. Revocation and replacement arrive as
+ // mutations before their close, so every other close is a transient drop.
  static bool transientClose(int code) {
-  return code==0 || code==1001 || code==1006 || code==1011 || code==1012 || code==1013;
+  return code!=4401 && code!=4403;
  }
- std::function<qint64()> monotonic=[] {return qint64(0);};
  bool takeRetry(qint64 now, bool drained) {
   if(!intent || retryAt<0 || now<retryAt || !drained) return false;
   retryAt=-1;return true;
  }
- qint64 deadline=0, heartbeatRequest=-1;
- // Only negotiated resume permits healthy media to outlive a control socket.
- bool resumeSupported=false, recoveringControl=false;
- double fence=0;
- qint64 controlRetryAt=-1;
- bool controlLost(qint64 now) {
-  if(!resumeSupported || !leased || !intent || stopping || mediaDraining || now>=deadline) return false;
-  ready=false; recoveringControl=true; heartbeatRequest=-1;
-  if(controlRetryAt<0) controlRetryAt=now+1000;
+ // A control drop while media runs is not a stream failure: forget the socket
+ // and let the caller reconnect; the next DESKTOP_READY needs no new start.
+ bool controlLost() {
+  if(!started || !intent || mediaDraining) return false;
+  ready=false; pending=false; pingDeadline=0;
   return true;
  }
- bool heartbeatSent(qint64 now) { if(heartbeatRequest>=0) return false; heartbeatRequest=now; return true; }
- bool authorized(qint64 now) const { return (ready || recoveringControl) && leased && !mediaDraining && now < deadline; }
- bool requestStart(qint64 now) {
-  if (!ready || pending || leased || stopping || mediaDraining || now >= deadline) return false;
+ bool pingExpired(qint64 now) {
+  if(!ready || !pingDeadline || now<pingDeadline) return false;
+  pingDeadline=0; return true;
+ }
+ bool authorized(qint64) const { return started && !mediaDraining; }
+ bool requestStart(qint64) {
+  if (!ready || pending || started || mediaDraining) return false;
   if(!intent) retries=0;
-  ++generation;setupClaimed=false;intent=true; pending=true; send({{"type","start"}}); return true;
+  ++generation;setupClaimed=false;intent=true; pending=true;
+  send({{"message","DESKTOP_START"},{"data",QJsonObject{}}}); return true;
  }
  void fail(QString message, bool transient=false) {
   if(transient && retryAt>=0) return; // Duplicate transport notifications.
   transientFailure=transient;
-  recoveringControl=false; controlRetryAt=-1; resumeSupported=false; fence=0;
   ++generation;
   if(!transient || !reconnect || retries>=maxRetries) intent=false;
   retryAt=-1;
   if(intent) {++retries;retryAt=monotonic()+qint64(std::max(0,retryDelay))*1000;}
-  ready=false; pending=false; leased=false; stopping=false; mediaDraining=false; deadline=0;
+  ready=false; pending=false; started=false; mediaDraining=false; pingDeadline=0;
   halt(); error(message);
  }
- std::function<void(QString)> error=[](QString){};
  bool development=false;
- void tick(qint64 now) {
-  if(ready && stopping && now>=stopDeadline) fail("Stream stop acknowledgement timed out. Reconnecting control; start manually.",true);
-  else if((ready || recoveringControl) && now>=deadline) fail("Connection acknowledgement expired. Stream stopped.",true);
- }
  void receive(const QJsonObject &o, qint64 now) {
-  const auto type=o["type"].toString();
-  if(type=="started" && (mediaDraining || stopping)) return; // Cancelled attempt, not fresh authority.
-  if (type=="ready" && !ready && o["heartbeat_interval"].toInt()==15 && o["lease_seconds"].toInt()==45) {
-   if(recoveringControl) {
-    const double next=o["fence"].toDouble();
-    const double expiry=o["lease_expires_at"].toDouble();
-    if(now>=deadline || !o["resumed"].toBool() || !o["fence"].isDouble() || !std::isfinite(next) ||
-       next<=fence || next>9007199254740991.0 || std::floor(next)!=next ||
-       !o["lease_expires_at"].isDouble() || !std::isfinite(expiry) || expiry<=0) {
-     fail("Pixelview lease resume rejected. Stream stopped.");return;
-    }
-    fence=next; ready=true; recoveringControl=false; controlRetryAt=-1; heartbeatRequest=-1;
-    return; // Resume never extends authority or requests a new start.
-   }
-   if(o["resumed"].toBool()) {fail("Unexpected Pixelview lease resume.");return;}
-   resumeSupported=o["resumed"].isBool();
-   ready=true; deadline=now+30000; heartbeatRequest=-1;
-   if(intent && retryAt<0) requestStart(now);
-  } else if(type=="started" && ready && pending && now<deadline) {
-   pending=false; leased=true;
-   const auto whip=o["config"].toObject()["whip"].toObject();
+  const auto name=o["mutation"].toString();
+  const auto data=o["data"].toObject();
+  if(name=="DESKTOP_READY") {
+   if(ready) return;
+   ready=true; pingDeadline=now+PING_SILENCE_MS;
+   if(intent && !started && retryAt<0) requestStart(now);
+  } else if(name=="SOCKET_SEND_PING") {
+   // The server's ping loop can run ahead of DESKTOP_READY; a pong is always
+   // the right answer, and presence depends on it.
+   if(ready) pingDeadline=now+PING_SILENCE_MS;
+   send({{"message","PONG_RESPONSE"},{"data",report()}});
+  } else if(name=="DESKTOP_STARTED") {
+   if(!ready || !pending) return;
+   pending=false;
+   if(mediaDraining) return; // Cancelled attempt, not fresh authority.
+   const auto whip=data["config"].toObject()["whip"].toObject();
    QUrl endpoint(whip["endpoint"].toString());
    QUrl origin=endpoint; origin.setPath("");
-   if(!validOrigin(origin, development) || whip["bearer_token"].toString().isEmpty() ||
-      !o["fence"].isDouble() || o["fence"].toDouble()<=0 || std::floor(o["fence"].toDouble())!=o["fence"].toDouble() ||
-      !o["lease_expires_at"].isDouble() || !std::isfinite(o["lease_expires_at"].toDouble()) || o["lease_expires_at"].toDouble()<=0) {
+   if(!validOrigin(origin, development) || whip["bearer_token"].toString().isEmpty()) {
     fail("WHIP is unavailable or invalid for this node. SRT is not supported."); return;
    }
-   // A response cannot move the deadline beyond the request/ack budget.
-   fence=o["fence"].toDouble();
+   started=true;
    publish(endpoint.toString(),whip["bearer_token"].toString());
-  } else if(type=="heartbeat" && ready && now<deadline && heartbeatRequest>=0) {
-   if(leased && (!o["lease_expires_at"].isDouble() || !std::isfinite(o["lease_expires_at"].toDouble()) || o["lease_expires_at"].toDouble()<=0)) { fail("Streaming lease lost."); return; }
-   deadline=heartbeatRequest+30000; heartbeatRequest=-1;
-  } else if(type=="stopped" && ready && stopping && !leased && !pending) {
-   stopping=false;
-  } else {
-   const QString code=o["code"].toString();
-   const QStringList known={"busy","active_session_required","node_paused","subscription_required"};
+  } else if(name=="DESKTOP_ERROR") {
+   const QString code=data["code"].toString();
+   const QStringList known={"active_session_required","node_paused","subscription_required"};
    fail(known.contains(code) ? "Pixelview: "+code+". Check admin and start manually." : "Pixelview protocol error. Stream stopped.");
+  } else if(name=="SOCKET_DESKTOP_REVOKED") {
+   revoked=true;
+   fail("Device revoked. Pair again in Pixelview admin.");
+  } else if(name=="SOCKET_DESKTOP_REPLACED") {
+   replaced=true;
+   if(started && intent && !mediaDraining) {
+    ready=false; pending=false; pingDeadline=0;
+    error("Another connection of this device took over control. Streaming continues; restart the app to reconnect.");
+   } else fail("Another connection of this device took over control. Restart the app to reconnect.");
   }
+  // DESKTOP_STOPPED and unknown mutations need no action.
  }
  void outputStopped() {
   ++generation;intent=false;retryAt=-1;mediaDraining=false;
-  recoveringControl=false;controlRetryAt=-1;
-  const bool release=ready && (leased || pending);
-  leased=pending=false;
-  if (release) {stopping=true;stopDeadline=monotonic()+30000;send({{"type","stop"}});}
+  const bool release=ready && (started || pending);
+  started=pending=false;
+  if (release) send({{"message","DESKTOP_STOP"},{"data",QJsonObject{}}});
  }
  static bool validOrigin(const QUrl &u, bool dev) {
   const auto host = u.host();

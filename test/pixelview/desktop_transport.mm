@@ -34,12 +34,12 @@ int main(int argc,char **argv) {
  assert(exchanged); assert(client.identity.nodeId=="test" && client.identity.desktopId=="test"); assert(pixelview::loadDevice(origin.toString())=="fixture-secret");
  assert(pixelview::removeDevice(origin.toString()));
  bool gotReady=false;
- client.message=[&](QByteArray body){ gotReady=QJsonDocument::fromJson(body).object()["type"]=="ready"; app.quit(); };
+ client.message=[&](QByteArray body){ gotReady=QJsonDocument::fromJson(body).object()["mutation"]=="DESKTOP_READY"; app.quit(); };
  client.openSocket(QUrl(QString::fromUtf8(argv[1])),"fixture-secret");
  QTimer::singleShot(5000,&app,&QCoreApplication::quit); app.exec();
  assert(gotReady);
  int closeCode=0; client.disconnected=[&](int code){closeCode=code;app.quit();};
- client.sendSocket("{\"type\":\"test-close\"}");
+ client.sendSocket("{\"message\":\"test-close\",\"data\":{}}");
  QTimer::singleShot(5000,&app,&QCoreApplication::quit);app.exec();
  assert(closeCode==4401);client.closeSocket();
 }

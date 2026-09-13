@@ -63,7 +63,7 @@ successful Pair replaces it). Reconnect no longer consumes it with std::exchange
 and then rereads Keychain on every subsequent socket attempt. Startup/background
 read failures remain retryable using existing bounded backoff with native UI
 suppressed. They do not change pairing metadata, delete credentials or grant
-streaming authority. Server ready/lease checks still apply to every connection.
+streaming authority. Server ready checks still apply to every connection.
 
 Integration verification caught a retained process cache after terminal 4401:
 reconnect was already disabled, but the revoked credential remained in memory.

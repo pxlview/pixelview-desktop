@@ -8,9 +8,9 @@ The native log records HTTP 404 at 17:53:33 and 17:56:37 on 2026-09-06. A subseq
 
 ## Root cause
 
-The frontend sent native media failure through `Desktop::fail`, the control-plane failure path. That cleared authenticated readiness and invoked the halt callback, stopping heartbeats and closing the control socket after native cleanup. A terminal media failure did not schedule an idle reconnect. The durable pairing identity remained saved, but the control connection was dropped and Start required readiness that could not recover on its own.
+The frontend sent native media failure through `Desktop::fail`, the control-plane failure path. That cleared authenticated readiness and invoked the halt callback, closing the control socket after native cleanup. A terminal media failure did not schedule an idle reconnect. The durable pairing identity remained saved, but the control connection was dropped and Start required readiness that could not recover on its own.
 
-Media setup/output failure must not invalidate durable pairing. Terminal media failure must stop and drain output, release its stream lease, and retain a healthy control connection. Start must remain unavailable until native cleanup and lease-stop acknowledgement complete. Revocation, control disconnection, malformed authority, and acknowledgement expiry must still invalidate streaming authority.
+Media setup/output failure must not invalidate durable pairing. Terminal media failure must stop and drain output, send `DESKTOP_STOP`, and retain a healthy control connection. Start must remain unavailable until native cleanup completes. Revocation, control disconnection before media started, malformed authority, and ping silence must still invalidate streaming authority.
 
 User-facing errors should describe the streaming destination or encoder, not internal “native output” machinery or manually configured stream keys.
 

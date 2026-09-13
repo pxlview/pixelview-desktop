@@ -9,7 +9,7 @@ class ControlSocket(unittest.TestCase):
    subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(ROOT),str(ROOT/'test/pixelview/control_ping_native.cpp'),'-o',tmp+'/test'],check=True)
    subprocess.run([tmp+'/test'],check=True)
  def test_native_timeout(self):
-  errors=[]; pings=[]; auth=[]
+  errors=[]; pings=[]; upgrades=[]
   class Handler(http.server.BaseHTTPRequestHandler):
    protocol_version='HTTP/1.1'
    reject=False
@@ -28,6 +28,10 @@ class ControlSocket(unittest.TestCase):
      accept=base64.b64encode(hashlib.sha1((key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
      self.send_response(101);self.send_header('Upgrade','websocket');self.send_header('Connection','Upgrade');self.send_header('Sec-WebSocket-Accept',accept);self.end_headers()
      self.connection.settimeout(25)
+     if self.path.startswith('/desktop/ws'):
+      # The token authenticates the upgrade; the server speaks first.
+      upgrades.append(self.path)
+      body=json.dumps({'mutation':'DESKTOP_READY','data':{'desktop_id':'fixture','node_id':'fixture'}},separators=(',',':')).encode();self.wfile.write(bytes([129,len(body)])+body);self.wfile.flush()
      opened=time.monotonic(); last_ping=opened
      ping_count=0
      while True:
@@ -47,11 +51,9 @@ class ControlSocket(unittest.TestCase):
         time.sleep(2);self.wfile.write(bytes([138,len(b)])+b);self.wfile.flush()
        continue # Next ping is deliberately blackholed.
       data=json.loads(b)
-      if self.path=='/desktop/ws':
-       auth.append(data);reply={'type':'ready'}
-      else:
-       assert data['message']=='ADD_VIEWER_WEB' and data['data']['client_type']=='pixelview-desktop'
-       reply={'mutation':'SOCKET_ADD_VIEWER_WEB','data':{'status':'success'}}
+      assert not self.path.startswith('/desktop/ws'), ('unexpected Desktop message', data)
+      assert data['message']=='ADD_VIEWER_WEB' and data['data']['client_type']=='pixelview-desktop'
+      reply={'mutation':'SOCKET_ADD_VIEWER_WEB','data':{'status':'success'}}
       body=json.dumps(reply,separators=(',',':')).encode();self.wfile.write(bytes([129,len(body)])+body);self.wfile.flush()
     except (ConnectionResetError,BrokenPipeError):pass
     except Exception as e:errors.append(repr(e))
@@ -76,7 +78,7 @@ class ControlSocket(unittest.TestCase):
      for mode in ['sender-denied','receiver-denied']:
       subprocess.run([tmp+'/test',f'http://127.0.0.1:{server.server_port}',mode],check=True,timeout=18)
     finally:server.shutdown();thread.join()
-   self.assertEqual(auth,[{'type':'auth','device_token':'fixture','resume_fence':17}]*2)
+   self.assertEqual(upgrades,['/desktop/ws?token=fixture']*2)
    self.assertEqual(len(pings),6)
    self.assertFalse(errors,errors)
 if __name__=='__main__':unittest.main()
