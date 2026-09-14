@@ -1,12 +1,48 @@
-# Pixelview Desktop — capture and encoding prototype
+# Pixelview Desktop
 
-A local OBS fork with capture/encoding settings on the left and an editable Blackmagic preview on the right. Choose a device, adjust its native settings, and drag/resize the picture on a fixed **1920 × 1080** canvas. **Fit** resets framing without stretching the input.
+Pixelview Desktop is a macOS application derived from OBS Studio for the
+[Pixelview.io](https://pixelview.io) streaming platform. It keeps OBS's
+capture, audio, encoding and output foundations and replaces the general
+broadcaster workflow with two focused modes:
 
-The compact sidebar uses the original `pv-home` logo plus **Desktop**, grouped left-aligned controls, adjacent FPS/Mbps fields, and automatic device discovery without a Refresh button. B-frame controls are hidden and the no-B-frame policy is enforced on saved and Advanced settings. Native device and encoder properties remain available.
+- **Sending** — capture a Blackmagic/DeckLink input on a fixed 1920 × 1080
+  canvas, encode with fixed Pixelview-oriented defaults, pair the machine with
+  a Pixelview node, and stream to that node over WHIP under the control of a
+  backend WebSocket.
+- **Receiving** — log in to a Pixelview session with its credentials, decode
+  the WHEP stream natively, show it on the canvas and optionally play it out
+  through a DeckLink output card.
 
-The native **Start/Stop Streaming** button is bottom-anchored in the sidebar; configuration locks during streaming while operational audio controls remain usable. Native audio meters, **Mute audio** (stream and local playback), and **Listen locally** with an output selector sit under the preview. The compact live status bar and **Show stats** retain detailed native telemetry. macOS **Help** includes offline license information and, in release builds, **Check for Updates…**. There is no destination configured by default. See [audio controls and verification](docs/pixelview-audio.md) and [current integration verification](docs/pixelview-acceptance.md).
+Native OBS capabilities that operators still need (device settings, output
+controls, statistics, license information, updates) remain reachable; the
+rest of the OBS surface is hidden. The app has its own bundle identity and
+its own settings root under `~/Library/Application Support/pixelview/obs-studio`,
+so it never touches a stock OBS installation.
 
-See [distribution licensing requirements](docs/pixelview-distribution-license.md) before shipping binaries; public GitHub source alone is not a completed release compliance audit.
+What is implemented, how it behaves and what has been verified is kept in
+[`docs/features.md`](docs/features.md). Building, testing, signing and
+releasing are described in [`docs/build-and-release.md`](docs/build-and-release.md).
+Release notes live under [`docs/releases/`](docs/releases/).
+
+## Repository structure
+
+The tree is upstream OBS Studio (`32.2.1`, see `version.json`) plus these
+Pixelview additions:
+
+| Area | Where |
+| --- | --- |
+| Sidebar, modes, pairing, streaming control, receive panel, deep links, shutdown gate | `frontend/widgets/OBSBasic_Pixelview*.inc`, hooks in `frontend/widgets/OBSBasic.cpp` and `OBSBasic_Streaming.cpp` |
+| Control-socket policy, transport, Keychain, receiver controller | `frontend/utility/Pixelview*.hpp`, `Pixelview*.cpp`, `Pixelview*.mm` |
+| Native WHEP receiver (GStreamer + VideoToolbox) | `plugins/pixelview-whep` |
+| DeckLink receive output and its watchdog | `plugins/decklink` (`decklink-output-receive.inc`), `plugins/decklink-output-ui` (`decklink-receive-ui.inc`) |
+| WHIP output hardening | `plugins/obs-webrtc` |
+| Offline and loopback tests | `test/pixelview`, `plugins/decklink/tests`, `plugins/pixelview-whep/tests` |
+| Signed development build and launcher | `cmake/macos/pixelview-build.sh`, `pixelview-signed-development.py`, `pixelview-launch.py` |
+| Release pipeline (notarization, Sparkle, R2) | `release/`, `cmake/macos/pixelview-release.sh`, `version.json` |
+
+Inherited OBS files (`README.rst`, `CONTRIBUTING.md`, `CODESTYLE.md`,
+`SECURITY.md`, `COPYING`, `AUTHORS`) are kept unchanged for attribution and
+rebasing.
 
 ## Company information
 
@@ -20,27 +56,8 @@ Estonia
 https://pixelview.io
 ```
 
-These company details identify the business behind Pixelview; they do not replace upstream copyright notices or change the applicable software licenses.
-
-## Open
-
-```sh
-open "build_macos/frontend/RelWithDebInfo/Pixelview Desktop.app"
-```
-
-## Build
-
-```sh
-bash cmake/macos/pixelview-build.sh
-```
-
-This prototype does not replace `/Applications/OBS.app`. Its settings are separate, under `~/Library/Application Support/pixelview/obs-studio/`.
-
-**Native capture, encoding and Pixelview WHIP:** On macOS, the **Pairing / Connection** category above capture shows persistent paired node identity separately from connection/streaming state and offers **Unpair this installation** (local-only, stop-before-release; no other device is revoked). Use **Pair with Pixelview**, enter your backend origin and a one-time code from the node's admin Settings → Pixelview Desktop. Device credentials live in Keychain. Start Streaming asks the backend for the node's WHIP configuration over the control socket before configuring an in-memory native WHIP service; Stop ends actual output before telling the backend. SRT-only/v2 nodes report WHIP unavailable instead of falling back. The control connection recovers with backoff; a running stream survives control drops, and a stream that failed before it started is retried within the profile's reconnect settings. An active project/engine and valid subscription must already exist in admin. Remote playout and engine provisioning are not implemented. Close other capture apps if they are holding the selected hardware.
-
-- [Verified behavior and remaining hardware tests](docs/pixelview-acceptance.md)
-- [Toolchain/build instructions and compatibility limits](docs/pixelview-build.md)
-- [UI implementation details](docs/PIXELVIEW-UI.md)
-- [Encoding defaults, native Advanced controls and HEVC color formats](docs/pixelview-encoding.md)
-
-This remains an OBS-derived GPL project; upstream source and attribution are retained. Development builds are ad-hoc signed and updater-free. Start with the top-level [Pixelview release checklist](PIXELVIEW_RELEASE.md); the detailed Apple Silicon customer-release path is in [the macOS release runbook](docs/pixelview-macos-updates-and-releases.md). Release creation requires local Developer ID signing, Apple notarization, a signed Sparkle appcast, and R2 publishing.
+These company details identify the business behind Pixelview; they do not
+replace upstream copyright notices or change the applicable software
+licenses. Pixelview Desktop remains an OBS-derived GPL project: upstream
+source and attribution are retained, and binaries ship with the complete
+license and third-party notices described in `docs/build-and-release.md`.

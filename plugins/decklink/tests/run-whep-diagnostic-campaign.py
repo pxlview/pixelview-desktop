@@ -11,7 +11,7 @@ def main():
  manifest=O/'campaign.json'
  assert not manifest.exists(),'campaign already executed; no retry to green'
  results=[]
- state={'declaration_sha256':hashlib.sha256(DECL.read_bytes()).hexdigest(),'started_unix':time.time(),
+ state={'declaration_sha256':hashlib.sha256(DECL.read_bytes()).hexdigest() if DECL.exists() else None,'started_unix':time.time(),
         'maximum_cases':8,'first_failure_stop':True,'results':results,'historical_failure_fixed':False,'shipping':False}
  manifest.write_text(json.dumps(state,indent=2))
  for phase in ['baseline','reference-repeat']:

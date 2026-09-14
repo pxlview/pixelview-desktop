@@ -130,6 +130,15 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    pixelviewConnectionStatus->setText(QStringLiteral("Control disconnected. Reconnecting; streaming continues."));
    return;
   }
+  // A refused upgrade (HTTP 403 or a redirect, e.g. an edge rule) ends control
+  // only: running media is independent of it and must not be stopped.
+  if(code==4403 && pixelviewActualStreaming && pixelviewLease.controlLost()) {
+   pixelviewAuthDeadline=0; pixelviewReconnectAt=0;
+   pixelviewDesktop->closeSocket();
+   pixelviewConnectionStatus->setText(QStringLiteral("Pixelview refused the control connection. Streaming continues; if this device was revoked, unpair and pair again after stopping."));
+   RefreshPixelviewReconnect();
+   return;
+  }
   pixelviewLease.fail(code==4401 ? "Device revoked. Pair again in Pixelview admin." :
    code==4403 ? "Pixelview refused the control connection. If this device was revoked, unpair and pair again." :
    "Pixelview control disconnected. Stream stopped.",transient);

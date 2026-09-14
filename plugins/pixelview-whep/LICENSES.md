@@ -19,7 +19,7 @@ The current build uses the pinned official GStreamer1.28.3 runtime/development p
 
 The official SDK's available notices and version inventory are retained, including notices for some SDK components not shipped. The missing separate gst-plugins-good notice directory and transitive Rust source/notices remain review items. Do not infer whole-app compliance from this curated runtime: the OBS dependency FFmpeg is GPLv3-or-later and Qt and other application dependencies have separate obligations.
 
-`release/source-inventory.json` is the authoritative explicit release-blocker list. `cmake/macos/pixelview_sources.py` and the release validator refuse incomplete/unreviewed source inventories. The License dialog has GPL2/GPL3, third-party-notice and source/build pages; a development fallback is not a claim of complete notices or published corresponding source. See `docs/pixelview-source-release.md`.
+`release/source-inventory.json` is the authoritative explicit release-blocker list. `cmake/macos/pixelview_sources.py` and the release validator refuse incomplete/unreviewed source inventories. The License dialog has GPL2/GPL3, third-party-notice and source/build pages; a development fallback is not a claim of complete notices or published corresponding source. See `docs/build-and-release.md`.
 
 ## Historical Homebrew closure findings (not the current payload)
 

@@ -330,6 +330,16 @@ int main() {
  assert(!refused.pixelviewLease.intent && !refused.pixelviewLease.transientFailure && refused.pixelviewPairingDurable);
  assert(refused.connection.authorizedToken=="kept" && refused.label.text.contains("refused"));
  Timer::run();assert(refused.pixelviewReconnectAt==0);
+ // A refused upgrade while streaming ends control only: media keeps running, no reconnect loop.
+ OBSBasic refusedLive;refusedLive.bind();Output liveOutput;liveOutput.active=true;refusedLive.handler.streamOutput=&liveOutput;
+ refusedLive.connection.authorizedToken="kept";refusedLive.connection.message(READY);refusedLive.pixelviewLease.requestStart(0);
+ refusedLive.connection.message(STARTED);refusedLive.pixelviewActualStreaming=true;refusedLive.pixelviewNativeAttempt=true;
+ refusedLive.connection.disconnected(4403);
+ assert(liveOutput.forceStops==0 && liveOutput.active && refusedLive.PixelviewLeaseValid() && refusedLive.pixelviewLease.intent);
+ assert(!refusedLive.pixelviewLease.ready && refusedLive.connection.closes==1 && refusedLive.pixelviewReconnectAt==0);
+ assert(refusedLive.connection.authorizedToken=="kept" && refusedLive.label.text.contains("Streaming continues"));
+ refusedLive.pixelviewClock.now=99999;refusedLive.Watchdog();assert(refusedLive.authentications==0 && liveOutput.active);
+ Timer::run();
  OBSBasic callback;callback.bind();grant(callback);
  auto finish=callback.MakeSetup();auto copy=finish;
  finish(true);copy(true);assert(callback.handler.starts==1);
