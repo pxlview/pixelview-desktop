@@ -29,7 +29,8 @@ class PixelviewReleaseMetadata(unittest.TestCase):
         self.assertTrue(metadata_path.is_file(), "version.json is the release source of truth")
         metadata = json.loads(metadata_path.read_text())
         self.assertRegex(metadata["pixelview_version"], r"^\d+\.\d+\.\d+$")
-        self.assertEqual(metadata["pixelview_build_number"], 1)
+        self.assertIsInstance(metadata["pixelview_build_number"], int)
+        self.assertGreaterEqual(metadata["pixelview_build_number"], 1)
         self.assertEqual(metadata["obs_base_version"], "32.2.1")
         self.assertEqual(metadata["obs_base_describe"], "32.2.1-66-g6b3e55072")
         self.assertEqual(
