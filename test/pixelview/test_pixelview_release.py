@@ -189,6 +189,8 @@ class PixelviewLocalRelease(unittest.TestCase):
         for required in (
             "codesign --verify --deep --strict",
             "xcrun notarytool submit",
+            'resign_sparkle "$app_path" "$identity"',
+            '"$notary_status" != "Accepted"',
             "xcrun stapler staple",
             "xcrun stapler validate",
             "spctl --assess",

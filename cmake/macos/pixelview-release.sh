@@ -285,6 +285,39 @@ certificate_sha1() {
   printf '%s\n' "$fingerprint"
 }
 
+resign_sparkle() {
+  # Sparkle ships its helpers ad-hoc signed. Notarization requires every nested
+  # executable to carry our Developer ID with a secure timestamp, signed inside
+  # out, then the framework and the app re-sealed on top.
+  local app="$1" sign_identity="$2"
+  local sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+  [[ -d "$sparkle" ]] || die "Sparkle.framework is missing"
+  local nested
+  for nested in "$sparkle/XPCServices/Downloader.xpc" "$sparkle/XPCServices/Installer.xpc" \
+                "$sparkle/Autoupdate" "$sparkle/Updater.app"; do
+    [[ -e "$nested" ]] || die "Sparkle component is missing: $nested"
+    codesign --force --sign "$sign_identity" --options runtime --timestamp "$nested" || die "could not re-sign $nested"
+  done
+  codesign --force --sign "$sign_identity" --options runtime --timestamp "$app/Contents/Frameworks/Sparkle.framework" \
+    || die "could not re-sign Sparkle.framework"
+  local entitlements
+  entitlements="$(mktemp /tmp/pixelview-entitlements.XXXXXX)"
+  codesign -d --entitlements "$entitlements" --xml "$app" 2>/dev/null || true
+  if [[ -s "$entitlements" ]]; then
+    codesign --force --sign "$sign_identity" --options runtime --timestamp --entitlements "$entitlements" "$app" \
+      || die "could not re-seal the app after Sparkle re-signing"
+  else
+    codesign --force --sign "$sign_identity" --options runtime --timestamp "$app" \
+      || die "could not re-seal the app after Sparkle re-signing"
+  fi
+  rm -f "$entitlements"
+  local component
+  for component in "$sparkle/XPCServices/Downloader.xpc" "$sparkle/XPCServices/Installer.xpc" "$sparkle/Autoupdate" "$sparkle/Updater.app"; do
+    codesign -dvv "$component" 2>&1 | grep -F "Authority=Developer ID Application" >/dev/null || die "Sparkle component is not Developer ID signed: $component"
+    codesign -dvv "$component" 2>&1 | grep -F "Timestamp=" >/dev/null || die "Sparkle component has no secure timestamp: $component"
+  done
+}
+
 verify_app() {
   local app_to_verify="${1:-$app_path}"
   local expected_certificate="${2:-}"
@@ -478,6 +511,7 @@ prepare_release() {
   PIXELVIEW_LICENSE_DATA_DIR="$compliance_stage/license" \
     bash cmake/macos/pixelview-build.sh
 
+  resign_sparkle "$app_path" "$identity"
   verify_app "$app_path" "$identity"
 
   local stage
@@ -500,6 +534,14 @@ EOF
   codesign --verify --verbose=2 "$dmg_path"
   xcrun notarytool submit "$dmg_path" "${notary_auth_args[@]}" --wait --output-format json \
     > "$release_dir/notarization.json"
+  local notary_status
+  notary_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$release_dir/notarization.json")"
+  if [[ "$notary_status" != "Accepted" ]]; then
+    local notary_id
+    notary_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$release_dir/notarization.json")"
+    xcrun notarytool log "$notary_id" "${notary_auth_args[@]}" > "$release_dir/notarization-log.json" 2>/dev/null || true
+    die "Apple notarization returned '$notary_status' (submission $notary_id); see $release_dir/notarization-log.json"
+  fi
   xcrun stapler staple "$dmg_path"
   xcrun stapler validate "$dmg_path"
   spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
