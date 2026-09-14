@@ -28,7 +28,7 @@ class PixelviewReleaseMetadata(unittest.TestCase):
         metadata_path = ROOT / "version.json"
         self.assertTrue(metadata_path.is_file(), "version.json is the release source of truth")
         metadata = json.loads(metadata_path.read_text())
-        self.assertEqual(metadata["pixelview_version"], "0.0.1")
+        self.assertRegex(metadata["pixelview_version"], r"^\d+\.\d+\.\d+$")
         self.assertEqual(metadata["pixelview_build_number"], 1)
         self.assertEqual(metadata["obs_base_version"], "32.2.1")
         self.assertEqual(metadata["obs_base_describe"], "32.2.1-66-g6b3e55072")
@@ -248,7 +248,8 @@ class PixelviewLocalRelease(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Pixelview Desktop 0.0.1 (build 1)", result.stdout)
+        current = json.loads((ROOT / "version.json").read_text())
+        self.assertIn(f"Pixelview Desktop {current['pixelview_version']} (build {current['pixelview_build_number']})", result.stdout)
         self.assertIn("OBS 32.2.1-66-g6b3e55072 @ 6b3e550729f125b6c5b3767df88c08f5aef9d264", result.stdout)
         self.assertIn("arm64", result.stdout)
     def test_production_release_never_accepts_a_dirty_checkout(self):
