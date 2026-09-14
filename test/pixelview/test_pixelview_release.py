@@ -357,16 +357,16 @@ class PixelviewLocalRelease(unittest.TestCase):
         self.assertIn("--env-file", wrapper)
         self.assertIn("cmake/macos/pixelview-release.sh", wrapper)
         for reference in (
-            "op://pixelview-prod/pixelview-desktop-releases-r2-bucket/endpoint",
-            "op://pixelview-prod/pixelview-desktop-releases-r2-bucket/access_key_id",
-            "op://pixelview-prod/pixelview-desktop-releases-r2-bucket/secret_access_key",
+            "op://pixelview-desktop/pixelview-desktop-releases-r2-bucket/endpoint",
+            "op://pixelview-desktop/pixelview-desktop-releases-r2-bucket/access_key_id",
+            "op://pixelview-desktop/pixelview-desktop-releases-r2-bucket/secret_access_key",
         ):
             self.assertIn(reference, r2_file)
             self.assertNotIn(reference, notary_file)
         for reference in (
-            "op://pixelview-prod/pixelview-desktop-notarization/key_id",
-            "op://pixelview-prod/pixelview-desktop-notarization/issuer_id",
-            "op://pixelview-prod/pixelview-desktop-notarization/private_key",
+            "op://pixelview-desktop/pixelview-desktop-notarization/key_id",
+            "op://pixelview-desktop/pixelview-desktop-notarization/issuer_id",
+            "op://pixelview-desktop/pixelview-desktop-notarization/private_key",
         ):
             self.assertIn(reference, notary_file)
             self.assertNotIn(reference, r2_file)
