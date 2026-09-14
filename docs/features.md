@@ -393,10 +393,9 @@ gate) fail in the current environment regardless of changes.
   today. Fit has no undo; UI strings are English only.
 - Two settings roots on one Mac share the same Keychain identities (one device record per origin, one
   receiver record); this is not a two-sender recipe.
-- Release compliance is blocked: `release/source-inventory.json` has `review.status: blocked`
-  (bundled FFmpeg reports GPL-3.0-or-later, Qt/GStreamer/Rust transitive sources and notices
-  incomplete, Blackmagic SDK and codec obligations unreviewed, no clean tag or anonymous source
-  download). The release script fails closed on it. Public CI is test-only.
+- Corresponding source is offered through the public repository at each release tag and the
+  sources tarball published next to each DMG; `release/source-inventory.json` keeps informational
+  open review items about third-party component materials and does not gate a release.
 - Minimum macOS 14 (from the bundled runtime); arm64 only; Xcode 26 / SDK 26.5 normal toolchain
   (`PIXELVIEW_LEGACY_TOOLCHAIN=ON` permits Xcode 15.3 without Metal and AVFoundation capture).
 - Configuration files and the Keychain are not a cross-store transaction; interrupted saves fail

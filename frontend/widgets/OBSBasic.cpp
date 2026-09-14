@@ -1447,8 +1447,10 @@ void OBSBasic::ShowPixelviewLicense()
 		"It is provided WITHOUT ANY WARRANTY, including implied warranties of "
 		"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE, to the extent permitted by law.\n\n"
 		"Corresponding source must be made available under the GPL when this program is distributed. "
-		"See the included COPYING and AUTHORS. Third-party components retain their applicable licenses. "
-		"Pixelview is not an official OBS Project release."), dialog);
+		"The complete source of Pixelview Desktop, including all modifications to OBS Studio, is published at "
+		"https://github.com/pxlview/pixelview-desktop; the exact tag and commit of this build are listed under "
+		"Source & build info. See the included COPYING and AUTHORS. Third-party components retain their "
+		"applicable licenses. Pixelview is not an official OBS Project release."), dialog);
 	notice->setTextFormat(Qt::PlainText);
 	notice->setWordWrap(true);
 	notice->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);

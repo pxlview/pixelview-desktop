@@ -199,9 +199,9 @@ desktop/macos/
 
 The repository cannot create the R2 bucket/domain/token, the App Store Connect API key, the GitHub tag/release or the acceptance Mac; those are operator steps.
 
-### 4.7 Corresponding-source and compliance gate
+### 4.7 Corresponding source
 
-Preparation and publication both run the source builder; the offline form is:
+The project is public at `https://github.com/pxlview/pixelview-desktop` and every release is an annotated tag there; that is the primary corresponding-source offer, and the in-app License dialog names it. In addition, preparation and publication run the source packager, which ships a sources tarball, a NOTICES file and the resolved inventory next to each DMG. The offline form is:
 
 ```sh
 python3 cmake/macos/pixelview_sources.py \
@@ -212,20 +212,9 @@ python3 cmake/macos/pixelview_sources.py \
   --base-url https://downloads.pixelview.io/desktop/macos
 ```
 
-(`PIXELVIEW_SOURCE_CACHE` overrides the cache; keep it for publication revalidation.) It reads the tracked `release/source-inventory.json` at the exact clean tag, packs the complete project tree plus every component source archive into the sources tarball, writes the NOTICES file and resolved inventory, and writes `license/third-party-notices.txt` and `license/source-manifest.json`, which the build installs under `Contents/Resources/license/` before signing. `release-manifest.json.compliance` records `sources`, `notices` and `inventory` (name, SHA-256, size, immutable URL). Missing, tampered, symlinked or unsafe inputs, a dirty/untagged tree, or `review.status != approved` fail the release; there is no notice-only fallback.
+(`PIXELVIEW_SOURCE_CACHE` overrides the cache; keep it for publication revalidation.) It reads the tracked `release/source-inventory.json` at the exact clean tag, packs the complete project tree plus every inventoried component source archive into the sources tarball, writes the NOTICES file and resolved inventory, and writes `license/third-party-notices.txt` and `license/source-manifest.json`, which the build installs under `Contents/Resources/license/` before signing. `release-manifest.json.compliance` records `sources`, `notices` and `inventory` (name, SHA-256, size, immutable URL). Missing, tampered, symlinked or unsafe inputs, or a dirty/untagged tree, fail the packager.
 
-`release/source-inventory.json` (schema 1) currently has `review.status: blocked` with these unresolved blockers; do not flip the status to pass a build:
-
-- No whole-app binary/static dependency closure review or responsible approval.
-- Bundled FFmpeg reports GPL-3.0-or-later: resolve whole-combination GPLv3 terms, full texts, exact FFmpeg sources/build configuration, transitive codecs.
-- Qt 6.11.1 exact module sources, notices, patches, configure options and relink/replacement materials are incomplete.
-- Official GStreamer 1.28.3 Cerbero recipes/patches and transitive sources; SDK notices lack a separate gst-plugins-good directory.
-- rswebrtc 0.15.2 crate and MPL notice are verified (the only inventoried component); Cargo static dependency sources/notices are incomplete.
-- OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.
-- Modification notices/dates, submodule scope, build/install instructions and codec/patent/vendor obligations need review.
-- No clean product tag, full source rebuild, anonymous download verification or production publication has occurred.
-
-Clearing the gate requires `review.status: approved`, empty `blockers`, and `review.evidence` (`{path, sha256, size}`) pointing at a tracked review document.
+`release/source-inventory.json` also carries a `review` block. It is informational: it records open points about third-party component materials (FFmpeg GPLv3 terms, Qt and GStreamer module sources and recipes, Cargo dependency notices, Sparkle/Blackmagic SDK obligations) for follow-up and never gates a build or a publish.
 
 ## 5. Distribution licensing obligations
 

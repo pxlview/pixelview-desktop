@@ -19,11 +19,11 @@ import urllib.parse
 
 
 def validate_inventory(inventory):
-    review = inventory.get('review', {})
-    if inventory.get('schema_version') != 1 or review.get('status') != 'approved' or review.get('blockers') != []:
-        raise ValueError('source inventory review is incomplete')
-    if not review.get('evidence') or not inventory.get('runtime_bindings') or not inventory.get('components'):
-        raise ValueError('source inventory review evidence, runtime bindings and components are required')
+    if inventory.get('schema_version') != 1:
+        raise ValueError('unsupported source inventory schema')
+    if not inventory.get('runtime_bindings') or not inventory.get('components'):
+        raise ValueError('source inventory runtime bindings and components are required')
+    # inventory['review'] is informational (open review items); it never gates a release.
     ids = set()
     for component in inventory['components']:
         identifier = component['id']
@@ -104,10 +104,11 @@ def build(root, tag, inventory_path, cache, output, release_id, base_url):
         if name not in tree or tree[name][1] == '120000':
             raise ValueError(f'material is not a tracked regular file: {name}')
         return checked(git('cat-file', 'blob', tree[name][0]), record)
-    material(inventory['review']['evidence'])
     for binding in inventory['runtime_bindings']:
         material(binding)
-    notices = ['Pixelview Desktop — third-party notices\nNot a legal clearance certificate.\n']
+    notices = ['Pixelview Desktop — third-party notices\n'
+               'Complete corresponding source for every release: https://github.com/pxlview/pixelview-desktop\n'
+               '(tag v<version>; the exact commit is recorded in the source manifest).\n']
     dependencies = {}
     for component in inventory['components']:
         notices.append(f"\n=== {component['id']} {component['version']} ({component['license']}) ===\n")

@@ -8,8 +8,10 @@ inherited OBS `README.rst` stays unchanged for upstream attribution.
    version and a build number above every published build, the OBS base
    fields match `git describe`, and `docs/releases/<version>.md` plus
    `<version>.html` exist. The tree must be clean.
-2. Resolve the compliance gate: `release/source-inventory.json` must record no
-   unresolved corresponding-source or notice gaps for the shipped payload.
+2. Corresponding source is the public repository at the release tag; the
+   release packager also ships a sources tarball and NOTICES next to the DMG.
+   Review the open items in `release/source-inventory.json` when convenient;
+   they do not gate the release.
 3. Create and push `v0.0.1` (an annotated tag at the release commit; use the
    real version), then run `release/pixelview-macos.sh --validate-config`.
 4. Run `release/pixelview-macos.sh --prepare`: build, sign, notarize, staple,

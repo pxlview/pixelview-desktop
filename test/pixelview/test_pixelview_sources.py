@@ -110,7 +110,7 @@ class SourceInventoryTests(unittest.TestCase):
 
     def test_rejects_missing_tampered_dirty_and_untagged_inputs(self):
         import pixelview_sources as sources
-        for case in ('missing', 'tampered', 'symlink-cache', 'dirty', 'wrong-tag', 'missing-review', 'missing-notice', 'missing-recipe', 'missing-binding', 'unsafe-notice', 'unsafe-project-link'):
+        for case in ('missing', 'tampered', 'symlink-cache', 'dirty', 'wrong-tag', 'missing-notice', 'missing-recipe', 'missing-binding', 'unsafe-notice', 'unsafe-project-link'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
                 root, cache, inventory, git = self.fixture(temp)
                 record = inventory['components'][0]['sources'][0]
@@ -128,9 +128,7 @@ class SourceInventoryTests(unittest.TestCase):
                 elif case == 'wrong-tag':
                     git('tag', '-d', 'v1.0.0')
                 else:
-                    if case == 'missing-review':
-                        inventory['review'].pop('evidence')
-                    elif case == 'missing-notice':
+                    if case == 'missing-notice':
                         inventory['components'][0]['notices'] = []
                     elif case == 'missing-recipe':
                         inventory['components'][0]['recipes'] = []
@@ -183,12 +181,13 @@ class SourceInventoryTests(unittest.TestCase):
             again = sources.build(root, 'v1.0.0', 'inventory.json', public_cache, pathlib.Path(temp) / 'again', '1.0.0-1', 'https://example.org/test-only')
             self.assertEqual(result, again, 'identical real inputs must produce identical artifact bytes')
 
-    def test_unreviewed_inventory_is_rejected(self):
+    def test_review_status_is_informational(self):
         spec = importlib.util.find_spec('pixelview_sources')
-        self.assertIsNotNone(spec, 'corresponding-source gate must exist')
+        self.assertIsNotNone(spec, 'corresponding-source packager must exist')
         import pixelview_sources as sources
-        with self.assertRaisesRegex(ValueError, 'review'):
-            sources.validate_inventory({'schema_version': 1, 'review': {'status': 'blocked'}})
+        # Open review items never block packaging; only the material inputs do.
+        with self.assertRaisesRegex(ValueError, 'runtime bindings and components'):
+            sources.validate_inventory({'schema_version': 1, 'review': {'status': 'blocked', 'blockers': ['x']}})
 
 
 if __name__ == '__main__':

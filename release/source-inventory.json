@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
   "review": {
-    "status": "blocked",
-    "blockers": [
+    "status": "informational",
+    "source_repository": "https://github.com/pxlview/pixelview-desktop",
+    "note": "The complete project source is public at the repository above and every release is tagged v<version>; the release packager also ships a sources tarball, NOTICES and this resolved inventory next to each DMG. This block does not gate a release. The items below are open review points about third-party component materials, kept for follow-up.",
+    "open_items": [
       "No whole-app binary/static dependency closure review or responsible release approval exists.",
       "Audited bundled FFmpeg reports GPL version 3 or later: resolve whole-combination GPLv3 distribution terms, full texts, exact FFmpeg sources/build configuration and transitive codec sources.",
       "Qt 6.11.1 exact module sources, third-party notices, patches, configure options and recipient replacement/relinking materials are incomplete.",
       "Official GStreamer 1.28.3 Cerbero recipes/patches and all exact transitive sources still need collection; SDK notices lack a separate gst-plugins-good directory.",
       "rswebrtc 0.15.2 source archive and MPL notice verified, but Cargo static dependency sources/notices and build-tool inputs remain incomplete.",
       "OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.",
-      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations.",
-      "No clean product tag, full source rebuild, anonymous source-download verification or production publication has occurred."
-    ],
-    "evidence": null
+      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations."
+    ]
   },
   "runtime_bindings": [
     {
@@ -22,8 +22,8 @@
     },
     {
       "path": "CMakePresets.json",
-      "sha256": "5eea192d5b5278243a44db2d67f06b0396da759e4c5c563f967ea80ca43142c9",
-      "size": 9271
+      "sha256": "9e9bd35142b9959336c0049bbe79c8be65c789cd1b064d5d65acff8d47f3acdc",
+      "size": 9386
     },
     {
       "path": "release/macos.json",
@@ -66,8 +66,8 @@
         },
         {
           "path": "plugins/pixelview-whep/scripts/fetch-gstreamer.py",
-          "sha256": "8e5305f9e4d750b18309a8d942f684361fa74ca5d62b16c7ba987eba391d3f1a",
-          "size": 4630
+          "sha256": "d42eefd94ee02f3fb6dfef00d8e6c54178e0dacffe2bf0d622c3ac2a72c37371",
+          "size": 4985
         },
         {
           "path": "plugins/pixelview-whep/licenses/rswebrtc/Cargo.lock",

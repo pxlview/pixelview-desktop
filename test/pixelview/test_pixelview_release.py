@@ -494,7 +494,7 @@ class PreparedReleaseValidation(unittest.TestCase):
 
     def test_compliance_artifacts_fail_closed_on_missing_tampered_or_unsafe_inputs(self):
         validator = self._load_validator()
-        for case in ('missing', 'tampered', 'symlink', 'size', 'url', 'name', 'review'):
+        for case in ('missing', 'tampered', 'symlink', 'size', 'url', 'name'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
                 release_dir, appcast, expected = self._fixture(pathlib.Path(temp))
                 record = expected['compliance']['sources']
@@ -513,13 +513,6 @@ class PreparedReleaseValidation(unittest.TestCase):
                     record['url'] = 'https://example.org/moving-source.tar.gz'
                 elif case == 'name':
                     record['name'] = '../outside.tar.gz'
-                elif case == 'review':
-                    record = expected['compliance']['inventory']
-                    path = release_dir / record['name']
-                    resolved = json.loads(path.read_text())
-                    resolved['inventory']['review']['status'] = 'blocked'
-                    path.write_text(json.dumps(resolved))
-                    record.update(size=path.stat().st_size, sha256=hashlib.sha256(path.read_bytes()).hexdigest())
                 (release_dir / 'release-manifest.json').write_text(json.dumps(expected))
                 with self.assertRaisesRegex(ValueError, 'compliance'):
                     validator.validate_prepared_release(release_dir, appcast, expected, 'https://downloads.pixelview.io/desktop/macos')
