@@ -151,7 +151,14 @@ done
 
 source_commit="$(git rev-parse HEAD)"
 [[ -z "$(git status --porcelain)" ]] || die "working tree must be clean"
-[[ "$(git rev-parse "$tag^{commit}" 2>/dev/null || true)" == "$source_commit" ]] || die "tag $tag must exist at HEAD before preparing or publishing"
+if [[ "$mode" == publish-latest ]]; then
+  # Re-pointing latest/ happens after publication, possibly from later commits:
+  # the tag must still name the commit the prepared DMG was built from.
+  [[ "$(git rev-parse "$tag^{commit}" 2>/dev/null || true)" == "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_commit"])' "$root/dist/macos/releases/$version-$build_number/release-manifest.json" 2>/dev/null || true)" ]] \
+    || die "tag $tag must name the commit recorded in the prepared release manifest"
+else
+  [[ "$(git rev-parse "$tag^{commit}" 2>/dev/null || true)" == "$source_commit" ]] || die "tag $tag must exist at HEAD before preparing or publishing"
+fi
 git cat-file -e "$obs_base_commit^{commit}" 2>/dev/null || die "OBS base commit is unavailable locally"
 git merge-base --is-ancestor "$obs_base_commit" "$source_commit" || die "OBS base commit is not an ancestor of the release"
 
@@ -521,9 +528,12 @@ prepare_release() {
   temporary_stage="$stage"
   ditto "$app_path" "$stage/Pixelview Desktop.app"
   ln -s /Applications "$stage/Applications"
-  cp "$root/COPYING" "$root/AUTHORS" "$stage/"
-  cp "$compliance_stage/Pixelview-Desktop-$release_id-NOTICES.txt" "$stage/THIRD-PARTY-NOTICES.txt"
-  cat > "$stage/RELEASE.txt" <<EOF
+  # Keep the install window to the app and the Applications shortcut; the
+  # license material ships in its own folder so it stays visible but tidy.
+  mkdir -p "$stage/Licenses"
+  cp "$root/COPYING" "$root/AUTHORS" "$stage/Licenses/"
+  cp "$compliance_stage/Pixelview-Desktop-$release_id-NOTICES.txt" "$stage/Licenses/THIRD-PARTY-NOTICES.txt"
+  cat > "$stage/Licenses/RELEASE.txt" <<EOF
 Pixelview Desktop $version (build $build_number)
 Architecture: arm64
 Source: $source_repository/tree/$tag
