@@ -81,5 +81,22 @@
         }
       ]
     }
+  ],
+  "excluded_submodules": [
+    {
+      "path": "deps/libdshowcapture/src",
+      "commit": "8878638324393815512f802640b0d5ce940161f1",
+      "reason": "Windows-only DirectShow capture library; not built into the macOS app and not checked out in the release tree"
+    },
+    {
+      "path": "plugins/obs-browser",
+      "commit": "3f0a2cdf378939ebe3c6f9ab36d4ea100c25aac2",
+      "reason": "Browser source is disabled in the Pixelview macOS build (ENABLE_BROWSER=OFF); submodule not checked out"
+    },
+    {
+      "path": "plugins/obs-websocket",
+      "commit": "1ef34bf48110c2a18184e50e41cd0b1a855e2147",
+      "reason": "obs-websocket is disabled in the Pixelview macOS build (ENABLE_WEBSOCKET=OFF); submodule not checked out"
+    }
   ]
 }
