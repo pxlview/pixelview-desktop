@@ -84,6 +84,7 @@ class PixelviewReleaseMetadata(unittest.TestCase):
 
         frontend_cmake = (ROOT / "frontend/CMakeLists.txt").read_text()
         self.assertIn('PIXELVIEW_VERSION=\\"${PIXELVIEW_VERSION}\\"', frontend_cmake)
+        self.assertIn('PIXELVIEW_BUILD_NUMBER=\\"${PIXELVIEW_BUILD_NUMBER}\\"', frontend_cmake)
         self.assertIn('PIXELVIEW_OBS_BASE_VERSION=\\"${PIXELVIEW_OBS_BASE_VERSION}\\"', frontend_cmake)
         self.assertIn('PIXELVIEW_OBS_BASE_DESCRIBE=\\"${PIXELVIEW_OBS_BASE_DESCRIBE}\\"', frontend_cmake)
         main = (ROOT / "frontend/obs-main.cpp").read_text()

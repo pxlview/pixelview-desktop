@@ -331,6 +331,7 @@ private:
 	OBSScene pixelviewReceiveScene;
 	QTimer *pixelviewReceiveTimer = nullptr;
 	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
+	void ShowPixelviewAbout(); // Pixelview modification, 2026-09-14: version in About.
 	void InitPixelviewDesktop(QWidget *sidebar);
 	void ConnectPixelviewDesktop();
 	void PairPixelviewDesktop();

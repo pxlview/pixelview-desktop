@@ -1428,6 +1428,19 @@ void OBSBasic::OBSInit()
 	}
 }
 
+// Pixelview modification: native About dialog with the product version, 2026-09-14.
+void OBSBasic::ShowPixelviewAbout()
+{
+	QMessageBox::about(this, QStringLiteral("About Pixelview Desktop"),
+			   QStringLiteral("<h3>Pixelview Desktop</h3>"
+					  "<p>Version %1 (build %2)</p>"
+					  "<p>Based on OBS Studio %3</p>"
+					  "<p>Pixelview Desktop is independently maintained and derived from OBS Studio. "
+					  "See License information for licensing details.</p>")
+				   .arg(QString::fromUtf8(PIXELVIEW_VERSION), QString::fromUtf8(PIXELVIEW_BUILD_NUMBER),
+					QString::fromUtf8(PIXELVIEW_OBS_BASE_VERSION)));
+}
+
 // Pixelview modification: dedicated offline license viewer, 2026-09-05.
 void OBSBasic::ShowPixelviewLicense()
 {
@@ -1548,6 +1561,11 @@ void OBSBasic::InitPixelview()
 #else
 	auto *appMenu = menuBar()->addMenu(QStringLiteral("Pixelview Desktop"));
 #endif
+	// AboutRole moves this into the native application menu on macOS.
+	auto *about = appMenu->addAction(QStringLiteral("About Pixelview Desktop"));
+	about->setMenuRole(QAction::AboutRole);
+	connect(about, &QAction::triggered, this, &OBSBasic::ShowPixelviewAbout);
+	appMenu->addSeparator();
 #ifdef ENABLE_SPARKLE_UPDATER
 	ui->actionCheckForUpdates->setText(QStringLiteral("Check for Updates…"));
 	ui->actionCheckForUpdates->setMenuRole(QAction::NoRole);
@@ -2857,7 +2875,7 @@ void OBSBasic::UpdateEditMenu()
 
 void OBSBasic::UpdateTitleBar()
 {
-	setWindowTitle(QStringLiteral("Pixelview Desktop"));
+	setWindowTitle(QStringLiteral("Pixelview Desktop ") + QString::fromUtf8(PIXELVIEW_VERSION));
 }
 
 OBSBasic *OBSBasic::Get()

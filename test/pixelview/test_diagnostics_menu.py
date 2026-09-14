@@ -42,8 +42,9 @@ class OBSBasic : public QMainWindow {
  Q_OBJECT
 public:
  Ui::OBSBasic storage; Ui::OBSBasic *ui = &storage;
- int logs=0, view=0, crashes=0, licenses=0;
+ int logs=0, view=0, crashes=0, licenses=0, abouts=0;
  void ShowPixelviewLicense() { ++licenses; }
+ void ShowPixelviewAbout() { ++abouts; }
  void InitMenu() {
 PRODUCTION
  }
@@ -80,7 +81,7 @@ int main(int argc, char **argv) {
  logs->hide();
  w.ui->actionShowLogs->trigger(); w.ui->actionViewCurrentLog->trigger();
  assert(w.logs == 1 && w.view == 1);
- QStringList expected;
+ QStringList expected{"About Pixelview Desktop"};
 #if defined(TEST_APPLE) || defined(TEST_WINDOWS)
  assert(w.ui->menuCrashLogs == crashes && help->actions().contains(crashes->menuAction()));
  assert(crashes->isEnabled() && crashes->menuAction()->isVisible());
@@ -99,10 +100,11 @@ int main(int argc, char **argv) {
  expected << "License information…" << "Quit Pixelview Desktop";
  assert(visible(help) == expected);
  for (auto *a : help->actions()) {
+  if (a->text() == "About Pixelview Desktop") { assert(a->menuRole() == QAction::AboutRole); a->trigger(); }
   if (a->text() == "License information…") { assert(a->menuRole() == QAction::NoRole); a->trigger(); }
   if (a->text() == "Quit Pixelview Desktop") assert(a->menuRole() == QAction::QuitRole);
  }
- assert(w.licenses == 1);
+ assert(w.licenses == 1 && w.abouts == 1);
  std::cout << "native menu/platform/dispatch/license passed\n";
 }
 '''.replace('PRODUCTION', production)

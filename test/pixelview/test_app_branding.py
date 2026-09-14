@@ -16,9 +16,12 @@ class AppBranding(unittest.TestCase):
         self.assertIn('setApplicationDisplayName(QStringLiteral("Pixelview Desktop"))', app)
         self.assertNotIn('setApplicationName(', app)
         main = source('frontend/widgets/OBSBasic.cpp')
-        self.assertIn('setWindowTitle(QStringLiteral("Pixelview Desktop"))', main)
+        self.assertIn('setWindowTitle(QStringLiteral("Pixelview Desktop ") + QString::fromUtf8(PIXELVIEW_VERSION))', main)
         self.assertIn('addMenu(QStringLiteral("Pixelview Desktop"))', main)
         self.assertIn('QStringLiteral("Quit Pixelview Desktop")', main)
+        about = main.split('void OBSBasic::ShowPixelviewAbout()', 1)[1].split('\nvoid ', 1)[0]
+        for required in ('QMessageBox::about(', 'PIXELVIEW_VERSION', 'PIXELVIEW_BUILD_NUMBER', 'PIXELVIEW_OBS_BASE_VERSION'):
+            self.assertIn(required, about)
 
     def test_macos_bundle_display_and_native_icon_keep_identity(self):
         cmake = source('cmake/macos/helpers.cmake').split('if(target STREQUAL obs-studio)', 1)[1].split('get_property(obs_dependencies', 1)[0]
