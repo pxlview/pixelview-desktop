@@ -264,6 +264,18 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	rows->addStretch(1);
 	pixelviewReceiver = std::make_unique<pixelview::PixelviewReceiver>();
 	pixelviewReceiver->onStopped = [this] { DisconnectPixelviewReceiveMedia(); };
+	pixelviewReceiver->onKicked = [this](const QString &session) {
+		// Remember the kick locally so Start receiving refuses this session again.
+		// A plain user-config entry, deliberately only a deterrent: the server
+		// accepts a fresh login, and an operator can clear it by editing user.ini.
+		auto *config = App()->GetUserConfig();
+		QStringList blocked = QString::fromUtf8(config_get_string(config, "PixelviewReceive", "BlockedSessions")).split(',', Qt::SkipEmptyParts);
+		if (!session.isEmpty() && !blocked.contains(session)) blocked.append(session);
+		config_set_string(config, "PixelviewReceive", "BlockedSessions", blocked.join(',').toUtf8().constData());
+		config_save_safe(config, "tmp", nullptr);
+		if (isClosing() || pixelviewShutdownPending) return;
+		SetPixelviewReceiveStatus(QStringLiteral("Removed from session %1 by its host. This receiver cannot rejoin it.").arg(session), ReceiveStatusTone::Error);
+	};
 	pixelviewReceiver->onChanged = [this] {
 		if (isClosing() || pixelviewShutdownPending) return;
 		using State = pixelview::PixelviewReceiver::State;
@@ -445,6 +457,11 @@ void OBSBasic::StartPixelviewReceive()
 	if (!pixelviewReceiving || !pixelviewReceiver || PixelviewModeBusy()) return;
 	const QString id = pixelviewReceiveId->text().trimmed(), name = pixelviewReceiveName->text().trimmed();
 	if (id.isEmpty() || name.isEmpty()) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Enter a session ID and receiver name."), ReceiveStatusTone::Error); return; }
+	if (QString::fromUtf8(config_get_string(App()->GetUserConfig(), "PixelviewReceive", "BlockedSessions")).split(',', Qt::SkipEmptyParts).contains(id)) {
+		pixelviewReceiveFrames = 0;
+		SetPixelviewReceiveStatus(QStringLiteral("This receiver was removed from session %1 by its host and cannot rejoin it.").arg(id), ReceiveStatusTone::Error);
+		return;
+	}
 	if (!pixelviewReceiver->setOrigin(QUrl(PixelviewReceiveOrigin()), pixelview::localDevelopmentEnabled())) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Invalid backend origin."), ReceiveStatusTone::Error); return; }
 	if (pixelviewReceivePasswordOrigin != PixelviewReceiveOrigin()) {
 		SavePixelviewReceive(); // Apply the existing origin-bound password reset before snapshotting work.

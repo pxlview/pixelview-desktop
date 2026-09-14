@@ -43,6 +43,9 @@ public:
  std::function<void(const QString &)> onEndpoint;
  std::function<void()> onStopped;
  std::function<void()> onChanged;
+ // The host removed this viewer; argument is the session id. Delivered after the
+ // controller has stopped and entered the Error state.
+ std::function<void(const QString &)> onKicked;
 private:
  void change(State, const QString &);
  void authenticate();

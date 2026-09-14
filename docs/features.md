@@ -178,6 +178,13 @@ behaviour is:
 - Login denials map to fixed messages (wrong ID/password or deleted session; viewer limit reached;
   session ended). Server error bodies and URLs never appear in the UI.
 
+### Session end
+
+A host removal (`SOCKET_USER_KICKED`) stops receiving with "Removed from this session by its host."
+A deleted session (`SOCKET_SESSION_DELETED`, also what the expiry cron sends) stops receiving with
+"This session has ended. It was deleted or expired on Pixelview." and the backend refuses the next
+login with "Session archived". Both were verified live against the local backend.
+
 ### Viewer flow
 
 `pixelview::PixelviewReceiver` (QtCore + NSURLSession) implements the web player's viewer flow:

@@ -119,7 +119,14 @@ void PixelviewReceiver::message(const QByteArray &body)
  if(body.size()>262144 || error.error!=QJsonParseError::NoError || !doc.isObject()) {fail("Invalid receiver control response.");return;}
  const auto o=doc.object(); const auto kind=o["mutation"].toString();
  if(kind.isEmpty()) {fail("Invalid receiver control response.");return;}
- if(kind=="SOCKET_TOKEN_EXPIRED" || kind=="SOCKET_TOKEN_INVALID" || kind=="SOCKET_USER_KICKED" || kind=="SOCKET_SESSION_DELETED") {disconnected(1008);return;}
+ if(kind=="SOCKET_USER_KICKED") {
+  const QString session=sessionId; // stop() clears it.
+  fail("Removed from this session by its host.");
+  if(onKicked) onKicked(session);
+  return;
+ }
+ if(kind=="SOCKET_SESSION_DELETED") {fail("This session has ended. It was deleted or expired on Pixelview.");return;}
+ if(kind=="SOCKET_TOKEN_EXPIRED" || kind=="SOCKET_TOKEN_INVALID") {disconnected(1008);return;}
  if(kind=="SOCKET_SEND_PING") {if(current==State::Ready) deadline.start(65000);send("PONG_RESPONSE"); return;}
  if(kind=="SOCKET_ADD_VIEWER_WEB" && current==State::Registering) {
   if(o["data"].toObject()["status"]!="success") {fail("Receiver registration rejected."); return;}

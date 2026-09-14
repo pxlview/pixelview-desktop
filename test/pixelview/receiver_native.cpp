@@ -86,13 +86,18 @@ int main(int argc,char **argv){
  r.onStopped=[&]{r.stop();}; f->events.message(R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})");
  assert(!endpoint.contains("??"));f->events.closed(1006);r.stop();assert(r.state()==PixelviewReceiver::State::Idle);
  // Existing token-expiry/control rejection mapping remains distinct from login.
+ QStringList kicked; r.onKicked=[&](const QString &session){kicked<<session; assert(r.state()==PixelviewReceiver::State::Error);};
  for(const auto &kind : {"SOCKET_TOKEN_EXPIRED", "SOCKET_TOKEN_INVALID", "SOCKET_USER_KICKED", "SOCKET_SESSION_DELETED"}) {
   r.start("s","p","n");
   f->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a"})");
   f->events.message(QJsonDocument(QJsonObject{{"mutation",kind}}).toJson());
   assert(r.state()==PixelviewReceiver::State::Error);
-  assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
+  if(QString(kind)=="SOCKET_USER_KICKED") assert(r.status()=="Removed from this session by its host.");
+  else if(QString(kind)=="SOCKET_SESSION_DELETED") assert(r.status()=="This session has ended. It was deleted or expired on Pixelview.");
+  else assert(r.status()=="Receiver authorization expired or rejected. Start again to sign in.");
  }
+ assert(kicked==QStringList{"s"}); // Only a host kick reports the session; expiry/deletion do not.
+ r.onKicked={};
  for(int code : {1000,1002,1003,1007,1008,4400,4401,4403,4408,4409,4001}) {
   r.start("s","p","n"); f->events.closed(code);
   assert(r.state()==PixelviewReceiver::State::Error);
