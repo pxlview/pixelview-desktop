@@ -152,7 +152,8 @@ Current: `pixelview_version` `0.0.1`, `pixelview_build_number` `1`, `obs_base_ve
 ```sh
 release/pixelview-macos.sh --validate-config   # public metadata; no credentials
 release/pixelview-macos.sh --prepare           # build, sign, notarize, staple, appcast; no upload
-release/pixelview-macos.sh --publish           # upload prepared assets to R2, appcast last
+release/pixelview-macos.sh --publish           # upload prepared assets to R2, appcast, then latest/
+release/pixelview-macos.sh --publish-latest    # only re-point latest/ at the prepared, already public release
 release/pixelview-macos.sh --all               # prepare then publish; tag must already be pushed
 ```
 
@@ -169,6 +170,8 @@ Build progression: the public appcast must return HTTP 200 with a valid signatur
 ```text
 desktop/macos/
   appcast-arm64.xml                              Cache-Control: no-cache, max-age=0, must-revalidate
+  latest/Pixelview-Desktop-arm64.dmg             mutable server-side copy of the current release DMG (no-cache)
+  latest/latest.json                             version, build, tag, commit, sha256, size, immutable URL (no-cache)
   releases/<version>-<build>/                    Cache-Control: public,max-age=31536000,immutable
     Pixelview-Desktop-<version>-build<n>-arm64.dmg
     Pixelview-Desktop-<version>-build<n>-arm64.dmg.sha256
@@ -195,7 +198,7 @@ desktop/macos/
 4. `release/pixelview-macos.sh --publish`; approve the 1Password prompt.
 5. Download the DMG through the public domain on a clean Mac and repeat step 3.
 6. Update cycle: publish an older internal build and a higher-build replacement on a temporary staging feed (not a permanent beta channel); verify **Help → Check for Updates…** downloads, replaces, relaunches and preserves configuration and Keychain state.
-7. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub. Publish the GitHub release and announce only after every check passes; point the download button at `https://downloads.pixelview.io/desktop/macos/releases/<version>-<build>/Pixelview-Desktop-<version>-build<n>-arm64.dmg`.
+7. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub. Publish the GitHub release and announce only after every check passes; the website download button can point permanently at `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg` (updated by publish, after the appcast; `--publish-latest` re-points it for a prepared release that is already public), and `latest/latest.json` gives the version, checksum and immutable URL for display.
 
 The repository cannot create the R2 bucket/domain/token, the App Store Connect API key, the GitHub tag/release or the acceptance Mac; those are operator steps.
 

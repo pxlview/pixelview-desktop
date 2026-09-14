@@ -209,6 +209,15 @@ class PixelviewLocalRelease(unittest.TestCase):
         self.assertIn('-o "$release_dir/appcast-arm64.xml"', script)
         self.assertNotIn("--output appcast-arm64.xml", script)
         self.assertLess(script.index("upload_release_assets\n"), script.index("upload_appcast\n"))
+        # The stable latest/ pointers are written only after the feed is live, always no-cache,
+        # by a server-side copy that never re-uploads or touches immutable release keys.
+        self.assertLess(script.index("upload_appcast\n"), script.index("publish_latest\n"))
+        latest = script.split("publish_latest() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("latest/Pixelview-Desktop-arm64.dmg", latest)
+        self.assertIn("no-cache, max-age=0, must-revalidate", latest)
+        self.assertIn("x-amz-copy-source", script.split("r2_copy_object() {", 1)[1].split("\n}\n", 1)[0])
+        self.assertNotIn("If-None-Match", latest)
+        self.assertIn("--publish-latest", (ROOT / "release/pixelview-macos.sh").read_text())
         self.assertNotIn("OBS-Codesign-Password", script)
         self.assertNotIn("obsproject.com", script)
 

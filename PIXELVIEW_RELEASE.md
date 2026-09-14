@@ -26,4 +26,4 @@ inherited OBS `README.rst` stays unchanged for upstream attribution.
    pairing, streaming and receiving, then verify
    Sparkle replacement and relaunch from an older build against a staging
    feed, with configuration and Keychain state preserved.
-8. Update the product download link to the published DMG.
+8. The website download link is the stable `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg`; publish re-points it after the appcast.

@@ -39,7 +39,8 @@ usage() {
 Usage: cmake/macos/pixelview-release.sh [option]
 
   --prepare          Build, sign, notarize, staple, and generate appcast (default)
-  --publish          Publish an already prepared release to R2
+  --publish          Publish an already prepared release to R2 (then update latest/)
+  --publish-latest   Re-point latest/ at the prepared release already public on R2
   --all              Prepare, then publish to R2
   --validate-config  Validate public release metadata without credentials
   --release-notes F  Use an HTML release-notes file
@@ -85,6 +86,7 @@ while (($#)); do
   case "$1" in
     --prepare) mode=prepare; shift ;;
     --publish) mode=publish; shift ;;
+    --publish-latest) mode=publish-latest; shift ;;
     --all) mode=all; shift ;;
     --validate-config) mode=validate; shift ;;
     --release-notes)
@@ -750,6 +752,84 @@ upload_appcast() {
   printf 'Published %s after verifying immutable release assets.\n' "$appcast_url"
 }
 
+r2_copy_object() {
+  # Server-side copy inside the bucket (no re-upload); REPLACE applies the new headers.
+  local endpoint="$1" bucket="$2" source_key="$3" target_key="$4" content_type="$5" cache_control="$6" release_tag="$7"
+  local response_file http_status
+  response_file="$(mktemp /tmp/pixelview-r2-copy.XXXXXX)"
+  if ! http_status="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
+    --aws-sigv4 'aws:amz:auto:s3' \
+    --config <(printf 'user = "%s:%s"\n' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY") \
+    --request PUT \
+    --header "x-amz-copy-source: /$bucket/$source_key" \
+    --header "x-amz-metadata-directive: REPLACE" \
+    --header "x-amz-meta-pixelview-release: $release_tag" \
+    --header "Content-Type: $content_type" \
+    --header "Cache-Control: $cache_control" \
+    "$endpoint/$bucket/$target_key")"; then
+    rm -f "$response_file"
+    die "R2 copy transport failed: $target_key"
+  fi
+  if [[ "$http_status" != 200 ]] || ! grep -q "<CopyObjectResult" "$response_file"; then
+    printf 'R2 copy failed for %s (HTTP %s):\n' "$target_key" "$http_status" >&2
+    while IFS= read -r line; do printf '%s\n' "$line" >&2; done < "$response_file"
+    rm -f "$response_file"
+    die "R2 rejected the copy"
+  fi
+  rm -f "$response_file"
+}
+
+publish_latest() {
+  # Stable, mutable pointers for the website: a server-side copy of the current
+  # release DMG under a fixed name, plus latest.json describing it. Written only
+  # after the immutable assets and the appcast are live, always overwriting.
+  # A standalone re-point runs after publication, so the full prepared-release
+  # check (feed behind this build, manifest re-derived from HEAD) no longer
+  # applies; verify the prepared DMG against its own manifest instead.
+  [[ -f "$dmg_path" && -f "$release_dir/release-manifest.json" ]] || die "prepared release assets are incomplete"
+  local manifest_sha manifest_release
+  manifest_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' "$release_dir/release-manifest.json")"
+  manifest_release="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_id"])' "$release_dir/release-manifest.json")"
+  [[ "$manifest_release" == "$release_id" ]] || die "prepared manifest is for $manifest_release, not $release_id"
+  [[ "$(shasum -a 256 "$dmg_path" | cut -d ' ' -f 1)" == "$manifest_sha" ]] || die "prepared DMG does not match its manifest"
+  codesign --verify --verbose=2 "$dmg_path" || die "DMG code signature is invalid"
+  xcrun stapler validate "$dmg_path" >/dev/null || die "DMG has no valid notarization ticket"
+  local endpoint="${PIXELVIEW_R2_ENDPOINT:-}"
+  local bucket="${PIXELVIEW_R2_BUCKET:-}"
+  [[ "$endpoint" =~ ^https://[0-9a-fA-F]{32}\.r2\.cloudflarestorage\.com$ ]] || die "PIXELVIEW_R2_ENDPOINT is invalid"
+  [[ -n "$bucket" ]] || die "PIXELVIEW_R2_BUCKET is invalid"
+  local source_key="$r2_prefix/releases/$release_id/$dmg_name"
+  local latest_dmg_key="$r2_prefix/latest/Pixelview-Desktop-arm64.dmg"
+  local latest_json_key="$r2_prefix/latest/latest.json"
+  local no_cache='no-cache, max-age=0, must-revalidate'
+  # The immutable source must already be public and identical to the prepared DMG.
+  local public_file
+  public_file="$(mktemp /tmp/pixelview-r2-latest.XXXXXX)"
+  curl -fL --retry 3 -o "$public_file" "$download_base_url/releases/$release_id/$dmg_name" || die "release DMG is not public yet; publish the release first"
+  cmp -s "$public_file" "$dmg_path" || { rm -f "$public_file"; die "public release DMG differs from the prepared DMG"; }
+  r2_copy_object "$endpoint" "$bucket" "$source_key" "$latest_dmg_key" application/x-apple-diskimage "$no_cache" "$tag"
+  local latest_json
+  latest_json="$(mktemp /tmp/pixelview-latest-json.XXXXXX)"
+  python3 - "$release_dir/release-manifest.json" "$download_base_url" "$release_id" "$dmg_name" "$(stat -f %z "$dmg_path")" "$appcast_url" > "$latest_json" <<'PYEOF'
+import json, sys
+manifest = json.load(open(sys.argv[1])); base, release_id, dmg, size, appcast = sys.argv[2:7]
+print(json.dumps({
+    "version": manifest["version"], "build": manifest["build_number"], "release_id": release_id,
+    "tag": manifest["source_tag"], "commit": manifest["source_commit"],
+    "dmg": f"{base}/releases/{release_id}/{dmg}", "latest_dmg": f"{base}/latest/Pixelview-Desktop-arm64.dmg",
+    "sha256": manifest["sha256"], "size": int(size), "notes": f"{base}/releases/{release_id}/{dmg[:-4]}.html",
+    "appcast": appcast, "minimum_macos": "14.0", "architecture": "arm64",
+}, indent=2))
+PYEOF
+  r2_conditional_put "$endpoint" "$bucket" "$latest_json_key" "$latest_json" application/json "$no_cache" "x-amz-meta-pixelview-release: $tag"
+  curl -fL --retry 3 -H 'Cache-Control: no-cache' -o "$public_file" "$download_base_url/latest/Pixelview-Desktop-arm64.dmg"
+  cmp -s "$public_file" "$dmg_path" || { rm -f "$public_file" "$latest_json"; die "public latest DMG differs from the release DMG"; }
+  curl -fL --retry 3 -H 'Cache-Control: no-cache' -o "$public_file" "$download_base_url/latest/latest.json"
+  cmp -s "$public_file" "$latest_json" || { rm -f "$public_file" "$latest_json"; die "public latest.json differs"; }
+  rm -f "$public_file" "$latest_json"
+  printf 'Latest pointer: %s/latest/Pixelview-Desktop-arm64.dmg -> %s\n' "$download_base_url" "$release_id"
+}
+
 acquire_release_lock
 case "$mode" in
   prepare) prepare_release ;;
@@ -758,11 +838,18 @@ case "$mode" in
     verify_sparkle_key
     upload_release_assets
     upload_appcast
+    publish_latest
+    ;;
+  publish-latest)
+    ensure_sparkle_tools
+    verify_sparkle_key
+    publish_latest
     ;;
   all)
     prepare_release
     upload_release_assets
     upload_appcast
+    publish_latest
     ;;
   *) die "unsupported mode" ;;
 esac

@@ -10,7 +10,7 @@ notary_file="$root/release/macos-notary.1password.env"
 mode=""
 for argument in "$@"; do
   case "$argument" in
-    --prepare|--publish|--all|--validate-config) mode="$argument" ;;
+    --prepare|--publish|--publish-latest|--all|--validate-config) mode="$argument" ;;
   esac
 done
 
@@ -22,6 +22,9 @@ case "$mode" in
     secret_files=(--env-file "$notary_file")
     ;;
   --publish)
+    secret_files=(--env-file "$r2_file")
+    ;;
+  --publish-latest)
     secret_files=(--env-file "$r2_file")
     ;;
   --all)
