@@ -575,6 +575,28 @@ int main(int argc,char **argv) {
     if(button->isVisible() && mapped(button,sidebar).intersects(footer)) assert(button==transport);
   }
  }
+ { // The DeckLink output mode is the receive frame-rate setting; the sender FPS is never touched.
+  assert(w.pixelviewReceiving && w.pixelviewReceivePrecision);
+  const auto sender=w.pixelviewSendVideo;
+  auto request=[&](int num,int den,QString *error=nullptr) {
+   calldata_t cd; calldata_init(&cd); calldata_set_int(&cd,"num",num); calldata_set_int(&cd,"den",den);
+   assert(proc_handler_call(obs_get_proc_handler(),"pixelview_receive_frame_rate",&cd));
+   const bool ok=calldata_bool(&cd,"ok"); if(error) *error=QString::fromUtf8(calldata_string(&cd,"error"));
+   calldata_free(&cd); return ok;
+  };
+  assert(request(24,1) && fixtureVideo.fps_num==24 && fixtureVideo.fps_den==1);
+  assert(fixtureVideo.output_format==VIDEO_FORMAT_P010 && "Only the rate changes on the receive canvas");
+  assert(w.pixelviewSendVideo.fps_num==sender.fps_num && w.pixelviewSendVideo.fps_den==sender.fps_den);
+  assert(config_get_uint(application.config,"PixelviewReceive","FPSNum")==24 && config_get_uint(application.config,"PixelviewReceive","FPSDen")==1);
+  QString error; w.nativeBusy=true; // Another active output/settings dialog: refuse with an operator-readable reason.
+  assert(!request(25,1,&error) && !error.isEmpty() && fixtureVideo.fps_num==24 && w.pixelviewReceiveFPSNum==24);
+  w.nativeBusy=false;
+  assert(!request(0,1,&error) && !error.isEmpty() && fixtureVideo.fps_num==24);
+  assert(request(48,2) && fixtureVideo.fps_num==24 && "An equal rational needs no video reset");
+  assert(request(24000,1001) && fixtureVideo.fps_num==24000 && fixtureVideo.fps_den==1001);
+  w.SelectPixelviewMode(0); assert(fixtureVideo.fps_num==sender.fps_num && fixtureVideo.fps_den==sender.fps_den);
+  w.SelectPixelviewMode(1); assert(fixtureVideo.fps_num==24000 && fixtureVideo.fps_den==1001 && "Receiving reopens at the card's rate");
+ }
  OBSSourceAutoRelease active=obs_get_output_source(0);
  assert(active==obs_scene_get_source(w.pixelviewReceiveScene)); active=nullptr;
  assert(!w.PixelviewManagedSource());

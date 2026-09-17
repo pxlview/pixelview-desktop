@@ -249,6 +249,15 @@ receive mode; the switch is refused while any output is active, and a failed rol
 mode changes until restart. Preview, fullscreen and the rendered DeckLink output remain eight-bit
 boundaries.
 
+The receive canvas frame rate is independent of the Sending FPS (which is locked while unpaired):
+the DeckLink output mode is the single receive frame-rate setting. Before a receive Start the output
+UI reads the selected mode's exact rate (`mode_frame_rate`) and asks the frontend
+(`pixelview_receive_frame_rate`) to reset only the receive canvas to it; the rate is remembered in
+`PixelviewReceive/FPSNum|FPSDen` so the next switch to Receiving opens at the card's rate. The
+sender's `Video/FPS*` profile values are never written and are restored with the rest of the sender
+video state when leaving receive mode. Until an output mode has been started the receive canvas
+follows the sender rate. The reset is refused, with an on-screen reason, while another output is active.
+
 ### DeckLink program output
 
 - The Receiving panel's Output group holds the native DeckLink output settings (device, mode,
@@ -263,8 +272,13 @@ boundaries.
 - `receive_status` returns a `reason`; the UI watchdog (100 ms poll) logs
   `[decklink-output-ui] receive output stopped after N ms: <reason>`, resumes automatically when the
   source is ready again, bounded to three consecutive attempts that fail within ten seconds of
-  starting (budget reset on every bind), and logs `Start ignored: <reason>` for a refused manual
-  Start.
+  starting (budget reset on every bind).
+- A Start that does not happen (manual or automatic) shows a non-blocking "The DeckLink output did
+  not start" warning with the reason as well as the `Start failed: <reason>` log line: nothing
+  received yet, no saved settings, device or mode unavailable, the canvas could not follow the mode's
+  rate, or the output's own `last_error` (device not connected, mode unavailable, card busy, and in
+  Sending mode a frame-rate mismatch naming the canvas rate and the output mode). Only the
+  launch-time AutoStart stays log-only when it is merely early (no video yet).
 
 ### Fullscreen and projector
 
@@ -365,6 +379,8 @@ gate) fail in the current environment regardless of changes.
 
 ### Not verified
 
+- The receive canvas following the DeckLink output mode's frame rate, and the on-screen Start
+  failure warning, on real DeckLink hardware (offline harness and compile only).
 - Physical SDI picture inspection of the receiver's DeckLink output (cadence, colour, long-run A/V
   sync); the stall that used to trip the old 500 ms watchdog was not reproduced on demand.
 - Media start from the app to the local engine after the control-socket rewrite (no capture input

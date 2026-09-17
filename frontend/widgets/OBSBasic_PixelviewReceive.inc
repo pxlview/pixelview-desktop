@@ -2,6 +2,7 @@
 #include <QToolButton>
 #include <QInputDialog>
 #include <QTabBar>
+#include <QPointer>
 #include <QLineEdit>
 #include <QSysInfo>
 #include <QUuid>
@@ -44,6 +45,11 @@ bool OBSBasic::SetPixelviewReceivePrecision(bool enabled)
   target.output_format = VIDEO_FORMAT_P010;
   target.colorspace = VIDEO_CS_709;
   target.range = VIDEO_RANGE_PARTIAL;
+  // The receive canvas runs at the DeckLink output rate; the sender FPS stays in pixelviewSendVideo.
+  if (pixelviewReceiveFPSNum && pixelviewReceiveFPSDen) {
+   target.fps_num = pixelviewReceiveFPSNum;
+   target.fps_den = pixelviewReceiveFPSDen;
+  }
  } else {
   target.graphics_module = pixelviewSendRenderModule.c_str();
  }
@@ -136,6 +142,29 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	auto *config = App()->GetUserConfig();
 	config_set_default_int(config, "PixelviewReceive", "BufferMs", 100);
 	pixelviewReceiveBufferMs = qBound(0, (int)config_get_int(config, "PixelviewReceive", "BufferMs"), 2000);
+	// Last DeckLink output rate; unset follows the sender rate until an output mode is started.
+	const uint64_t savedFPSNum = config_get_uint(config, "PixelviewReceive", "FPSNum");
+	const uint64_t savedFPSDen = config_get_uint(config, "PixelviewReceive", "FPSDen");
+	if (savedFPSNum && savedFPSDen && savedFPSNum <= 120000 && savedFPSDen <= 10000 && savedFPSNum / savedFPSDen <= 120) {
+		pixelviewReceiveFPSNum = (uint32_t)savedFPSNum;
+		pixelviewReceiveFPSDen = (uint32_t)savedFPSDen;
+	}
+	// Procs cannot be removed: register once and reach the live main window through a guarded pointer.
+	static QPointer<OBSBasic> frameRateOwner;
+	static bool frameRateProc = false;
+	if (!frameRateOwner) frameRateOwner = this;
+	if (!frameRateProc) {
+		frameRateProc = true;
+		proc_handler_add(obs_get_proc_handler(), "void pixelview_receive_frame_rate(int num, int den, out bool ok, out string error)",
+			[](void *, calldata_t *cd) {
+				QString error = QStringLiteral("Pixelview is closing.");
+				const long long num = calldata_int(cd, "num"), den = calldata_int(cd, "den");
+				const bool ok = frameRateOwner && num > 0 && den > 0 && num <= UINT32_MAX && den <= UINT32_MAX &&
+					frameRateOwner->SetPixelviewReceiveFrameRate((uint32_t)num, (uint32_t)den, error);
+				calldata_set_bool(cd, "ok", ok);
+				calldata_set_string(cd, "error", ok ? "" : error.toUtf8().constData());
+			}, nullptr);
+	}
 	pixelviewReceiveId->setText(QString::fromUtf8(config_get_string(config, "PixelviewReceive", "SessionId")));
 	QString name = QString::fromUtf8(config_get_string(config, "PixelviewReceive", "Name"));
 	pixelviewReceiveName->setText(name.isEmpty() ? QSysInfo::machineHostName() : name);
@@ -217,6 +246,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	auto *decklink = new QPushButton(QStringLiteral("DeckLink output settings…"), pixelviewReceivingPanel);
 	decklink->setObjectName(QStringLiteral("pixelviewDecklinkOutputSettings"));
 	decklink->ensurePolished(); decklink->setFixedHeight(36);
+	decklink->setToolTip(QStringLiteral("Device and output mode. While receiving, the output mode also sets the canvas frame rate, independent of the Sending frame rate."));
 	connect(decklink, &QPushButton::clicked, this, [this] {
 		if (isClosing() || pixelviewShutdownPending) return;
 		auto *module = obs_get_module("decklink-output-ui");
@@ -362,6 +392,45 @@ void OBSBasic::RefreshPixelviewReceiveHint()
 	SetPixelviewReceiveStatus(idMissing || nameMissing ? QStringLiteral("Enter the session ID and a receiver name, then click Start receiving.") :
 		passwordMissing ? QStringLiteral("Enter the session password, then click Start receiving.") :
 		QStringLiteral("Ready. Click Start receiving."), ReceiveStatusTone::Idle);
+}
+
+// The DeckLink output mode is the receive frame-rate setting: the output UI asks
+// for the selected mode's exact rate before it starts, so canvas and card always
+// match and the (pairing-locked) sender FPS is never involved or modified.
+bool OBSBasic::SetPixelviewReceiveFrameRate(uint32_t num, uint32_t den, QString &error)
+{
+	if (!num || !den) { error = QStringLiteral("The DeckLink output mode reported no frame rate."); return false; }
+	obs_video_info current = {};
+	const bool live = pixelviewReceivePrecision && obs_get_video_info(&current);
+	if (live && (!current.fps_num || !current.fps_den || uint64_t(current.fps_num) * den != uint64_t(num) * current.fps_den)) {
+		if (isClosing() || pixelviewReceivePrecisionFault || PixelviewReceiveVideoBusy()) {
+			error = QStringLiteral("The canvas frame rate cannot change while another output is active. Stop it and start the DeckLink output again.");
+			return false;
+		}
+		// Copy the module name: obs_reset_video tears down the previous video state.
+		const std::string currentModule = current.graphics_module ? current.graphics_module : "";
+		current.graphics_module = currentModule.c_str();
+		obs_video_info target = current;
+		target.fps_num = num;
+		target.fps_den = den;
+		if (obs_reset_video(&target) != OBS_VIDEO_SUCCESS) {
+			if (obs_reset_video(&current) != OBS_VIDEO_SUCCESS) pixelviewReceivePrecisionFault = true;
+			error = QStringLiteral("Video could not be reset to the DeckLink output frame rate. Restart Pixelview if the preview stays black.");
+			RefreshPixelviewModes();
+			return false;
+		}
+		blog(LOG_INFO, "Pixelview receive canvas now follows the DeckLink output mode at %u/%u fps", num, den);
+	}
+	if (pixelviewReceiveFPSNum != num || pixelviewReceiveFPSDen != den) {
+		// Remembered so the next switch to Receiving starts at the card's rate.
+		pixelviewReceiveFPSNum = num;
+		pixelviewReceiveFPSDen = den;
+		auto *config = App()->GetUserConfig();
+		config_set_uint(config, "PixelviewReceive", "FPSNum", num);
+		config_set_uint(config, "PixelviewReceive", "FPSDen", den);
+		config_save_safe(config, "tmp", nullptr);
+	}
+	return true;
 }
 
 void OBSBasic::SelectPixelviewMode(int index)

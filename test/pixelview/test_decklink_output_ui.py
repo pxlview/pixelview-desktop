@@ -150,7 +150,7 @@ enum obs_frontend_event { OBS_FRONTEND_EVENT_FINISHED_LOADING, OBS_FRONTEND_EVEN
 struct Data { bool auto_start; } mainSettings{false}, stalePreview{true};
 using OBSData = Data *;
 int mainStarts=0, previewStarts=0, previewLoads=0, mainStops=0;
-bool main_output_running=false, preview_output_running=false, shutting_down=false;
+bool main_output_running=false, preview_output_running=false, shutting_down=false, launch_auto_start=false;
 OBSData load_settings() { return &mainSettings; }
 OBSData load_preview_settings() { ++previewLoads; return &stalePreview; }
 bool obs_data_get_bool(OBSData data, const char *key) { assert(!strcmp(key,"auto_start")); return data->auto_start; }
@@ -166,6 +166,7 @@ int main() {
     mainSettings.auto_start=true;
     OBSEvent(OBS_FRONTEND_EVENT_FINISHED_LOADING, nullptr);
     assert(mainStarts == 1 && previewStarts == 0 && previewLoads == 0);
+    assert(!launch_auto_start); // Quiet-launch scope ends with the launch attempt.
     OBSEvent(OBS_FRONTEND_EVENT_EXIT, nullptr);
     assert(shutting_down && mainStops == 1 && !main_output_running);
 }

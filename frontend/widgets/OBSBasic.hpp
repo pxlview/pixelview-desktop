@@ -318,6 +318,9 @@ private:
 	bool SetPixelviewReceivePrecision(bool enabled);
 	bool pixelviewReceivePrecision = false, pixelviewReceivePrecisionFault = false;
 	obs_video_info pixelviewSendVideo = {};
+	// Receive canvas rate follows the DeckLink output mode, never the (pairing-locked) sender FPS; 0/0 = not chosen yet.
+	uint32_t pixelviewReceiveFPSNum = 0, pixelviewReceiveFPSDen = 0;
+	bool SetPixelviewReceiveFrameRate(uint32_t num, uint32_t den, QString &error);
 	std::string pixelviewSendRenderModule;
 	QTabBar *pixelviewModeTabs = nullptr;
 	QWidget *pixelviewSendingPanel = nullptr, *pixelviewReceivingPanel = nullptr;

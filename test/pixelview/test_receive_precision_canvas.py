@@ -18,7 +18,7 @@ class ReceivePrecision(unittest.TestCase):
   switch=body(text,'SetPixelviewReceivePrecision')
   code=r'''#include <cassert>
 #include <string>
-struct obs_video_info {const char *graphics_module="opengl"; int output_format=1, colorspace=2,range=3;};
+struct obs_video_info {const char *graphics_module="opengl"; int output_format=1, colorspace=2,range=3; unsigned fps_num=30,fps_den=1;};
 constexpr int VIDEO_FORMAT_P010=10,VIDEO_CS_709=709,VIDEO_RANGE_PARTIAL=1,OBS_VIDEO_SUCCESS=0;
 obs_video_info current; int resets=0,failures=0; bool busy=false;
 bool obs_get_video_info(obs_video_info *v){*v=current;return true;}
@@ -26,6 +26,7 @@ int obs_reset_video(obs_video_info *v){++resets;if(failures){--failures;return -
 struct Canvas {
  bool pixelviewReceivePrecision=false,pixelviewReceivePrecisionFault=false;
  obs_video_info pixelviewSendVideo={}; std::string pixelviewSendRenderModule;
+ unsigned pixelviewReceiveFPSNum=0,pixelviewReceiveFPSDen=0;
  bool PixelviewReceiveVideoBusy(){return busy;}
  bool set(bool enabled){BODY}
 };
@@ -36,6 +37,10 @@ int main(){Canvas c; auto original=current;
  busy=true;int old=resets;assert(!c.set(false)&&resets==old&&c.pixelviewReceivePrecision);busy=false;
  failures=1;assert(!c.set(false)&&c.pixelviewReceivePrecision&&current.output_format==10);
  assert(c.set(false)&&!c.pixelviewReceivePrecision&&current.output_format==original.output_format&&current.colorspace==original.colorspace&&current.range==original.range);
+ assert(current.fps_num==30&&current.fps_den==1); // Unset receive FPS follows the sender.
+ c.pixelviewReceiveFPSNum=24;c.pixelviewReceiveFPSDen=1;
+ assert(c.set(true)&&current.fps_num==24&&current.fps_den==1); // Receive FPS is independent of the sender's 30.
+ assert(c.set(false)&&current.fps_num==30&&current.fps_den==1); // Sender FPS restored untouched.
  failures=2;assert(!c.set(true)&&c.pixelviewReceivePrecisionFault);
 }
 '''.replace('BODY',switch)

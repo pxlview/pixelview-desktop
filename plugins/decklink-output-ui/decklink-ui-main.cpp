@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QAction>
 #include <QTimer>
+#include <QMessageBox>
+#include <QPointer>
 #include <util/util.hpp>
 #include <util/platform.h>
 #include <media-io/video-io.h>
@@ -60,6 +62,58 @@ void output_stop();
 static void decklink_ui_tick(void *param, float sec);
 static void decklink_ui_render(void *param);
 
+// Pixelview: a start that does not happen is an operator-visible error, not
+// only a log line. Non-blocking so the watchdog timer never nests a modal loop.
+// The launch-time auto start may simply be early (nothing received yet): that
+// stays a log line, the watchdog starts the output once video arrives.
+static bool launch_auto_start = false;
+static void start_failed(const QString &reason, bool waiting = false)
+{
+	blog(LOG_WARNING, "[decklink-output-ui] Start failed: %s", reason.toUtf8().constData());
+	if (shutting_down || (waiting && launch_auto_start)) {
+		return;
+	}
+	static QPointer<QMessageBox> box;
+	if (box) {
+		box->close();
+	}
+	QWidget *parent = doUI && doUI->isVisible() ? static_cast<QWidget *>(doUI)
+						    : static_cast<QWidget *>(obs_frontend_get_main_window());
+	box = new QMessageBox(QMessageBox::Warning, QStringLiteral("DeckLink output"),
+			      QStringLiteral("The DeckLink output did not start.\n\n") + reason, QMessageBox::Ok, parent);
+	box->setAttribute(Qt::WA_DeleteOnClose);
+	box->open();
+}
+
+static QString output_error(obs_output_t *output)
+{
+	const char *error = obs_output_get_last_error(output);
+	return error && *error ? QString::fromUtf8(error)
+			       : QStringLiteral("The DeckLink device refused to start. Check the device, the output "
+						"mode and that no other application is using the card.");
+}
+
+// In receive mode the selected output mode is the frame-rate setting: the
+// frontend moves its receive canvas to the mode's exact rate before the start.
+static bool follow_mode_frame_rate(obs_output_t *output, QString &error)
+{
+	calldata_t cd;
+	calldata_init(&cd);
+	bool ok = true;
+	if (proc_handler_call(obs_output_get_proc_handler(output), "mode_frame_rate", &cd) &&
+	    calldata_int(&cd, "num") > 0 && calldata_int(&cd, "den") > 0 &&
+	    proc_handler_call(obs_get_proc_handler(), "pixelview_receive_frame_rate", &cd)) {
+		ok = calldata_bool(&cd, "ok");
+		if (!ok) {
+			const char *text = calldata_string(&cd, "error");
+			error = text && *text ? QString::fromUtf8(text)
+					      : QStringLiteral("The canvas could not follow the output mode's frame rate.");
+		}
+	}
+	calldata_free(&cd);
+	return ok;
+}
+
 void output_stop()
 {
 	receive_auto_pending = false;
@@ -99,18 +153,21 @@ void output_start()
 	}
 	OBSSourceAutoRelease selected = receive_mode ? obs_weak_source_get_source(receive_source) : nullptr;
 	if (receive_mode && !selected) {
-		blog(LOG_WARNING, "[decklink-output-ui] Start ignored: no receive source is bound");
+		start_failed(QStringLiteral("Nothing is being received yet. Click Start receiving first; the output "
+					    "can start once video arrives."),
+			     true);
 		return;
 	}
 	OBSData settings = load_settings();
 	if (settings == nullptr) {
-		blog(LOG_WARNING, "[decklink-output-ui] Start ignored: no saved DeckLink output settings");
+		start_failed(QStringLiteral("No DeckLink output settings are saved yet. Choose a device and mode first."));
 	}
 
 	if (settings != nullptr) {
 		obs_output_t *const output = obs_output_create("decklink_output", "decklink_output", settings, NULL);
 		if (!output) {
-			blog(LOG_WARNING, "[decklink-output-ui] Start ignored: could not create the DeckLink output");
+			start_failed(QStringLiteral("The DeckLink output could not be created. Check the Desktop Video "
+						    "installation."));
 			return;
 		}
 		if (receive_mode) {
@@ -126,9 +183,16 @@ void output_start()
 				     calldata_bool(&cd, "bound");
 			calldata_free(&cd);
 			if (!bound) {
-				blog(LOG_WARNING, "[decklink-output-ui] Start ignored: %s",
-				     ready ? "the output refused to bind the receive source"
-					   : "the receive source is not ready (waiting for fresh video)");
+				start_failed(ready ? QStringLiteral("The output refused to bind the received stream.")
+						   : QStringLiteral("No fresh video is being received yet. Start receiving "
+								    "and wait for the picture, then start the output."),
+					     !ready);
+				obs_output_release(output);
+				return;
+			}
+			QString rateError;
+			if (!follow_mode_frame_rate(output, rateError)) {
+				start_failed(rateError);
 				obs_output_release(output);
 				return;
 			}
@@ -139,6 +203,7 @@ void output_start()
 					doUI->OutputStateChanged(main_output_running);
 				}
 				if (!main_output_running) {
+					start_failed(output_error(output));
 					output_stop();
 				}
 				return;
@@ -194,10 +259,12 @@ void output_start()
 			}
 
 			if (!started) {
+				start_failed(output_error(context.output));
 				output_stop();
 			}
 		} else {
-			blog(LOG_WARNING, "[decklink-output-ui] Start ignored: the selected DeckLink device or mode is unavailable");
+			start_failed(QStringLiteral("The selected DeckLink device or output mode is unavailable. Check the "
+						    "card and choose a device and mode in DeckLink output settings."));
 			obs_output_release(output);
 		}
 	}
@@ -321,7 +388,9 @@ static void OBSEvent(enum obs_frontend_event event, void *)
 		OBSData settings = load_settings();
 
 		if (settings && obs_data_get_bool(settings, "auto_start")) {
+			launch_auto_start = true;
 			output_start();
+			launch_auto_start = false;
 		}
 
 		// Pixelview exposes program output only. Never load legacy Preview

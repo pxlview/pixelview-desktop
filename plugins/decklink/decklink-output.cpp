@@ -34,6 +34,21 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 							 calldata_bool(cd, "native")));
 		},
 		decklinkOutput);
+	// Pixelview: the receive canvas follows the selected output mode's exact rate.
+	proc_handler_add(
+		obs_output_get_proc_handler(output), "void mode_frame_rate(out int num, out int den)",
+		[](void *p, calldata_t *cd) {
+			auto *o = static_cast<DeckLinkOutput *>(p);
+			ComPtr<DeckLinkDevice> device;
+			device.Set(deviceEnum->FindByHash(o->deviceHash.c_str()));
+			DeckLinkDeviceMode *mode = device ? device->FindOutputMode(o->modeID) : nullptr;
+			BMDTimeValue duration = 0;
+			BMDTimeScale scale = 0;
+			const bool ok = mode && mode->GetFrameRate(&duration, &scale) && duration > 0 && scale > 0;
+			calldata_set_int(cd, "num", ok ? scale : 0);
+			calldata_set_int(cd, "den", ok ? duration : 0);
+		},
+		decklinkOutput);
 	proc_handler_add(
 		obs_output_get_proc_handler(output),
 		"void receive_status(out bool healthy, out string reason, out int completed, out int repeats, out int dropped, out int late, out int audio_empty_polls, out int partial_writes)",
@@ -118,10 +133,12 @@ static bool decklink_output_start(void *data)
 
 	if (!obs_get_audio_info(&aoi)) {
 		blog(LOG_WARNING, "No active audio");
+		obs_output_set_last_error(decklink->GetOutput(), "No active audio is available for the DeckLink output.");
 		return false;
 	}
 
 	if (decklink->deviceHash.empty()) {
+		obs_output_set_last_error(decklink->GetOutput(), "No DeckLink output device is selected.");
 		return false;
 	}
 
@@ -136,11 +153,15 @@ static bool decklink_output_start(void *data)
 	device.Set(deviceEnum->FindByHash(decklink->deviceHash.c_str()));
 
 	if (!device) {
+		obs_output_set_last_error(decklink->GetOutput(),
+					  "The selected DeckLink device is not connected. Check the card and Desktop Video.");
 		return false;
 	}
 
 	DeckLinkDeviceMode *mode = device->FindOutputMode(decklink->modeID);
 	if (!mode) {
+		obs_output_set_last_error(decklink->GetOutput(),
+					  "The selected output mode is not available on this DeckLink device.");
 		return false;
 	}
 
@@ -151,7 +172,13 @@ static bool decklink_output_start(void *data)
 	}
 
 	if (!mode->IsEqualFrameRate(ovi.fps_num, ovi.fps_den)) {
-		LOG(LOG_ERROR, "Start failed: FPS mismatch!");
+		LOG(LOG_ERROR, "Start failed: FPS mismatch! Canvas runs at %u/%u fps, output mode is %s", ovi.fps_num,
+		    ovi.fps_den, mode->GetName().c_str());
+		const std::string error = "Frame rate mismatch: the canvas runs at " +
+					  std::to_string(double(ovi.fps_num) / ovi.fps_den).substr(0, 6) +
+					  " fps but the DeckLink output mode is " + mode->GetName() +
+					  ". Choose an output mode with the canvas frame rate.";
+		obs_output_set_last_error(decklink->GetOutput(), error.c_str());
 		return false;
 	}
 
@@ -160,6 +187,9 @@ static bool decklink_output_start(void *data)
 	device->SetKeyerMode(decklink->keyerMode);
 
 	if (!decklink->Activate(device, decklink->modeID)) {
+		obs_output_set_last_error(
+			decklink->GetOutput(),
+			"The DeckLink device could not start this output mode. It may be in use by another application.");
 		return false;
 	}
 
@@ -172,6 +202,7 @@ static bool decklink_output_start(void *data)
 
 	if (!obs_output_begin_data_capture(decklink->GetOutput(), 0)) {
 		decklink->Deactivate();
+		obs_output_set_last_error(decklink->GetOutput(), "The DeckLink output could not start capturing the program.");
 		return false;
 	}
 
