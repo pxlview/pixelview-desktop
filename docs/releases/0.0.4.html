@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pixelview Desktop 0.0.4</title></head>
+<body>
+  <h1>Pixelview Desktop 0.0.4</h1>
+  <p>Fourth Apple Silicon release.</p>
+  <ul>
+    <li>Pairing as a sender works again: the app now ships the TLS component its pairing request needs. Without it every pairing attempt failed before reaching Pixelview.</li>
+    <li>Streaming to Pixelview works again: the app no longer rejects the stream address Pixelview returns after accepting the WHIP offer.</li>
+    <li>A pairing that fails now says why on screen (Pixelview unreachable, invalid or expired code, too many attempts), and pairing, Keychain and connection outcomes are written to the application log. Pairing codes and device tokens are never logged.</li>
+    <li>The short 6-character pairing codes from Pixelview admin are accepted; surrounding spaces are ignored.</li>
+  </ul>
+  <p>Pixelview Desktop is a modified distribution based on OBS Studio development snapshot <code>32.2.1-66-g6b3e55072</code> (commit <code>6b3e550729f125b6c5b3767df88c08f5aef9d264</code>). It is not an official OBS Project release.</p>
+  <p>Corresponding source: <a href="https://github.com/pxlview/pixelview-desktop/tree/v0.0.4">https://github.com/pxlview/pixelview-desktop/tree/v0.0.4</a></p>
+</body>
+</html>
