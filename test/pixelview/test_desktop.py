@@ -47,14 +47,14 @@ class Desktop(unittest.TestCase):
         self.assertNotIn('CURLOPT_UNRESTRICTED_AUTH, 1L',whip)
         self.assertNotIn('CURLOPT_FOLLOWLOCATION, 1L',whip)
         self.assertNotIn('val.c_str()', '\n'.join(x for x in whip.splitlines() if 'do_log' in x))
-        self.assertIn('pixelviewWhipSameOrigin(endpoint_url, resource_url)',whip)
+        self.assertIn('pixelviewWhipResourceAllowed(endpoint_url, resource_url, bearer_issuer_origin)',whip)
         self.assertNotIn('err.what()',whip)
         self.assertNotIn('error_buffer[0] ?',whip)
         adv=(ROOT/'frontend/utility/AdvancedOutput.cpp').read_text()
         self.assertIn('strcmp(obs_service_get_type(service), "whip_custom")',adv)
         self.assertIn('pixelviewClosingSocket', (ROOT/'frontend/widgets/OBSBasic_PixelviewDesktop.inc').read_text())
         self.assertIn('WHIP resource origin rejected',whip)
-        self.assertGreaterEqual(whip.count('pixelviewWhipSameOrigin(endpoint_url, resource_url)'),2)
+        self.assertGreaterEqual(whip.count('pixelviewWhipResourceAllowed(endpoint_url, resource_url, bearer_issuer_origin)'),2)
         self.assertIn('resource_url.clear();',whip[whip.index('bool WHIPOutput::Init()'):whip.index('bool WHIPOutput::Init()')+300])
         main=(ROOT/'frontend/widgets/OBSBasic.cpp').read_text()
         self.assertIn('pixelviewLease.fail("Stopping before shutdown.")',main)
@@ -92,6 +92,15 @@ class Desktop(unittest.TestCase):
 #include <cassert>
 int main(){
 assert(pixelviewWhipSameOrigin("https://example.com/a","https://example.com:443/b?session=x"));
+assert(pixelviewWhipOrigin("https://user:secret@api4.example.com/ingress/1/whip?token=t#f")=="https://api4.example.com:443");
+assert(pixelviewWhipOrigin("not a url")=="invalid");
+// Production shape: POST to the WHIP host, absolute Location on the paired backend behind /ingress.
+assert(pixelviewWhipResourceAllowed("https://whip.example.com/1","https://api4.example.com/ingress/1/whip","https://api4.example.com"));
+assert(pixelviewWhipResourceAllowed("https://whip.example.com/1","https://whip.example.com/1/whip",""));
+assert(!pixelviewWhipResourceAllowed("https://whip.example.com/1","https://api4.example.com/ingress/1/whip",""));
+assert(!pixelviewWhipResourceAllowed("https://whip.example.com/1","https://evil.com/ingress/1/whip","https://api4.example.com"));
+assert(!pixelviewWhipResourceAllowed("https://whip.example.com/1","http://api4.example.com/ingress/1/whip","https://api4.example.com"));
+assert(!pixelviewWhipResourceAllowed("https://whip.example.com/1","https://user:pass@api4.example.com/x","https://api4.example.com"));
 assert(!pixelviewWhipSameOrigin("https://example.com/a","http://example.com/b"));
 assert(!pixelviewWhipSameOrigin("https://example.com/a","https://evil.com/b"));
 assert(!pixelviewWhipSameOrigin("https://example.com/a","https://user:pass@example.com/b"));

@@ -273,6 +273,9 @@ bool WHIPOutput::Init()
 
 	bearer_token = obs_service_get_connect_info(service, OBS_SERVICE_CONNECT_INFO_BEARER_TOKEN);
 
+	OBSDataAutoRelease service_settings = obs_service_get_settings(service);
+	bearer_issuer_origin = obs_data_get_string(service_settings, "pixelview_bearer_issuer_origin");
+
 	return true;
 }
 
@@ -544,8 +547,12 @@ bool WHIPOutput::Connect()
 
 	resource_url = url;
 	curl_free(url);
-	if (!pixelviewWhipSameOrigin(endpoint_url, resource_url)) {
+	if (!pixelviewWhipResourceAllowed(endpoint_url, resource_url, bearer_issuer_origin)) {
 		do_log(LOG_ERROR, "WHIP resource origin rejected (credential boundary; URLs redacted)");
+		do_log(LOG_ERROR, "WHIP endpoint origin %s, bearer issuer origin %s, Location origin %s: the resource must be on one of the first two",
+		       pixelviewWhipOrigin(endpoint_url).c_str(),
+		       bearer_issuer_origin.empty() ? "none" : pixelviewWhipOrigin(bearer_issuer_origin).c_str(),
+		       pixelviewWhipOrigin(resource_url).c_str());
 		resource_url.clear();
 		curl_url_cleanup(url_builder);
 		doCleanup(OBS_OUTPUT_INVALID_STREAM);
@@ -625,7 +632,7 @@ void WHIPOutput::StartThread()
 
 void WHIPOutput::SendDelete()
 {
-	if (!resource_url.empty() && !pixelviewWhipSameOrigin(endpoint_url, resource_url)) {
+	if (!resource_url.empty() && !pixelviewWhipResourceAllowed(endpoint_url, resource_url, bearer_issuer_origin)) {
 		resource_url.clear();
 		return;
 	}

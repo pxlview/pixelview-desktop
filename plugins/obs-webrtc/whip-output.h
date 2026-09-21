@@ -52,6 +52,7 @@ private:
 
 	std::string endpoint_url;
 	std::string bearer_token;
+	std::string bearer_issuer_origin; // Paired Pixelview backend; empty for a user-configured service.
 	std::string resource_url;
 
 	std::atomic<bool> running;

@@ -80,6 +80,8 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   OBSDataAutoRelease settings=obs_data_create();
   obs_data_set_string(settings,"server",endpoint.toUtf8().constData());
   obs_data_set_string(settings,"bearer_token",bearer.toUtf8().constData());
+  // Engines behind the backend's /ingress proxy name the backend origin in their WHIP Location.
+  obs_data_set_string(settings,"pixelview_bearer_issuer_origin",pixelviewOrigin.toString().toUtf8().constData());
   OBSServiceAutoRelease whip=obs_service_create("whip_custom","Pixelview leased WHIP",settings,nullptr);
   if(!whip) {pixelviewLease.fail("WHIP output is unavailable in this build. SRT is not supported.");return;}
   pixelviewPreviousService=service; service=whip;
