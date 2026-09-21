@@ -32,8 +32,17 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
  pixelviewConnectionStatus=new QLabel(QStringLiteral("Not paired"),sidebar);
  pixelviewConnectionStatus->setWordWrap(true); sidebar->layout()->addWidget(pixelviewConnectionStatus);
  connect(pair,&QPushButton::clicked,this,&OBSBasic::PairPixelviewDesktop);
- pixelviewDesktop->status=[this](QString message){if(!isClosing() && !pixelviewShutdownPending) pixelviewConnectionStatus->setText(message);};
- pixelviewLease.error=[this](QString message){pixelviewConnectionStatus->setText(message);RefreshPixelviewReconnect();};
+ // Every pairing/connection outcome shown on screen is also in the application log.
+ pixelview::setKeychainLog([](const char *line){blog(LOG_WARNING,"%s",line);});
+ pixelviewDesktop->log=[](QString message){blog(LOG_INFO,"Pixelview: %s",message.toUtf8().constData());};
+ pixelviewDesktop->status=[this](QString message){
+  blog(LOG_INFO,"Pixelview: pairing status: %s",message.toUtf8().constData());
+  if(!isClosing() && !pixelviewShutdownPending) pixelviewConnectionStatus->setText(message);
+ };
+ pixelviewLease.error=[this](QString message){
+  blog(LOG_WARNING,"Pixelview: control connection: %s",message.toUtf8().constData());
+  pixelviewConnectionStatus->setText(message);RefreshPixelviewReconnect();
+ };
  pixelviewLease.send=[this](QJsonObject o){pixelviewDesktop->sendSocket(QJsonDocument(o).toJson(QJsonDocument::Compact));};
  pixelviewLease.report=[this]{
   // Exactly the documented pong shape; anything the server cannot validate
@@ -105,6 +114,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    pixelviewExpectedIdentity.clear();pixelviewUnpairRetry=false;
    pixelviewAuthDeadline=0; pixelviewReconnectAt=0;
    pixelviewBackoff=1000;
+   blog(LOG_INFO,"Pixelview: control socket ready (node %s, desktop %s)",pixelviewIdentity.nodeId.toUtf8().constData(),pixelviewIdentity.desktopId.toUtf8().constData());
    pixelviewConnectionStatus->setText(pixelviewLease.pending ? QStringLiteral("Requesting stream start…") :
     pixelviewLease.started ? QStringLiteral("Control reconnected · streaming") : QStringLiteral("Connected · ready to stream"));
   }
@@ -290,6 +300,7 @@ void OBSBasic::ConnectPixelviewDesktop()
  pixelviewLease.development=pixelviewDev;
  QUrl ws=pixelviewOrigin;ws.setScheme(ws.scheme()=="https" ? "wss":"ws");ws.setPath("/desktop/ws");
  pixelviewAuthDeadline=pixelviewClock.elapsed()+10000;
+ blog(LOG_INFO,"Pixelview: connecting control socket to %s",ws.toString().toUtf8().constData());
  pixelviewDesktop->openSocket(ws,token);
 }
 void OBSBasic::PixelviewDeviceRevoked()

@@ -8,6 +8,8 @@ namespace pixelview {
 // Fixed categories only: never print query dictionaries, account/origin, tokens,
 // OS-provided error text, or item contents. Interaction-required is not proof
 // that the login Keychain is locked (a trusted-application ACL can also deny it).
+// The application routes these lines into its log; offline tools keep stderr only.
+inline void (*keychainLogSink)(const char *line)=nullptr;
 inline OSStatus keychainStatus(const char *operation, OSStatus status)
 {
  if(status==errSecSuccess || status==errSecItemNotFound) return status;
@@ -20,7 +22,10 @@ inline OSStatus keychainStatus(const char *operation, OSStatus status)
  case errSecUserCanceled: category="user-canceled"; break;
  case errSecDecode: category="invalid-record"; break;
  }
- std::fprintf(stderr,"Pixelview Keychain %s: %s (OSStatus %d)\n",operation,category,int(status));
+ char line[160];
+ std::snprintf(line,sizeof line,"Pixelview Keychain %s: %s (OSStatus %d)",operation,category,int(status));
+ std::fprintf(stderr,"%s\n",line);
+ if(keychainLogSink) keychainLogSink(line);
  return status;
 }
 // LAContext does not suppress trusted-application ACL dialogs in the legacy

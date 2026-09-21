@@ -132,6 +132,9 @@ def verify(app, team, name):
         info = plistlib.load(handle)
     if info.get("CFBundleIdentifier") != "com.pixelview.desktop" or info.get("SUFeedURL"):
         raise RuntimeError("Unexpected bundle identity or enabled updater")
+    # Pairing is the only Qt HTTPS client; without a bundled TLS backend it fails before any request is sent.
+    if not (app / "Contents/PlugIns/tls/libqsecuretransportbackend.dylib").is_file():
+        raise RuntimeError("Qt TLS backend plugin missing from bundle; HTTPS pairing cannot work")
     details = signature_details(app)
     requirement = next((line for line in details.splitlines() if line.startswith("designated =>")), "")
     required = ('identifier "com.pixelview.desktop"', 'anchor apple generic',

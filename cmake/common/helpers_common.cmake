@@ -235,6 +235,9 @@ function(find_qt_plugins)
     iconengines
   )
   list(APPEND qt_plugins_Gui platforminputcontexts)
+  # Pixelview pairing uses QNetworkAccessManager over HTTPS; without a TLS
+  # backend plugin in the bundle every request fails before leaving the machine.
+  list(APPEND qt_plugins_Network tls)
   list(APPEND qt_plugins_Sql sqldrivers)
   list(APPEND qt_plugins_3dRender sceneparsers geometryloaders)
   list(APPEND qt_plugins_3dQuickRender renderplugins)

@@ -88,6 +88,7 @@ void DesktopConnection::closeSocket(bool normal) {
  else [s.task cancel];
  [s.session invalidateAndCancel];
 }
+void setKeychainLog(void (*sink)(const char *line)) { keychainLogSink=sink; }
 }
 
 namespace pixelview {

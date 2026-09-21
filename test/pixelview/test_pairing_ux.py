@@ -193,8 +193,9 @@ int main(int argc,char **argv) {
         import os
         text=DESKTOP.read_text()
         transport=(ROOT/'frontend/utility/PixelviewDesktopConnection.hpp').read_text()
-        completion=transport.split('   if(!ok ||',1)[1].split('\n  });',1)[0]
-        completion=('if(!ok ||'+completion).replace('(this,','(&app,').replace('[requestOrigin,token]','[&,requestOrigin,token]').replace('[this,object,token]','[&,object,token]')
+        # Starts after the HTTP failure branch (reply/status-code diagnostics).
+        completion=transport.split('   exchanging=true; // Includes',1)[1].split('\n  });',1)[0]
+        completion=('exchanging=true; // Includes'+completion).replace('(this,','(&app,').replace('[requestOrigin,token]','[&,requestOrigin,token]').replace('[this,object,token]','[&,object,token]')
         ready=text.split(' pixelviewDesktop->message=[this](QByteArray body){',1)[1].split('\n };',1)[0]
         connect_body=body(text,'ConnectPixelviewDesktop').replace('pixelview::loadDevice','loadDevice')
         code=r'''#include <QtWidgets/QApplication>
@@ -205,12 +206,15 @@ int main(int argc,char **argv) {
 #include "frontend/utility/PixelviewDesktop.hpp"
 #include "frontend/utility/PixelviewKeychainTask.hpp"
 using pixelview::runKeychainUserAction;
+#define LOG_INFO 0
+static void blog(int,const char *,...) {}
 int main(int argc,char **argv) {
  QApplication app(argc,argv);
  QUrl requestOrigin(argc>1 ? argv[1] : "https://fixture.invalid");
  QString secret="existing-secret",statusText,authorizedToken; bool exchanging=false,storageOK=false; int pairedCalls=0;
  pixelview::DesktopIdentity identity;
- auto status=[&](QString s){statusText=s;}; auto paired=[&]{++pairedCalls;};
+ QStringList logged;
+ auto status=[&](QString s){statusText=s;}; auto paired=[&]{++pairedCalls;}; auto log=[&](QString s){logged<<s;};
  auto saveDevice=[&](QString origin,QString token){
   assert(origin==requestOrigin.toString());
   if(!storageOK) return false; secret=token; return true;
@@ -220,6 +224,7 @@ int main(int argc,char **argv) {
  complete(exchange); while(exchanging) app.processEvents();
  assert(pairedCalls==0 && secret=="existing-secret" && identity.nodeId.isEmpty());
  assert(statusText.contains("canceled or failed") && statusText.contains("not removed"));
+ assert(logged.size()==1 && logged[0].contains("Keychain") && !logged[0].contains("new-secret"));
  storageOK=true; complete(exchange); while(exchanging) app.processEvents();
  assert(pairedCalls==1 && secret=="new-secret" && identity.nodeId=="node");
  bool pixelviewShutdownPending=false,pixelviewStopPending=false,pixelviewClosingSocket=false,pixelviewUnpairPending=false;
