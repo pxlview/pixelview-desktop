@@ -93,7 +93,14 @@ static GstSample *audit_pull(GstAppSink *sink)
 #undef obs_source_output_audio
 int main(int argc,char **argv)
 {
- g_assert_cmpint(argc,==,3);setbuf(stdout,NULL);gst_init(NULL,NULL);g_mutex_init(&audit_lock);
+ g_assert_cmpint(argc,==,3);
+ /* Bearer token for the WHEP resource DELETE/PATCH: decoded like the engine's url.Query(). */
+ char *t=endpoint_token("https://api4.example/ingress/1/whep/2?viewer_id=v&token=YWJj-_%3D");g_assert_cmpstr(t,==,"YWJj-_=");wipe(&t);
+ t=endpoint_token("https://api4.example/ingress/1/whep/2?token=a+b");g_assert_cmpstr(t,==,"a b");wipe(&t);
+ g_assert_null(endpoint_token("https://api4.example/ingress/1/whep/2"));
+ g_assert_null(endpoint_token("https://api4.example/ingress/1/whep/2?token="));
+ g_assert_null(endpoint_token("not a url"));
+ setbuf(stdout,NULL);gst_init(NULL,NULL);g_mutex_init(&audit_lock);
  g_assert_true(obs_startup("en-US",NULL,NULL));struct obs_audio_info ai={.samples_per_sec=48000,.speakers=SPEAKERS_STEREO};g_assert_true(obs_reset_audio(&ai));g_assert_true(obs_module_load());
  obs_source_t *source=obs_source_create_private("pixelview_whep_source","isolated-loopback",NULL);g_assert_nonnull(source);
  proc_handler_t *ph=obs_source_get_proc_handler(source);calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint",argv[1]);calldata_set_int(&cd,"latency",50);g_assert_true(proc_handler_call(ph,"connect",&cd));

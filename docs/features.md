@@ -221,8 +221,11 @@ An earlier backend handoff proposing receiver registration over the control sock
   pipeline clock, and the source runs libobs async-unbuffered so frames are not rebuffered twice.
   Eight-bit sources are upconverted to P010 without gaining precision.
 - The patched signaller rejects POST redirects and pins the session `Location` to the accepted
-  response origin. A bus error, EOS or 15 s without video ends the attempt; the plugin has no
-  reconnect loop of its own. Endpoints stay in private memory; OBS-log diagnostics are limited to
+  response origin. The endpoint's `?token=` is also set as the signaller `auth-token`, so session
+  PATCH/DELETE carry `Authorization: Bearer <token>` (the engine's `Location` has no token; engine
+  DELETE accepts the header from pxlview/pv-engine#58, older engines answer 401 and clean the viewer
+  up when the peer connection closes). A bus error, EOS or 15 s without video ends the attempt; the
+  plugin has no reconnect loop of its own. Endpoints stay in private memory; OBS-log diagnostics are limited to
   timeout/EOS and GStreamer domain/code.
 
 ### HEVC 4:2:2 10 refusal
@@ -366,6 +369,10 @@ gate) fail in the current environment regardless of changes.
   publisher through normal ingress, 135 s uninterrupted video/audio in the GUI, mode round trip,
   fullscreen with advancing timecode, Listen/Mute behaviour. Synthetic loopback WHEP decode for
   H.264, HEVC Main/Main10 and VP9 0/2 on the current plugin source.
+- WHEP session DELETE with `Authorization: Bearer` (2026-09-23, local engine with
+  pxlview/pv-engine#58): Stop receiving closed the viewer immediately (`viewer_left` reason
+  `client_closed`, encoder and track removed before the peer connection closed) instead of the
+  earlier `401 missing token`.
 - DeckLink receive output: 1080p24 Main10 to an UltraStudio Monitor 3G from the rebuilt signed
   bundle; a deliberate 15 s stream cut logged the named stop and armed resume; the restarted run
   stayed up 28 minutes. AutoStart was exercised once.

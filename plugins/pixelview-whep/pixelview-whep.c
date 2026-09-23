@@ -180,6 +180,24 @@ static void wipe(char **text)
  while (n--) *p++ = 0;
  g_free(*text); *text = NULL;
 }
+/* The session token from the endpoint's ?token= query, decoded like Go's url.Query() (the
+ * engine's binding), or NULL; caller wipes. */
+static char *endpoint_token(const char *endpoint)
+{
+ GUri *uri = g_uri_parse(endpoint, G_URI_FLAGS_ENCODED_QUERY, NULL);
+ const char *query = uri ? g_uri_get_query(uri) : NULL;
+ GHashTable *params = query ? g_uri_parse_params(query, -1, "&", G_URI_PARAMS_WWW_FORM, NULL) : NULL;
+ const char *token = params ? g_hash_table_lookup(params, "token") : NULL;
+ char *copy = token && *token ? g_strdup(token) : NULL;
+ if (params) {
+  /* Parsed values are secrets too: overwrite before the table frees them. */
+  GHashTableIter it; gpointer key, value; g_hash_table_iter_init(&it, params);
+  while (g_hash_table_iter_next(&it, &key, &value)) if (value) memset(value, 0, strlen(value));
+  g_hash_table_unref(params);
+ }
+ if (uri) g_uri_unref(uri);
+ return copy;
+}
 static bool valid_endpoint(const char *endpoint)
 {
  if (!endpoint || strlen(endpoint) > 16384) return false;
@@ -692,6 +710,11 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
   g_signal_connect_data(signaller, "webrtcbin-ready", G_CALLBACK(webrtc_ready),
    attempt_ref(r->attempt), attempt_unref, 0);
   g_object_set(signaller, "whep-endpoint", endpoint, NULL);
+  /* The resource Location carries no token, so the session DELETE (and PATCH)
+   * authenticate with the standard WHEP Bearer header; same-origin is enforced
+   * by the patched signaller. The engine keeps reading ?token= on POST. */
+  char *token = endpoint_token(endpoint);
+  if (token) { g_object_set(signaller, "auth-token", token, NULL); wipe(&token); }
   g_object_unref(signaller); gst_object_unref(rx);
  }
  GstElement *clock_queue=gst_bin_get_by_name(GST_BIN(pipe),"audio-clock");
