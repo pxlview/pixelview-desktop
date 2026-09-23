@@ -1,5 +1,7 @@
 """Source integration contracts only: no GUI, encoder or network execution."""
+import json
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -66,9 +68,22 @@ class NativeStreamingUI(unittest.TestCase):
         self.assertNotIn('on_actionShowAbout_triggered', init)
         self.assertIn('void ShowPixelviewLicense();', source('widgets/OBSBasic.hpp'))
         dialog = main.split('void OBSBasic::ShowPixelviewLicense()', 1)[1].split('\nvoid ', 1)[0]
+        # Offline: no network stack, no URL opening, no rich text or clickable links.
         for forbidden in ('OBSAbout', 'ShowAbout', 'invokeMethod', 'RemoteTextThread',
-                          'QNetwork', 'https://', 'http://', 'setHtml'):
+                          'QNetwork', 'QDesktopServices', 'openUrl', 'QUrl', 'QTextBrowser',
+                          'setHtml', 'Qt::RichText', 'Qt::AutoText', 'Qt::MarkdownText',
+                          'setOpenExternalLinks', 'setOpenLinks', 'linkActivated',
+                          'LinksAccessibleBy', 'TextBrowserInteraction', 'href', '<a '):
             self.assertNotIn(forbidden, dialog)
+        # The only URL is the canonical corresponding-source repository, shown as plain text.
+        repository = json.loads((ROOT / 'release' / 'macos.json').read_text())['source_repository']
+        self.assertTrue(repository.startswith('https://'))
+        urls = [url.rstrip('.,;:)') for url in re.findall(r'[A-Za-z][A-Za-z0-9+.-]*://[^\s"\\]*', dialog)]
+        self.assertEqual(urls, [repository],
+                         'Only the plain-text source repository URL may appear in the license dialog')
+        self.assertIn('notice->setTextFormat(Qt::PlainText)', dialog)
+        self.assertIn('notice->setTextInteractionFlags(Qt::TextSelectableByMouse | '
+                      'Qt::TextSelectableByKeyboard)', dialog)
         for required in ('new QDialog(this)', 'Qt::WA_DeleteOnClose', 'new QPlainTextEdit',
                          'setReadOnly(true)', 'setPlainText(', 'QDialogButtonBox::Close',
                          '&QDialog::reject', 'dialog->show()',
