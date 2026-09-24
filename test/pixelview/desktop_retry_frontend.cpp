@@ -60,6 +60,7 @@ public:
  bool pixelviewUnpairPending=false,isClosing_=false,pixelviewShutdownPending=false;
  qint64 pixelviewShutdownDeadline=0; QString pixelviewShutdownWait; bool pixelviewForceClose=false;
  bool PixelviewShutdownReady();
+ bool PixelviewDialogLoopsClosed(){return true;} // Gate compiled in test_close_dialog_loop.
  QUrl pixelviewOrigin{"https://fixture.invalid"};bool pixelviewDev=false;
  config_t *activeConfiguration=nullptr;
  int authentications=0,teardowns=0,nativePreparations=0;

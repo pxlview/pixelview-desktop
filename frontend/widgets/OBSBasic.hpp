@@ -388,6 +388,9 @@ private:
 	bool pixelviewForceClose=false;
 	// Starts native shutdown once; true when scene teardown may proceed.
 	bool PixelviewShutdownReady();
+	// False while a child dialog's exec() is still on the stack; asks it to end.
+	bool PixelviewDialogLoopsClosed();
+	bool pixelviewDialogWaitLogged=false;
 	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
 	void PixelviewDeviceRevoked();
 	// The account already unpaired this Mac: finish locally without prompting.

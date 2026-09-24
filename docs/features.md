@@ -375,6 +375,15 @@ configuration.
   and retried every 100 ms. The wait is bounded by `PIXELVIEW_SHUTDOWN_WAIT_MS` (10 s); after it, or
   on `aboutToQuit`, an active stream output is force-stopped and normal scene teardown runs.
   `kill -TERM` goes through the same path.
+- Before that gate, the close also waits while a dialog of the main window is still inside
+  `exec()` (`PixelviewDialogLoopsClosed()`; `exec()` keeps `WA_ShowModal` set until it returns).
+  On macOS a message box runs the native `NSAlert` loop, which also delivers the window's deferred
+  delete, so accepting the close there tore down and freed the window, and the stack-allocated box
+  with it, under the still-running method (quitting with a stream-failure box open aborted in
+  `~OBSBasic`). A visible dialog is closed like Esc, so a question answers No/Cancel, never
+  `NoButton`; a box that quit already hid but whose native loop still runs ("Dialog is not top
+  level modal window") has that loop stopped with the button the close chose (`abortModal` when
+  none). The close retries every 100 ms; `closeWindow` repeats the check except on `aboutToQuit`.
 - An unclean-shutdown sentinel (`.sentinel/run_*`) produces the branded one-button Continue prompt on
   the next launch; it offers neither safe mode nor crash upload and blocks until dismissed.
 - Reconnect summary: sender control socket 1-30 s backoff, media unaffected by control drops,
@@ -389,7 +398,7 @@ configuration.
 ### Compiled and offline tests (`test/pixelview`, `plugins/*/tests`)
 
 The Python drivers compile production source slices (offscreen Qt, Objective-C++ transports against
-loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 223
+loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 225
 tests; `test_icon_assets` (needs Pillow) and `test_pixelview_sources` (corresponding-source inventory
 gate) fail in the current environment regardless of changes.
 
@@ -487,7 +496,11 @@ gate) fail in the current environment regardless of changes.
   all three Apple HEVC profiles and H.264 (no B-frames, 1 s keyframes); loopback SRT smoke with
   mute/listen measured through CoreAudio.
 - Clean shutdown via SIGTERM on the signed bundle: log ends with `Shutting down`, zero leaks, sentinel
-  removed, no crash report. Custom-scheme deep links delivered cold and warm to an isolated app copy.
+  removed, no crash report. With the stream-failure box still open after a WHIP 404 against the
+  local backend (pentest mode, no engine), SIGTERM logged the dialog wait, then shut down with zero
+  leaks, no sentinel and no crash report (previously SIGABRT in `~OBSBasic`); that run did not log
+  "Cannot hide", so the native-loop stop path is covered only by the offscreen harness.
+  Custom-scheme deep links delivered cold and warm to an isolated app copy.
 
 ### Not verified
 

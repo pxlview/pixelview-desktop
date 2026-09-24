@@ -2403,6 +2403,19 @@ void OBSBasic::closeEvent(QCloseEvent *event)
 				  saveGeometry().toBase64().constData());
 	}
 
+	/* Pixelview: blocking dialogs (OBSMessageBox, the QMessageBox statics,
+	 * a stack QDialog::exec) are children of this window whose nested modal
+	 * loop runs inside an OBSBasic method. On macOS a message box runs
+	 * NSAlert's loop, which also delivers this window's deferred delete, so
+	 * accepting now would tear down and free the window, and the stack dialog
+	 * with it, under that method. End the dialog and retry once it unwound. */
+	if (!PixelviewDialogLoopsClosed()) {
+		event->ignore();
+
+		QTimer::singleShot(100, this, &OBSBasic::close);
+		return;
+	}
+
 	if (!isReadyToClose()) {
 		event->ignore();
 
@@ -2665,6 +2678,46 @@ bool OBSBasic::promptToClose()
 	return true;
 }
 
+bool OBSBasic::PixelviewDialogLoopsClosed()
+{
+	// exec() keeps WA_ShowModal set until it returns, even after the dialog
+	// was hidden (application quit hides every window before closing this one).
+	bool open = false, closing = false;
+	QList<QDialog *> hidden;
+	for (QDialog *dialog : findChildren<QDialog *>()) {
+		if (!dialog->testAttribute(Qt::WA_ShowModal))
+			continue;
+		open = true;
+		if (dialog->isVisible()) {
+			// close(), not reject(): a message box then answers with its
+			// escape button (No/Cancel), exactly like Esc. A bare reject()
+			// returns NoButton, which "== No" checks would read as consent.
+			dialog->close();
+			closing = true;
+		} else {
+			hidden << dialog;
+		}
+	}
+	if (!open) {
+		pixelviewDialogWaitLogged = false;
+		return true;
+	}
+#ifdef __APPLE__
+	// A native alert whose hide() failed ("not top level modal window") is
+	// hidden for Qt but still runs NSApp's modal loop. End it with the button
+	// the close already chose, so exec() returns that answer.
+	if (!closing && !hidden.isEmpty()) {
+		auto *box = hidden.size() == 1 ? qobject_cast<QMessageBox *>(hidden.first()) : nullptr;
+		EndMacModalLoop(box && box->clickedButton() ? box->standardButton(box->clickedButton()) : 0);
+	}
+#endif
+	if (!pixelviewDialogWaitLogged) {
+		pixelviewDialogWaitLogged = true;
+		blog(LOG_INFO, "Pixelview: close waiting for an open dialog to return");
+	}
+	return false;
+}
+
 bool OBSBasic::PixelviewShutdownReady()
 {
 	StopPixelviewReceive();
@@ -2721,7 +2774,7 @@ void OBSBasic::closeWindow()
 	}
 	// closeEvent already waited; this only remains false on a forced quit
 	// after the deadline, where the helper has logged and force-stopped.
-	if (!PixelviewShutdownReady()) {
+	if (!PixelviewShutdownReady() || (!pixelviewForceClose && !PixelviewDialogLoopsClosed())) {
 		QTimer::singleShot(100, this, &OBSBasic::closeWindow);
 		return;
 	}

@@ -362,6 +362,29 @@ void InstallNSApplicationSubclass()
     [OBSApplication sharedApplication];
 }
 
+// Ends the innermost native modal loop (NSAlert runModal behind QMessageBox::exec)
+// from a Qt timer inside it, where Qt's own hide() could not stop it. A positive
+// response is the alert button tag (Qt's StandardButton) and is reported as that
+// click; 0 aborts, which Qt reports as a rejection.
+void EndMacModalLoop(long response)
+{
+    if (response > 0) {
+        [NSApp stopModalWithCode:response];
+    } else {
+        [NSApp abortModal];
+    }
+    // Stop requests are only noticed after the modal loop handles an event.
+    NSEvent *wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint
+                                  modifierFlags:0
+                                      timestamp:0
+                                   windowNumber:0
+                                        context:nil
+                                        subtype:0
+                                          data1:0
+                                          data2:0];
+    [NSApp postEvent:wake atStart:YES];
+}
+
 bool HighContrastEnabled()
 {
     return [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldIncreaseContrast];
