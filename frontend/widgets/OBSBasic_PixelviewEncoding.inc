@@ -306,7 +306,7 @@ void OBSBasic::RefreshPixelviewEncoding()
 bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool initializing)
 {
 	if (PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return false;
-	auto fail = [this](const QString &message) { QMessageBox::warning(this, QStringLiteral("Pixelview encoding"), message); return false; };
+	auto fail = [this](const QString &message) { PixelviewWarn(QStringLiteral("Pixelview encoding"), message); return false; };
 	if (pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard))
 		return fail(QStringLiteral("Stop active outputs and wait for stream setup before changing encoding."));
 	const auto opus = PixelviewOpusEncoder();

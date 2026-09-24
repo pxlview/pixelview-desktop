@@ -76,6 +76,8 @@ struct OBSBasic {
  std::unique_ptr<Handler> outputHandler = std::make_unique<Handler>();
  std::shared_future<void> setupStreamingGuard;
  bool pixelviewStreamingBusy = false;
+ // Production routes these through PixelviewWarn (remote commands return them instead).
+ void PixelviewWarn(const QString &title, const QString &message) { QMessageBox::warning(this, title, message); }
  /* PRODUCTION_BUSY */
  bool paired = true;
  bool PixelviewConfigurationLocked() const {return !paired || PixelviewSettingsBusy();}

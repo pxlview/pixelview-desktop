@@ -106,6 +106,8 @@ public:
  void UnregisterPixelviewDesktop(){++unpairs;pixelviewUnpairPending=false;}
  // Local credential removal after revocation is compiled with Qt in test_pairing_ux.
  int revocationCleanups=0; void CompletePixelviewRevocation(){++revocationCleanups;}
+ // Admin remote control is covered by test_remote_control.
+ int controls=0; void HandlePixelviewControl(const QJsonObject &){++controls;}
  void PixelviewOutputStopped();
  void QueuePixelviewOutputStopped(int delay=0);
  void CancelPixelviewStart();

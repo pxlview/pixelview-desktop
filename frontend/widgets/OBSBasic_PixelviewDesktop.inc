@@ -122,6 +122,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   }
   if(pixelviewLease.revoked) PixelviewDeviceRevoked();
   else if(pixelviewLease.replaced) {pixelviewReconnectAt=0; pixelviewAuthDeadline=0; pixelviewDesktop->closeSocket();}
+  else if(mutation=="DESKTOP_CONTROL" && pixelviewLease.ready) HandlePixelviewControl(doc.object()["data"].toObject());
   // Keep the media failure detail available after release (also in the node tooltip).
   RefreshPixelviewReconnect();
  };

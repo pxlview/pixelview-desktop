@@ -149,7 +149,7 @@ class FPS(unittest.TestCase):
         for text in ('pixelview::changeFrameRate', 'obs_video_active()', 'outputHandler->Active()',
                      '"FPSType", 2', '"FPSNum", rate.num', '"FPSDen", rate.den',
                      'config_has_user_value', 'config_remove_value', 'ResetVideo() == OBS_VIDEO_SUCCESS',
-                     'config_save_safe', 'CONFIG_SUCCESS', 'QMessageBox::warning', 'RollbackFailed'):
+                     'config_save_safe', 'CONFIG_SUCCESS', 'PixelviewWarn(', 'RollbackFailed'):
             self.assertIn(text, select)
         self.assertNotIn('FitPixelview', select)
         self.assertNotIn('obs_sceneitem_', select)

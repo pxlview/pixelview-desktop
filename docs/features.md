@@ -114,6 +114,34 @@ behaviour is:
   credentials and resource DELETE is pinned to the original origin. Error text names the streaming
   destination or encoder, not stream keys or internal output machinery.
 
+### Admin remote control
+
+The admin pairing modal (pxlview/pixelview-admin#162) can operate every Sending control of an online
+Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
+(pxlview/pixelview-backend-v4#236, protocol in that repository's `docs/desktop-remote-control.md`).
+
+- The backend sends `DESKTOP_CONTROL {request_id, command}`; the Desktop answers
+  `DESKTOP_CONTROL_RESULT {request_id, ok, error?, state}` on the same socket. Commands are handled
+  only on a ready socket and run on the next event-loop turn
+  (`frontend/widgets/OBSBasic_PixelviewControl.inc`).
+- Commands: `get_state`, `start`, `stop`, `select_device`, `set_capture` (a visible boolean or list
+  property of the DeckLink input and one of its enabled values; never the device hash or free text),
+  `fit`, `set_fps` (the eight sidebar rates), `set_encoder`, `set_bitrate` (whole Mbps, 1-12, the
+  quick range), `set_profile`, `set_mute`. Each runs the same native path as the sidebar control
+  (`SelectPixelviewDevice`, `SelectPixelviewFPS`, `SavePixelviewEncoding`, `ChangePixelviewAudio`,
+  `StartStreaming`/`StopStreaming`), and the local sidebar refreshes to match.
+- The configuration lock applies unchanged: while streaming or starting, receiving, unpaired or with
+  the native device settings dialog open, everything except `get_state`, `start`, `stop` and
+  `set_mute` is refused. Remote `start` also requires a selected capture device, because the local
+  "stream a blank screen?" confirmation cannot be answered remotely.
+- Failures that show a dialog locally (encoding, FPS, device creation, audio save) are returned as
+  the command's `error` instead (`PixelviewWarn`). A media failure after a remote start still shows
+  the ordinary local failure dialog on the Mac; the admin sees the Desktop's status line.
+- `state` reports stream status (`streaming`, `starting`, `stopping`, `can_start`, `can_stop`,
+  retries, the connection status and the Start hint), `locked`/`lock_reason`, the device list and
+  selection, the DeckLink properties with their options, encoders, profiles, FPS options and the
+  current values, bitrate in kbps with the 1-12 Mbps range, and mute.
+
 ### Capture
 
 - DeckLink devices are enumerated every two seconds from the input plugin's own property list (no
@@ -361,7 +389,7 @@ configuration.
 ### Compiled and offline tests (`test/pixelview`, `plugins/*/tests`)
 
 The Python drivers compile production source slices (offscreen Qt, Objective-C++ transports against
-loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 211
+loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 223
 tests; `test_icon_assets` (needs Pillow) and `test_pixelview_sources` (corresponding-source inventory
 gate) fail in the current environment regardless of changes.
 
@@ -371,7 +399,8 @@ gate) fail in the current environment regardless of changes.
   60 s silence), `test_control_socket.py` (RFC 6455 keepalive, refused upgrade),
   `test_desktop_retry.py`, `test_media_failure_pairing.py`, `test_whip_retry.py`,
   `test_pairing_ux.py`, `test_pairing_defaults.py`, `test_backend_selection.py`, `test_stream_lock.py`,
-  `test_streaming_ui.py`. `desktop_backend_smoke.mm` is an opt-in live tool.
+  `test_streaming_ui.py`, `test_remote_control.py` (admin remote-control source contracts).
+  `desktop_backend_smoke.mm` is an opt-in live tool.
 - Keychain: `test_keychain_reliability.py`, `test_keychain_noninteractive.py`,
   `test_keychain_async.py` (mocked Security APIs), `test_receive_keychain_restart.py` and
   `test_receive_ui.py` (real isolated test-only Keychain service, removed afterwards),
@@ -412,6 +441,16 @@ gate) fail in the current environment regardless of changes.
   message; Unpair and re-pairing; `DESKTOP_START`/`STARTED` (WHIP granted) and `DESKTOP_STOP`/`STOPPED`
   via the smoke tool. (This run predates account removal on Unpair and the automatic local cleanup
   after revocation; those have not been run against a live backend yet.)
+- Admin remote control (2026-09-24, local backend on pxlview/pixelview-backend-v4#236 without an
+  engine, rebuilt signed bundle in an isolated `--app-config-dir` paired to dev node 707880, no
+  DeckLink device attached): `get_state` round trips of ~120 ms; `set_fps`, `set_bitrate`,
+  `set_profile` and `set_encoder` applied and appeared in the Mac's sidebar, also when driven from
+  the admin modal (pxlview/pixelview-admin#162); out-of-range and unknown values, a missing
+  device, and `set_capture`/`set_mute`/`fit` without a source returned `ok: false` with the reason
+  and no dialog on the Mac. A remote `start` refused a settings change while starting; before the
+  capture-device gate existed it went through `DESKTOP_START` to the WHIP POST (404, no engine).
+  With the gate, `start` without a device is refused ("Choose a capture device to stream.") and
+  `can_start` is false. SIGTERM afterwards shut down cleanly.
 - Receiver control: live loopback login/registration with viewer-record read-back in Redis and exact
   removal after stop; live missing-session 401 mapping.
 - Receiving media (earlier build, 50 ms jitter era): local backend + engine + synthetic H.264/Opus
@@ -464,6 +503,9 @@ gate) fail in the current environment regardless of changes.
   attached); the WHIP grant was exercised only by the smoke tool.
 - A real Cloudflare/backend drop during an active WHIP stream on a production origin; only a local
   backend reload was exercised.
+- Admin remote control with a DeckLink device attached (`select_device`, `set_capture`, `fit`,
+  `set_mute` applied), a remote start that reaches an engine and streams, remote stop of a live
+  stream, and the relay across several backend workers (FakeRedis test only).
 - Production notarization, Gatekeeper, R2 publication, appcast and the Sparkle update cycle;
   clean-Mac acceptance; the interactive Pair forms on the rebuilt bundle (offscreen tests only);
   clicking the red close button (SIGTERM shares the path).
@@ -475,6 +517,8 @@ gate) fail in the current environment regardless of changes.
 
 ## Known limitations and intentionally out of scope
 
+- Admin remote control covers the Sending controls only: no remote receiving, pairing, Advanced
+  encoder options, local monitoring or DeckLink output settings.
 - No remote playout, engine provisioning, billing or engine-enforced fencing; an active project,
   engine and subscription must already exist in admin. Admin's `streaming` flag is the client's own
   report, not independent media observation.

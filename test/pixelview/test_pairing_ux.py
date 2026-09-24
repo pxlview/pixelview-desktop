@@ -262,6 +262,7 @@ int main(int argc,char **argv) {
  struct Clock {qint64 elapsed(){return 100;}} pixelviewClock;
  int pixelviewAuthDeadline=0,pixelviewReconnectAt=0,pixelviewBackoff=0;
  auto PixelviewDeviceRevoked=[]{};
+ auto HandlePixelviewControl=[](QJsonObject){};
  int saves=0; bool configOK=true;
  auto SavePixelviewIdentity=[&]{++saves;return configOK;};
  auto RefreshPixelviewReconnect=[]{};

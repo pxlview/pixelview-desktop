@@ -242,7 +242,7 @@ void OBSBasic::ChangePixelviewAudio(bool monitoring, bool checked)
 		const QString id = QString::fromUtf8(config_get_string(activeConfiguration, "Audio", "MonitoringDeviceId"));
 		if (std::none_of(devices.begin(), devices.end(), [&](const auto &d) { return d.second == id; })) {
 			RefreshPixelviewAudio();
-			QMessageBox::warning(this, QStringLiteral("Local audio"), QStringLiteral("Selected output device is unavailable. Choose an available output or System default."));
+			PixelviewWarn(QStringLiteral("Local audio"), QStringLiteral("Selected output device is unavailable. Choose an available output or System default."));
 			return;
 		}
 	}
@@ -257,7 +257,7 @@ void OBSBasic::ChangePixelviewAudio(bool monitoring, bool checked)
 		}, [&] { return SavePixelviewAudioSource(source); });
 	}();
 	if (result != pixelview::AudioChangeResult::Applied) {
-		QMessageBox::warning(this, QStringLiteral("Capture audio"), result != pixelview::AudioChangeResult::RollbackFailed ?
+		PixelviewWarn(QStringLiteral("Capture audio"), result != pixelview::AudioChangeResult::RollbackFailed ?
 			QStringLiteral("Could not save audio settings. Previous settings were restored.") :
 			QStringLiteral("Could not save audio settings. Live state was restored, but scene persistence could not be verified. Check scene-folder permissions before quitting."));
 	}

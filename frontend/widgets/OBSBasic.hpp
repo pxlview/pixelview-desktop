@@ -356,6 +356,14 @@ private:
 	bool pixelviewStopPending=false, pixelviewNativeAttempt=false;
 	quint64 pixelviewStopGeneration=0;
 	QJsonObject PixelviewReportedSettings();
+	// Admin remote control over the Desktop control socket (DESKTOP_CONTROL).
+	void HandlePixelviewControl(const QJsonObject &data);
+	QString RunPixelviewControl(const QJsonObject &command);
+	QJsonObject PixelviewControlState();
+	bool PixelviewCaptureSelected();
+	// Sender-setting failures are dialogs locally but errors for a remote command.
+	QString *pixelviewRemoteError = nullptr;
+	void PixelviewWarn(const QString &title, const QString &message);
 	std::unique_ptr<pixelview::DesktopConnection> pixelviewDesktop;
 	pixelview::Desktop pixelviewLease;
 	QElapsedTimer pixelviewClock;

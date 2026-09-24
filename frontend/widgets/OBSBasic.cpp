@@ -95,6 +95,7 @@ using namespace std;
 #include "OBSBasic_PixelviewAudio.inc"
 #include "OBSBasic_PixelviewReceive.inc"
 #include "OBSBasic_PixelviewDeepLinks.inc"
+#include "OBSBasic_PixelviewControl.inc"
 
 extern bool portable_mode;
 extern bool disable_3p_plugins;
@@ -1891,7 +1892,7 @@ void OBSBasic::SelectPixelviewFPS(int index)
 	else
 		message = QStringLiteral("Could not reset video to the selected FPS. The previous frame rate was restored.");
 	blog(LOG_WARNING, "Pixelview FPS: %s", QT_TO_UTF8(message));
-	QMessageBox::warning(this, QStringLiteral("Pixelview FPS"), message);
+	PixelviewWarn(QStringLiteral("Pixelview FPS"), message);
 }
 
 void OBSBasic::RefreshPixelviewDevices()
@@ -2035,7 +2036,7 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	if (!source) {
 		source = obs_source_create("decklink-input", "Pixelview Capture", settings, nullptr);
 		if (!source) {
-			QMessageBox::warning(this, QStringLiteral("Pixelview"), QStringLiteral("Could not create the DeckLink input. Check the application log and Desktop Video installation."));
+			PixelviewWarn(QStringLiteral("Pixelview"), QStringLiteral("Could not create the DeckLink input. Check the application log and Desktop Video installation."));
 			return;
 		}
 		auto *item = obs_scene_add(GetCurrentScene(), source);
