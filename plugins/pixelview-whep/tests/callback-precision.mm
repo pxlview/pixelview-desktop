@@ -13,6 +13,8 @@
 struct CanvasPolicy {
  bool pixelviewReceivePrecision=false,pixelviewReceivePrecisionFault=false;
  obs_video_info pixelviewSendVideo={}; std::string pixelviewSendRenderModule;
+ int pixelviewReceiveHdr=0,pixelviewReceiveHdrNits=1000; float pixelviewSendSdrWhite=300.f,pixelviewSendHdrPeak=1000.f;
+ uint32_t pixelviewReceiveFPSNum=0,pixelviewReceiveFPSDen=0;
  bool PixelviewReceiveVideoBusy() const { return obs_video_active(); }
  bool set(bool enabled) { /* PRODUCTION_PRECISION_BODY */ }
 };

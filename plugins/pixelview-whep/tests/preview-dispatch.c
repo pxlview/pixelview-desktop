@@ -37,10 +37,10 @@ static void pause_at(int point)
  while (!released) g_cond_wait(&cond,&gate);
  g_mutex_unlock(&gate);
 }
-static bool held_info(GstCaps *caps,GstVideoInfo *info)
-{ pause_at(1); return pixelview_video_info(caps,info); }
-static bool held_frame(GstVideoFrame *mapped,struct obs_source_frame2 *frame)
-{ bool ok=pixelview_video_frame(mapped,frame); pause_at(2); prepared=ok&&!injecting; return ok; }
+static bool held_info(GstCaps *caps,enum pixelview_color color,GstVideoInfo *info)
+{ pause_at(1); return pixelview_video_info(caps,color,info); }
+static bool held_frame(GstVideoFrame *mapped,enum pixelview_color color,struct obs_source_frame2 *frame)
+{ bool ok=pixelview_video_frame(mapped,color,frame); pause_at(2); prepared=ok&&!injecting; return ok; }
 static void capture_video(obs_source_t *s,const struct obs_source_frame2 *f)
 {
  (void)s; assert(f); pause_at(4);

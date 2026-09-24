@@ -323,11 +323,17 @@ static void decklink_ui_render(void *param)
 
 	gs_effect_t *const effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
 	gs_effect_set_texture_srgb(gs_effect_get_param_by_name(effect, "image"), tex);
-	const char *const tech_name = target_hdr ? "DrawAlphaDivideR10L"
-						 : (source_hdr ? "DrawAlphaDivideTonemap" : "DrawAlphaDivide");
+	// Pixelview: an HLG canvas leaves as HLG; the HDR metadata follows in the output.
+	const bool target_hlg = target_hdr && (ctx->ovi.colorspace == VIDEO_CS_2100_HLG);
+	const char *const tech_name = target_hlg   ? "DrawAlphaDivideR10LHLG"
+				      : target_hdr ? "DrawAlphaDivideR10L"
+						   : (source_hdr ? "DrawAlphaDivideTonemap" : "DrawAlphaDivide");
 	while (gs_effect_loop(effect, tech_name)) {
 		gs_effect_set_float(gs_effect_get_param_by_name(effect, "multiplier"),
 				    obs_get_video_sdr_white_level() / 10000.f);
+		if (target_hlg)
+			gs_effect_set_float(gs_effect_get_param_by_name(effect, "hdr_lw"),
+					    obs_get_video_hdr_nominal_peak_level());
 		gs_draw_sprite(tex, 0, 0, 0);
 	}
 

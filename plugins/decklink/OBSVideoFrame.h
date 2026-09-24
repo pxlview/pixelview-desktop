@@ -73,7 +73,8 @@ public:
 
 class HDRVideoFrame : public IDeckLinkVideoFrame, public IDeckLinkVideoFrameMetadataExtensions {
 public:
-	HDRVideoFrame(IDeckLinkMutableVideoFrame *frame);
+	// eotf is the CTA-861 value: 2 = SMPTE ST 2084 (PQ), 3 = HLG.
+	HDRVideoFrame(IDeckLinkMutableVideoFrame *frame, int64_t eotf = 2);
 	virtual ~HDRVideoFrame() {}
 
 	// IUnknown interface
@@ -111,4 +112,5 @@ public:
 private:
 	ComPtr<IDeckLinkMutableVideoFrame> m_videoFrame;
 	std::atomic<ULONG> m_refCount;
+	int64_t m_eotf;
 };

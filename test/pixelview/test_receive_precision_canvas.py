@@ -19,7 +19,11 @@ class ReceivePrecision(unittest.TestCase):
   code=r'''#include <cassert>
 #include <string>
 struct obs_video_info {const char *graphics_module="opengl"; int output_format=1, colorspace=2,range=3; unsigned fps_num=30,fps_den=1;};
-constexpr int VIDEO_FORMAT_P010=10,VIDEO_CS_709=709,VIDEO_RANGE_PARTIAL=1,OBS_VIDEO_SUCCESS=0;
+constexpr int VIDEO_FORMAT_P010=10,VIDEO_CS_709=709,VIDEO_CS_2100_PQ=2084,VIDEO_CS_2100_HLG=2067,VIDEO_RANGE_PARTIAL=1,OBS_VIDEO_SUCCESS=0;
+float sdr_white=300.f,hdr_peak=1000.f;
+float obs_get_video_sdr_white_level(){return sdr_white;}
+float obs_get_video_hdr_nominal_peak_level(){return hdr_peak;}
+void obs_set_video_levels(float white,float peak){sdr_white=white;hdr_peak=peak;}
 obs_video_info current; int resets=0,failures=0; bool busy=false;
 bool obs_get_video_info(obs_video_info *v){*v=current;return true;}
 int obs_reset_video(obs_video_info *v){++resets;if(failures){--failures;return -1;}current=*v;return 0;}
@@ -27,6 +31,7 @@ struct Canvas {
  bool pixelviewReceivePrecision=false,pixelviewReceivePrecisionFault=false;
  obs_video_info pixelviewSendVideo={}; std::string pixelviewSendRenderModule;
  unsigned pixelviewReceiveFPSNum=0,pixelviewReceiveFPSDen=0;
+ int pixelviewReceiveHdr=0,pixelviewReceiveHdrNits=1000; float pixelviewSendSdrWhite=0.f,pixelviewSendHdrPeak=0.f;
  bool PixelviewReceiveVideoBusy(){return busy;}
  bool set(bool enabled){BODY}
 };
@@ -41,6 +46,16 @@ int main(){Canvas c; auto original=current;
  c.pixelviewReceiveFPSNum=24;c.pixelviewReceiveFPSDen=1;
  assert(c.set(true)&&current.fps_num==24&&current.fps_den==1); // Receive FPS is independent of the sender's 30.
  assert(c.set(false)&&current.fps_num==30&&current.fps_den==1); // Sender FPS restored untouched.
+ // HDR receive: Rec.2100 canvas with the operator's nits; the sender's levels come back.
+ hdr_peak=800.f;c.pixelviewReceiveHdr=1;c.pixelviewReceiveHdrNits=1000;
+ assert(c.set(true)&&current.output_format==10&&current.colorspace==2084&&current.range==1&&hdr_peak==1000.f&&sdr_white==300.f);
+ assert(c.set(false)&&current.colorspace==original.colorspace&&hdr_peak==800.f&&sdr_white==300.f);
+ c.pixelviewReceiveHdr=2;c.pixelviewReceiveHdrNits=600;
+ assert(c.set(true)&&current.colorspace==2067&&hdr_peak==600.f);
+ assert(c.set(false)&&hdr_peak==800.f);
+ c.pixelviewReceiveHdr=0;
+ assert(c.set(true)&&current.colorspace==709&&hdr_peak==800.f); // SDR receive keeps the sender's peak.
+ assert(c.set(false));
  failures=2;assert(!c.set(true)&&c.pixelviewReceivePrecisionFault);
 }
 '''.replace('BODY',switch)

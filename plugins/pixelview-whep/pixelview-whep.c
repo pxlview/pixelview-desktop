@@ -50,6 +50,7 @@ struct receiver {
  bool source_muted;
  guint latency, active_latency;
  bool latency_override, active_latency_override;
+ enum pixelview_color color, active_color; /* lock; active_color is fixed for one pipeline */
  struct pixelview_receive_capabilities active_caps;
  struct receive_attempt *attempt;
  bool offer_failed;
@@ -132,6 +133,22 @@ static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
  if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_MAIN_422_10)) r->failure=PV_UNSUPPORTED_HEVC_MAIN_422_10;
  else if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_PROFILE)) r->failure=PV_UNSUPPORTED_HEVC_PROFILE;
  if(r->failure) blog(LOG_ERROR,"[pixelview-whep] %s: the sender must use the HEVC Main or Main10 profile",r->failure);
+}
+/* First colour-mode refusal per generation; the reason names the fix, not the stream. */
+static void color_failure(struct receiver *r, GstCaps *caps, enum pixelview_color color)
+{
+ const char *reason = pixelview_video_color_mismatch(caps, color);
+ if (!reason) return;
+ g_mutex_lock(&r->lock);
+ const bool first = !r->quit && !r->changed && r->generation == r->active_generation && !r->failure;
+ if (first) r->failure = reason;
+ g_mutex_unlock(&r->lock);
+ if (first) {
+  const char *colorimetry = caps && gst_caps_is_fixed(caps) ? gst_structure_get_string(gst_caps_get_structure(caps, 0), "colorimetry") : NULL;
+  blog(LOG_ERROR, "[pixelview-whep] %s: receive mode %s, stream colorimetry %s", reason,
+   color == PIXELVIEW_COLOR_PQ ? "hdr-pq" : color == PIXELVIEW_COLOR_HLG ? "hdr-hlg" : "sdr",
+   colorimetry ? colorimetry : "unsignalled");
+ }
 }
 static void log_media_stop(GstMessage *msg,bool stale)
 {
@@ -218,13 +235,20 @@ static void connect_proc(void *opaque, calldata_t *cd)
  const char *endpoint = calldata_string(cd, "endpoint");
  int64_t latency = 0;
  bool latency_override = calldata_get_int(cd, "latency", &latency);
+ /* Operator colour mode; absent means the historical SDR receive. */
+ const char *color_name = calldata_string(cd, "color");
+ enum pixelview_color color = PIXELVIEW_COLOR_SDR;
+ bool color_valid = !color_name || !*color_name || !strcmp(color_name, "sdr");
+ if (color_name && !strcmp(color_name, "pq")) { color = PIXELVIEW_COLOR_PQ; color_valid = true; }
+ if (color_name && !strcmp(color_name, "hlg")) { color = PIXELVIEW_COLOR_HLG; color_valid = true; }
  g_mutex_lock(&r->lock);
  r->generation++;
  r->native422_failure=(struct pv422_diagnostic){0}; r->failure=NULL;
  pv_feed_reset(&r->feed);
  wipe(&r->endpoint);
- bool valid = valid_endpoint(endpoint) && (!latency_override || (latency >= 0 && latency <= 2000));
+ bool valid = color_valid && valid_endpoint(endpoint) && (!latency_override || (latency >= 0 && latency <= 2000));
  r->endpoint = valid ? g_strdup(endpoint) : NULL;
+ r->color = color;
  r->latency_override = valid && latency_override;
  r->latency = r->latency_override ? (guint)latency : 0;
  r->state = valid ? "connecting" : "error";
@@ -271,9 +295,10 @@ static gpointer preview_worker(gpointer opaque)
   if (clear && !quit) obs_source_output_video(r->source, NULL);
   if (sample && current) {
    GstVideoInfo info; GstVideoFrame mapped = {0}; struct obs_source_frame2 frame;
-   if (pixelview_video_info(gst_sample_get_caps(sample), &info) &&
+   /* Native 4:2:2 preview is SDR BT.709 only. */
+   if (pixelview_video_info(gst_sample_get_caps(sample), PIXELVIEW_COLOR_SDR, &info) &&
        gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
-    if (pixelview_video_frame(&mapped, &frame)) {
+    if (pixelview_video_frame(&mapped, PIXELVIEW_COLOR_SDR, &frame)) {
      frame.timestamp = pts;
      /* Dispatch handoff linearizes under lock AFTER all preparation (including
       * a preceding clear). Cancellation before this reservation suppresses OBS.
@@ -321,13 +346,17 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
   gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
  struct obs_source_frame2 frame;
- if (!pixelview_video_info(caps, &info)) { gst_sample_unref(sample); return GST_FLOW_ERROR; }
+ const enum pixelview_color color = native_preview ? PIXELVIEW_COLOR_SDR : r->active_color;
+ if (!pixelview_video_info(caps, color, &info)) {
+  color_failure(r, caps, color); gst_sample_unref(sample); return GST_FLOW_ERROR;
+ }
  if (!native_preview) {
   /* The ordinary clocked appsink maps and delivers directly to OBS. */
   if (!gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
    gst_sample_unref(sample); return GST_FLOW_ERROR;
   }
-  if (!pixelview_video_frame(&mapped, &frame)) {
+  if (!pixelview_video_frame(&mapped, color, &frame)) {
+   color_failure(r, caps, color);
    gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_NOT_NEGOTIATED;
   }
  }
@@ -795,6 +824,7 @@ static gpointer worker(gpointer opaque)
    wipe(&r->endpoint);
    r->active_latency = r->latency;
    r->active_latency_override = r->latency_override;
+   r->active_color = r->color;
    r->active_generation = generation;
    r->changed = false;
    g_mutex_unlock(&r->lock);
@@ -863,7 +893,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
  proc_handler_t *ph = obs_source_get_proc_handler(source);
  proc_handler_add(ph, "void native422_feed(ptr request, out int version)", feed_proc, r);
  proc_handler_add(ph, "void set_native_preview(bool enabled)", native_preview_proc, r);
- proc_handler_add(ph, "void connect(string endpoint, int latency)", connect_proc, r);
+ proc_handler_add(ph, "void connect(string endpoint, int latency, string color)", connect_proc, r);
  proc_handler_add(ph, "void disconnect()", disconnect_proc, r);
  proc_handler_add(ph, "void get_status(out bool ready, out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency, out int native422_frames, out int native_audio_frames, out string native422_diagnostic, out string failure)", status_proc, r);
  r->thread = g_thread_new("pixelview-whep", worker, r);

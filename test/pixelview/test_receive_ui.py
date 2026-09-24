@@ -172,6 +172,8 @@ QWidget *pixelviewSendingPanel=&sending, *pixelviewReceivingPanel=&receiving;
 QLineEdit *pixelviewReceiveId=&id, *pixelviewReceivePassword=&password, *pixelviewReceiveName=&name;
 QPushButton *pixelviewReceiveButton=&start;
 QToolButton *pixelviewReceiveBuffer=&buffer;
+QCheckBox hdr; QComboBox transfer; QSpinBox nits;
+QCheckBox *pixelviewReceiveHdrBox=&hdr; QComboBox *pixelviewReceiveHdrTransfer=&transfer; QSpinBox *pixelviewReceiveHdrNitsBox=&nits;
 bool pixelviewReceiving=false, pixelviewReceiveIntent=false;
 bool PixelviewModeBusy() const { return busy; }
 bool isClosing() const { return closing; }
@@ -185,10 +187,13 @@ w.pixelviewReceiving=true; w.RefreshPixelviewModes(); assert(w.sending.isHidden(
 assert(w.tabs.currentIndex()==1 && w.tabs.isEnabled() && w.id.isEnabled());
 w.busy=true; w.pixelviewReceiveIntent=true; w.RefreshPixelviewModes();
 assert(!w.tabs.isEnabled() && !w.id.isEnabled() && !w.password.isEnabled() && !w.name.isEnabled());
+assert(!w.hdr.isEnabled() && !w.transfer.isEnabled() && !w.nits.isEnabled()); // HDR is fixed per connection.
 assert(w.start.isEnabled() && w.start.text()=="Stop receiving");
 w.closing=true; w.RefreshPixelviewModes(); assert(!w.start.isEnabled());
 w.closing=false; w.busy=false; w.pixelviewReceiveIntent=false; w.RefreshPixelviewModes();
 assert(w.start.text()=="Start receiving" && w.id.isEnabled());
+assert(w.hdr.isEnabled() && !w.transfer.isEnabled() && !w.nits.isEnabled()); // Transfer and nits only with HDR ticked.
+w.hdr.setChecked(true); w.RefreshPixelviewModes(); assert(w.transfer.isEnabled() && w.nits.isEnabled());
 }'''.replace('BODY', refresh)
         with tempfile.TemporaryDirectory() as td:
             src=pathlib.Path(td)/'ui.cpp'; src.write_text(code); binary=pathlib.Path(td)/'ui'

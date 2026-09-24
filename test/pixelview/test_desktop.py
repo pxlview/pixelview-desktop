@@ -70,8 +70,8 @@ class Desktop(unittest.TestCase):
         self.assertIn('Unpair this installation',inc)
         self.assertIn('pixelviewUnpairPending',inc)
         stop=inc[inc.index('void OBSBasic::PixelviewOutputStopped()'):]
-        self.assertLess(stop.index('obs_output_active'),stop.index('FinishPixelviewUnpair()'))
-        self.assertLess(stop.index('pixelviewLease.outputStopped()'),stop.index('FinishPixelviewUnpair()'))
+        self.assertLess(stop.index('obs_output_active'),stop.index('UnregisterPixelviewDesktop()'))
+        self.assertLess(stop.index('pixelviewLease.outputStopped()'),stop.index('UnregisterPixelviewDesktop()'))
         self.assertIn('"NodeId"',inc); self.assertIn('"DesktopId"',inc)
         self.assertNotIn('/desktop/devices/',inc)
         self.assertIn('"PairingDisabled"',inc)

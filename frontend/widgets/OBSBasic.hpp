@@ -58,6 +58,7 @@ class OBSAbout;
 class QTabBar;
 class QLineEdit;
 class QToolButton;
+class QComboBox;
 #include <QElapsedTimer>
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -321,6 +322,14 @@ private:
 	// Receive canvas rate follows the DeckLink output mode, never the (pairing-locked) sender FPS; 0/0 = not chosen yet.
 	uint32_t pixelviewReceiveFPSNum = 0, pixelviewReceiveFPSDen = 0;
 	bool SetPixelviewReceiveFrameRate(uint32_t num, uint32_t den, QString &error);
+	// Operator-chosen receive colour (must match the sender): 0 = SDR BT.709, 1 = PQ, 2 = HLG (limited BT.2020).
+	// HDR nits become the canvas nominal peak and the DeckLink HDR metadata; sender levels are restored on leaving.
+	int pixelviewReceiveHdr = 0, pixelviewReceiveHdrNits = 1000;
+	float pixelviewSendSdrWhite = 300.f, pixelviewSendHdrPeak = 1000.f;
+	bool SetPixelviewReceiveHdr(int hdr, int nits, QString &error);
+	QCheckBox *pixelviewReceiveHdrBox = nullptr;
+	QComboBox *pixelviewReceiveHdrTransfer = nullptr;
+	QSpinBox *pixelviewReceiveHdrNitsBox = nullptr;
 	std::string pixelviewSendRenderModule;
 	QTabBar *pixelviewModeTabs = nullptr;
 	QWidget *pixelviewSendingPanel = nullptr, *pixelviewReceivingPanel = nullptr;
@@ -356,7 +365,10 @@ private:
 	pixelview::DesktopIdentity pixelviewIdentity;
 	bool pixelviewUnpairPending=false;
 	bool SavePixelviewIdentity();
-	void FinishPixelviewUnpair();
+	// Unpair: remove this Mac from the Pixelview account, then the local credential.
+	enum class PixelviewAccountRemoval { Removed, Unreachable, NoCredential };
+	void UnregisterPixelviewDesktop();
+	void FinishPixelviewUnpair(PixelviewAccountRemoval account);
 	QUrl pixelviewOrigin;
 	bool pixelviewDev=false, pixelviewStartPermit=false, pixelviewActualStreaming=false;
 	bool pixelviewClosingSocket=false;
@@ -370,6 +382,8 @@ private:
 	bool PixelviewShutdownReady();
 	qint64 pixelviewReconnectAt=0, pixelviewAuthDeadline=0;
 	void PixelviewDeviceRevoked();
+	// The account already unpaired this Mac: finish locally without prompting.
+	void CompletePixelviewRevocation();
 	int pixelviewBackoff=1000;
 	OBSService pixelviewPreviousService;
 	void InitPixelviewStreaming(QWidget *sidebar);

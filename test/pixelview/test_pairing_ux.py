@@ -62,7 +62,8 @@ int main() {
         text=DESKTOP.read_text()
         refresh=body(text, 'RefreshPixelviewPairing')
         guard=body(text, 'PixelviewPairingBusy')
-        cleanup=body(text, 'FinishPixelviewUnpair').replace('pixelview::removeDevice', 'removeDevice').replace('(this,', '(&app,').replace('[this]', '[&]').replace('[origin]', '[&,origin]')
+        cleanup=body(text, 'FinishPixelviewUnpair').replace('pixelview::removeDevice', 'removeDevice').replace('(this,', '(&app,').replace('[this,account]', '[&]').replace('[origin]', '[&,origin]')
+        revocation=body(text, 'CompletePixelviewRevocation').replace('pixelview::removeDevice', 'removeDevice')
         initialization=text[text.index(' auto heading='):text.index(' connect(unpair,')]
         code=r'''#include <QtWidgets/QApplication>
 #include <QtWidgets/QVBoxLayout>
@@ -155,6 +156,7 @@ int main(int argc,char **argv) {
  auto config_set_bool=[](int,const char *,const char *,bool){};
  auto SavePixelviewIdentity=[&]{pixelviewPairingDurable=false;return saved;};
  auto RefreshPixelviewPairing=[&]{refresh();};
+ enum class PixelviewAccountRemoval {Removed,Unreachable,NoCredential}; auto account=PixelviewAccountRemoval::Removed;
  auto finish=[&]{CLEANUP};
  for (int failure : {0,1,2}) {
   removed=failure!=0; saved=failure!=1; pixelviewUnpairPending=true;
@@ -172,11 +174,34 @@ int main(int argc,char **argv) {
    assert(credential=="synthetic-secret");
   }
   assert(!pixelviewConnectionStatus->text().contains("cleanup",Qt::CaseInsensitive));
+  assert(failure!=2 || pixelviewConnectionStatus->text()=="Unpaired. This Mac was removed from your Pixelview account.");
   assert(failure==2 || (unpair.text()=="Unpair" && pair.isHidden()));
  }
  assert(removals==3 && credential.isEmpty() && pair.isEnabled() && !pair.isHidden());
+ // The account could not be told (offline, or no readable credential): the Mac
+ // is still unpaired locally and the message says where to finish.
+ for(auto outcome : {PixelviewAccountRemoval::Unreachable,PixelviewAccountRemoval::NoCredential}) {
+  account=outcome; removed=true; saved=true; credential="synthetic-secret"; pixelviewUnpairPending=true;
+  finish(); while(pixelviewUnpairPending) app.processEvents();
+  assert(credential.isEmpty() && !pixelviewUnpairRetry && unpair.isHidden() && pair.isEnabled());
+  const QString text=pixelviewConnectionStatus->text();
+  assert(text.startsWith("Unpaired on this Mac") && text.contains("Pixelview admin"));
+  assert((outcome==PixelviewAccountRemoval::Unreachable)==text.contains("could not be reached"));
+ }
+ // Unpaired from the account (admin Unpair): finish locally without a prompt,
+ // or leave Unpair in place when the Keychain refuses a silent removal.
+ auto completeRevocation=[&]{REVOCATION};
+ pixelviewIdentity.nodeId="707880"; credential="synthetic-secret"; saved=true;
+ removed=false; pixelviewUnpairRetry=true; completeRevocation();
+ assert(pixelviewUnpairRetry && !unpair.isHidden() && unpair.isEnabled() && pair.isHidden());
+ assert(pixelviewIdentity.nodeId=="707880" && credential=="synthetic-secret");
+ assert(connection.text().contains("unpaired from your Pixelview account") && connection.text().contains("Click Unpair"));
+ removed=true; completeRevocation();
+ assert(!pixelviewUnpairRetry && credential.isEmpty() && pixelviewIdentity.nodeId.isEmpty());
+ assert(unpair.isHidden() && !pair.isHidden() && pair.isEnabled());
+ assert(connection.text()=="This Mac was unpaired from your Pixelview account. Pair again to stream from it.");
 
-}'''.replace('GUARD',guard).replace('REFRESH',refresh).replace('INITIALIZATION',initialization).replace('CLEANUP',cleanup)
+}'''.replace('GUARD',guard).replace('REFRESH',refresh).replace('INITIALIZATION',initialization).replace('CLEANUP',cleanup).replace('REVOCATION',revocation)
         with tempfile.TemporaryDirectory() as tmp:
             src=pathlib.Path(tmp)/'ui.cpp';src.write_text(code)
             qt=ROOT/'.deps/obs-deps-qt6-2026-08-26-universal/lib'

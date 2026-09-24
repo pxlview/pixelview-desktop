@@ -1,5 +1,8 @@
 // Pixelview modification: one native canvas, mutually exclusive send/receive controls.
 #include <QToolButton>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QSpinBox>
 #include <QInputDialog>
 #include <QTabBar>
 #include <QPointer>
@@ -43,7 +46,7 @@ bool OBSBasic::SetPixelviewReceivePrecision(bool enabled)
  obs_video_info target = enabled ? current : pixelviewSendVideo;
  if (enabled) {
   target.output_format = VIDEO_FORMAT_P010;
-  target.colorspace = VIDEO_CS_709;
+  target.colorspace = pixelviewReceiveHdr == 1 ? VIDEO_CS_2100_PQ : pixelviewReceiveHdr == 2 ? VIDEO_CS_2100_HLG : VIDEO_CS_709;
   target.range = VIDEO_RANGE_PARTIAL;
   // The receive canvas runs at the DeckLink output rate; the sender FPS stays in pixelviewSendVideo.
   if (pixelviewReceiveFPSNum && pixelviewReceiveFPSDen) {
@@ -62,6 +65,11 @@ bool OBSBasic::SetPixelviewReceivePrecision(bool enabled)
   pixelviewSendVideo = current;
   pixelviewSendRenderModule = currentModule;
   pixelviewSendVideo.graphics_module = pixelviewSendRenderModule.c_str();
+  pixelviewSendSdrWhite = obs_get_video_sdr_white_level();
+  pixelviewSendHdrPeak = obs_get_video_hdr_nominal_peak_level();
+  obs_set_video_levels(pixelviewSendSdrWhite, pixelviewReceiveHdr ? (float)pixelviewReceiveHdrNits : pixelviewSendHdrPeak);
+ } else {
+  obs_set_video_levels(pixelviewSendSdrWhite, pixelviewSendHdrPeak);
  }
  pixelviewReceivePrecision = enabled;
  return true;
@@ -258,6 +266,50 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		}
 		QMessageBox::information(this, QStringLiteral("DeckLink output"), QStringLiteral("Native DeckLink output settings are unavailable. Check the bundled module and Desktop Video installation."));
 	});
+	// HDR must match the sender: the stream cannot always say PQ versus HLG (VP9 cannot).
+	config_set_default_int(config, "PixelviewReceive", "HDRNits", 1000);
+	const QString savedTransfer = QString::fromUtf8(config_get_string(config, "PixelviewReceive", "HDRTransfer"));
+	pixelviewReceiveHdrNits = qBound(100, (int)config_get_int(config, "PixelviewReceive", "HDRNits"), 10000);
+	pixelviewReceiveHdr = !config_get_bool(config, "PixelviewReceive", "HDR") ? 0 : savedTransfer == QStringLiteral("hlg") ? 2 : 1;
+	auto *hdrRow = new QHBoxLayout;
+	hdrRow->setContentsMargins(0, 0, 0, 0); hdrRow->setSpacing(8);
+	pixelviewReceiveHdrBox = new QCheckBox(QStringLiteral("HDR"), connection);
+	pixelviewReceiveHdrBox->setObjectName(QStringLiteral("pixelviewReceiveHdr"));
+	pixelviewReceiveHdrBox->setToolTip(QStringLiteral("Receive limited-range BT.2020 HDR. Must match the sender. The canvas and the DeckLink output switch to the chosen transfer."));
+	pixelviewReceiveHdrBox->setChecked(pixelviewReceiveHdr != 0);
+	pixelviewReceiveHdrTransfer = new QComboBox(connection);
+	pixelviewReceiveHdrTransfer->setObjectName(QStringLiteral("pixelviewReceiveHdrTransfer"));
+	pixelviewReceiveHdrTransfer->addItem(QStringLiteral("PQ"), QStringLiteral("pq"));
+	pixelviewReceiveHdrTransfer->addItem(QStringLiteral("HLG"), QStringLiteral("hlg"));
+	pixelviewReceiveHdrTransfer->setCurrentIndex(savedTransfer == QStringLiteral("hlg") ? 1 : 0);
+	pixelviewReceiveHdrTransfer->setToolTip(QStringLiteral("The sender's HDR transfer function."));
+	pixelviewReceiveHdrNitsBox = new QSpinBox(connection);
+	pixelviewReceiveHdrNitsBox->setObjectName(QStringLiteral("pixelviewReceiveHdrNits"));
+	pixelviewReceiveHdrNitsBox->setRange(100, 10000); pixelviewReceiveHdrNitsBox->setSingleStep(100);
+	pixelviewReceiveHdrNitsBox->setSuffix(QStringLiteral(" nits"));
+	pixelviewReceiveHdrNitsBox->setValue(pixelviewReceiveHdrNits);
+	pixelviewReceiveHdrNitsBox->setToolTip(QStringLiteral("HDR nominal peak: the HLG system peak and the DeckLink mastering/content light level metadata."));
+	// HDR shares the Output heading row: it sets what leaves the card, and an extra
+	// row would not fit the minimum window height.
+	hdrRow->addWidget(outputHint, 1);
+	hdrRow->addWidget(pixelviewReceiveHdrBox);
+	hdrRow->addWidget(pixelviewReceiveHdrTransfer);
+	hdrRow->addWidget(pixelviewReceiveHdrNitsBox);
+	auto applyHdr = [this] {
+		const int hdr = !pixelviewReceiveHdrBox->isChecked() ? 0 : pixelviewReceiveHdrTransfer->currentIndex() == 1 ? 2 : 1;
+		QString error;
+		if (!SetPixelviewReceiveHdr(hdr, pixelviewReceiveHdrNitsBox->value(), error)) {
+			const QSignalBlocker blockBox(pixelviewReceiveHdrBox), blockTransfer(pixelviewReceiveHdrTransfer), blockNits(pixelviewReceiveHdrNitsBox);
+			pixelviewReceiveHdrBox->setChecked(pixelviewReceiveHdr != 0);
+			if (pixelviewReceiveHdr) pixelviewReceiveHdrTransfer->setCurrentIndex(pixelviewReceiveHdr == 2 ? 1 : 0);
+			pixelviewReceiveHdrNitsBox->setValue(pixelviewReceiveHdrNits);
+			SetPixelviewReceiveStatus(error, ReceiveStatusTone::Error);
+		}
+		RefreshPixelviewModes();
+	};
+	connect(pixelviewReceiveHdrBox, &QCheckBox::toggled, this, applyHdr);
+	connect(pixelviewReceiveHdrTransfer, &QComboBox::currentIndexChanged, this, applyHdr);
+	connect(pixelviewReceiveHdrNitsBox, &QSpinBox::valueChanged, this, applyHdr);
 	pixelviewReceiveButton = new QPushButton(QStringLiteral("Start receiving"), connection);
 	pixelviewReceiveButton->setObjectName(QStringLiteral("pixelviewReceiveButton"));
 	pixelviewReceiveButton->ensurePolished(); pixelviewReceiveButton->setFixedHeight(36);
@@ -289,7 +341,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	statusRow->addWidget(pixelviewReceiveBuffer, 0, Qt::AlignTop);
 	connectionRows->addLayout(statusRow);
 	connectionRows->addWidget(hardwareDivider);
-	connectionRows->addWidget(outputHint);
+	connectionRows->addLayout(hdrRow);
 	connectionRows->addWidget(decklink);
 	rows->addStretch(1);
 	pixelviewReceiver = std::make_unique<pixelview::PixelviewReceiver>();
@@ -332,6 +384,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		PixelviewBindDeckLinkReceive(pixelviewReceiveSource, true);
 		calldata_set_string(&data, "endpoint", endpoint.toUtf8().constData());
 		calldata_set_int(&data, "latency", pixelviewReceiveBufferMs);
+		calldata_set_string(&data, "color", pixelviewReceiveHdr == 1 ? "pq" : pixelviewReceiveHdr == 2 ? "hlg" : "sdr");
 		const bool accepted = proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "connect", &data);
 		calldata_free(&data);
 		if (!accepted) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native receive connection unavailable."), ReceiveStatusTone::Error); return; }
@@ -354,8 +407,18 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 				const char *failure = calldata_string(&data, "failure");
 				const bool hevc422 = failure && strcmp(failure, "unsupported-hevc-main-422-10") == 0;
 				const bool hevcOther = failure && strcmp(failure, "unsupported-hevc-profile") == 0;
+				const auto is = [failure](const char *reason) { return failure && strcmp(failure, reason) == 0; };
 				StopPixelviewReceive(true);
-				SetPixelviewReceiveStatus(hevc422 ?
+				SetPixelviewReceiveStatus(
+					is("hdr-source-needs-hdr-receive") ?
+					QStringLiteral("The sender is streaming HDR. Tick HDR, choose the sender's PQ or HLG, and start receiving again.") :
+					is("sdr-source-in-hdr-receive") ?
+					QStringLiteral("The sender is streaming SDR (BT.709). Untick HDR and start receiving again.") :
+					is("hdr-transfer-mismatch") ?
+					QStringLiteral("The sender uses the other HDR transfer. Switch between PQ and HLG and start receiving again.") :
+					is("unsupported-colorimetry") ?
+					QStringLiteral("The sender's colour format is not supported. Use limited-range BT.709 SDR or limited-range BT.2020 PQ/HLG on the sender.") :
+					hevc422 ?
 					QStringLiteral("The sender is streaming HEVC 4:2:2 10-bit, which cannot be received. Please use the HEVC Main or Main10 profile on the sender.") :
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
@@ -430,6 +493,43 @@ bool OBSBasic::SetPixelviewReceiveFrameRate(uint32_t num, uint32_t den, QString 
 		config_set_uint(config, "PixelviewReceive", "FPSDen", den);
 		config_save_safe(config, "tmp", nullptr);
 	}
+	return true;
+}
+
+// The receive colour mode is fixed per connection; the canvas follows it immediately
+// in receive mode (which needs every output stopped), otherwise on the next switch.
+bool OBSBasic::SetPixelviewReceiveHdr(int hdr, int nits, QString &error)
+{
+	if (hdr < 0 || hdr > 2 || nits < 100 || nits > 10000) { error = QStringLiteral("Invalid HDR setting."); return false; }
+	if (pixelviewReceiveIntent) { error = QStringLiteral("Stop receiving to change HDR."); return false; }
+	if (pixelviewReceivePrecision && hdr != pixelviewReceiveHdr) {
+		obs_video_info current = {};
+		if (isClosing() || pixelviewReceivePrecisionFault || PixelviewReceiveVideoBusy() || !obs_get_video_info(&current)) {
+			error = QStringLiteral("Stop the DeckLink output to change HDR, then start it again.");
+			return false;
+		}
+		// Copy the module name: obs_reset_video tears down the previous video state.
+		const std::string currentModule = current.graphics_module ? current.graphics_module : "";
+		current.graphics_module = currentModule.c_str();
+		obs_video_info target = current;
+		target.colorspace = hdr == 1 ? VIDEO_CS_2100_PQ : hdr == 2 ? VIDEO_CS_2100_HLG : VIDEO_CS_709;
+		if (obs_reset_video(&target) != OBS_VIDEO_SUCCESS) {
+			if (obs_reset_video(&current) != OBS_VIDEO_SUCCESS) pixelviewReceivePrecisionFault = true;
+			error = QStringLiteral("Video could not be reset for HDR. Restart Pixelview if the preview stays black.");
+			return false;
+		}
+	}
+	if (hdr != pixelviewReceiveHdr || nits != pixelviewReceiveHdrNits)
+		blog(LOG_INFO, "Pixelview receive colour: %s%s", hdr == 1 ? "HDR PQ" : hdr == 2 ? "HDR HLG" : "SDR BT.709",
+		     hdr ? QStringLiteral(" at %1 nits").arg(nits).toUtf8().constData() : "");
+	pixelviewReceiveHdr = hdr;
+	pixelviewReceiveHdrNits = nits;
+	if (pixelviewReceivePrecision) obs_set_video_levels(pixelviewSendSdrWhite, hdr ? (float)nits : pixelviewSendHdrPeak);
+	auto *config = App()->GetUserConfig();
+	config_set_bool(config, "PixelviewReceive", "HDR", hdr != 0);
+	if (hdr) config_set_string(config, "PixelviewReceive", "HDRTransfer", hdr == 2 ? "hlg" : "pq");
+	config_set_int(config, "PixelviewReceive", "HDRNits", nits);
+	config_save_safe(config, "tmp", nullptr);
 	return true;
 }
 
@@ -653,6 +753,9 @@ void OBSBasic::RefreshPixelviewModes()
 	pixelviewReceivePassword->setEnabled(!busy);
 	pixelviewReceiveName->setEnabled(!busy);
 	pixelviewReceiveBuffer->setEnabled(!busy);
+	pixelviewReceiveHdrBox->setEnabled(!busy);
+	pixelviewReceiveHdrTransfer->setEnabled(!busy && pixelviewReceiveHdrBox->isChecked());
+	pixelviewReceiveHdrNitsBox->setEnabled(!busy && pixelviewReceiveHdrBox->isChecked());
 	pixelviewReceiveButton->setText(pixelviewReceiveIntent ? QStringLiteral("Stop receiving") : QStringLiteral("Start receiving"));
 	pixelviewReceiveButton->setEnabled(!isClosing() && !pixelviewShutdownPending && (pixelviewReceiveIntent || !busy));
 }

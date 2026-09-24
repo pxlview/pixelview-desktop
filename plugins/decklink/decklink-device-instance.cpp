@@ -658,6 +658,13 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		source_hdr &&
 		(obs_output_get_video_conversion(decklinkOutput->GetOutput())->colorspace == VIDEO_CS_2100_PQ);
 	BMDPixelFormat pixelFormat = enable_hdr ? bmdFormat10BitRGBXLE : bmdFormat8BitBGRA;
+	blog(LOG_INFO, "[decklink] output video: %s (canvas %s, %.0f nits)",
+	     enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "10-bit RGB HLG with HDR metadata"
+							: "10-bit RGB PQ with HDR metadata")
+	     : source_hdr ? "8-bit SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
+			  : "8-bit SDR",
+	     colorspace == VIDEO_CS_2100_PQ ? "Rec.2100 PQ" : colorspace == VIDEO_CS_2100_HLG ? "Rec.2100 HLG" : "SDR",
+	     obs_get_video_hdr_nominal_peak_level());
 	const int64_t minimumPrerollFrames = std::max(device->GetMinimumPrerollFrames(), INT64_C(3));
 	for (int64_t i = 0; i < minimumPrerollFrames; ++i) {
 		ComPtr<IDeckLinkMutableVideoFrame> decklinkOutputFrame;
@@ -672,7 +679,9 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		IDeckLinkVideoFrame *theFrame = decklinkOutputFrame.Get();
 		ComPtr<HDRVideoFrame> decklinkOutputHDRFrame;
 		if (enable_hdr) {
-			*decklinkOutputHDRFrame.Assign() = new HDRVideoFrame(decklinkOutputFrame);
+			// Pixelview: an HLG canvas is rendered as HLG, so its metadata says HLG.
+			*decklinkOutputHDRFrame.Assign() =
+				new HDRVideoFrame(decklinkOutputFrame, colorspace == VIDEO_CS_2100_HLG ? 3 : 2);
 			theFrame = decklinkOutputHDRFrame.Get();
 		}
 

@@ -196,7 +196,7 @@ class PixelviewLocalRelease(unittest.TestCase):
             "xcrun stapler staple",
             "xcrun stapler validate",
             "spctl --assess",
-            "hdiutil create",
+            "cmake/macos/pixelview-dmg.sh",
             "generate_appcast",
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
@@ -222,6 +222,20 @@ class PixelviewLocalRelease(unittest.TestCase):
         self.assertIn("--publish-latest", (ROOT / "release/pixelview-macos.sh").read_text())
         self.assertNotIn("OBS-Codesign-Password", script)
         self.assertNotIn("obsproject.com", script)
+
+    def test_dmg_install_window_layout(self):
+        dmg = (ROOT / "cmake/macos/pixelview-dmg.sh").read_text()
+        layout = (ROOT / "cmake/macos/pixelview-dmg-layout.applescript").read_text()
+        self.assertIn("hdiutil create", dmg)
+        self.assertIn("-format UDZO", dmg)
+        self.assertIn("pixelview-dmg-layout.applescript", dmg)
+        self.assertIn("resources/pixelview-dmg-background.tiff", dmg)
+        self.assertTrue((ROOT / "cmake/macos/resources/pixelview-dmg-background.tiff").is_file())
+        # The install window shows the app, the Applications shortcut and the Licenses folder.
+        for item in ('"Pixelview Desktop.app"', '"Applications"', '"Licenses"'):
+            self.assertIn(f"position of item {item}", layout)
+        self.assertIn('file ".background:background.tiff"', layout)
+        subprocess.run(["bash", "-n", str(ROOT / "cmake/macos/pixelview-dmg.sh")], check=True)
 
         build = (ROOT / "cmake/macos/pixelview-build.sh").read_text()
         for required in (

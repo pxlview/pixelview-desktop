@@ -99,5 +99,25 @@ public:
     });
   });
  }
+ // Removes this device from the Pixelview account with its own device token
+ // (DELETE /desktop/device). done(true) when the account no longer lists it:
+ // removed now (200) or already revoked/unknown (401/404).
+ void unregister(QUrl url,const QString &token,std::function<void(bool)> done) {
+  url.setPath("/desktop/device");
+  log(QStringLiteral("removing this device from the Pixelview account at %1").arg(url.adjusted(QUrl::RemovePath).toString()));
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization","Bearer "+token.toUtf8());
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+  request.setTransferTimeout(10000);
+  auto reply=http.deleteResource(request);
+  connect(reply,&QNetworkReply::finished,this,[this,reply,done]{
+   const int http=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+   const QString transport=reply->error()==QNetworkReply::NoError ? QStringLiteral("none") : reply->errorString();
+   reply->deleteLater();
+   const bool removed=http==200 || http==401 || http==404;
+   log(QStringLiteral("account removal %1: HTTP %2, transport error: %3").arg(removed ? QStringLiteral("done") : QStringLiteral("failed")).arg(http).arg(transport));
+   done(removed);
+  });
+ }
 };
 }

@@ -103,7 +103,9 @@ public:
  template<class T> T findChild(QString) {return &button;}
  bool isClosing()const{return isClosing_;}
  void StreamingStopped(){++stoppedSignals;pixelviewStreamingBusy=false;}
- void FinishPixelviewUnpair(){++unpairs;pixelviewUnpairPending=false;}
+ void UnregisterPixelviewDesktop(){++unpairs;pixelviewUnpairPending=false;}
+ // Local credential removal after revocation is compiled with Qt in test_pairing_ux.
+ int revocationCleanups=0; void CompletePixelviewRevocation(){++revocationCleanups;}
  void PixelviewOutputStopped();
  void QueuePixelviewOutputStopped(int delay=0);
  void CancelPixelviewStart();
@@ -168,8 +170,10 @@ int main() {
    revoked.connection.message(R"({"mutation":"SOCKET_DESKTOP_REVOKED","data":{}})");
    assert(revoked.pixelviewLease.revoked && !revoked.pixelviewLease.intent && output.forceStops==1);
    assert(revoked.connection.authorizedToken.isEmpty() && revoked.pixelviewUnpairRetry && !revoked.pixelviewPairingDurable);
+   assert(revoked.revocationCleanups==1);
    assert(config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
    revoked.connection.disconnected(1000); assert(!revoked.pixelviewLease.transientFailure && revoked.pixelviewReconnectAt==0);
+   assert(revoked.revocationCleanups==1);
    Timer::run(); application.config.booleans.clear();
  }
  std::cout<<"control loss keeps media, replaced/revoked mutations decide before the close PASS\n";
@@ -317,7 +321,7 @@ int main() {
  assert(!revoke.pixelviewPairingDurable && revoke.pixelviewUnpairRetry);
  assert(config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled"));
  assert(revoke.pixelviewIdentity.nodeId=="retained-node" && revoke.pixelviewIdentity.desktopId=="retained-desktop");
- assert(revoke.connection.authorizedToken.isEmpty());
+ assert(revoke.connection.authorizedToken.isEmpty() && revoke.revocationCleanups==1);
  assert(!revoke.pixelviewLease.takeRetry(99999,true));
  Timer::run();assert(revoke.unpairs==0 && revoke.connection.closes==1);
  revoke.ConnectPixelviewDesktop();assert(revoke.authentications==0 && revoke.pixelviewReconnectAt==0);

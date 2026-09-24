@@ -87,7 +87,12 @@ HRESULT OBSVideoFrame::GetBytes(void **buffer)
 
 #define CompareREFIID(iid1, iid2) (memcmp(&iid1, &iid2, sizeof(REFIID)) == 0)
 
-HDRVideoFrame::HDRVideoFrame(IDeckLinkMutableVideoFrame *frame) : m_videoFrame(frame), m_refCount(1) {}
+HDRVideoFrame::HDRVideoFrame(IDeckLinkMutableVideoFrame *frame, int64_t eotf)
+	: m_videoFrame(frame),
+	  m_refCount(1),
+	  m_eotf(eotf)
+{
+}
 
 HRESULT HDRVideoFrame::QueryInterface(REFIID iid, LPVOID *ppv)
 {
@@ -133,7 +138,7 @@ HRESULT HDRVideoFrame::GetInt(BMDDeckLinkFrameMetadataID metadataID, int64_t *va
 
 	switch (metadataID) {
 	case bmdDeckLinkFrameMetadataHDRElectroOpticalTransferFunc:
-		*value = 2;
+		*value = m_eotf;
 		break;
 
 	case bmdDeckLinkFrameMetadataColorspace:

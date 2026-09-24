@@ -57,11 +57,20 @@ for entry in re.split(r'FormatID:\s*"',mapper)[1:]:
 subprocess.run(['go','build','-mod=mod','-o','server','.'],cwd=WORK,env=env,check=True,timeout=90)
 if os.environ.get('PV_LOOPBACK_BUILD_ONLY') == '1':
     raise SystemExit(0)
-cases=[('h264-8bit-420','h264','8',97),('hevc-8bit-420','main','8',96),('hevc-10bit-420','main10','10',120),('vp9-8bit-420','vp9_0','8',98),('vp9-10bit-420','vp9_2','10',121),('negative','negative','negative',None)]
+# (format, encoder profile, depth, payload type, fixture colour, receive mode, expected colour refusal).
+# Receive mode None is the historical connect without a colour argument.
+cases=[('h264-8bit-420','h264','8',97,'sdr',None,None),('hevc-8bit-420','main','8',96,'sdr',None,None),('hevc-10bit-420','main10','10',120,'sdr',None,None),('vp9-8bit-420','vp9_0','8',98,'sdr',None,None),('vp9-10bit-420','vp9_2','10',121,'sdr',None,None),('negative','negative','negative',None,'sdr',None,None),
+ ('hevc-10bit-420','main10','10',120,'pq','pq',None),('hevc-10bit-420','main10','10',120,'hlg','hlg',None),
+ ('vp9-10bit-420','vp9_2','10',121,'pq','pq',None),('vp9-10bit-420','vp9_2','10',121,'hlg','hlg',None),
+ ('hevc-10bit-420','main10','10',120,'pq','hlg','hdr-transfer-mismatch'),('hevc-10bit-420','main10','10',120,'pq','sdr','hdr-source-needs-hdr-receive'),
+ ('hevc-10bit-420','main10','10',120,'sdr','pq','sdr-source-in-hdr-receive'),('vp9-10bit-420','vp9_2','10',121,'pq','sdr','hdr-source-needs-hdr-receive')]
+HDR_TAGS={'pq':('bt2020','smpte2084','bt2020nc'),'hlg':('bt2020','arib-std-b67','bt2020nc'),'sdr':('bt709','bt709','bt709')}
 results=[]
-for fmt,name,depth,pt in cases:
-    if os.environ.get('PV_LOOPBACK_CASE') and name!=os.environ['PV_LOOPBACK_CASE']:continue
-    case=WORK/name;case.mkdir(exist_ok=True);case.chmod(0o700);shutil.copyfile(WORK/'fixtures.json',case/'fixtures.json')
+for fmt,name,depth,pt,fixture,mode,refusal in cases:
+    label=name if mode is None else f'{name}-{fixture}-as-{mode}'
+    if os.environ.get('PV_LOOPBACK_CASE') and label!=os.environ['PV_LOOPBACK_CASE']:continue
+    prim,trc,space=HDR_TAGS[fixture]
+    case=WORK/label;case.mkdir(exist_ok=True);case.chmod(0o700);shutil.copyfile(WORK/'fixtures.json',case/'fixtures.json')
     for stale in ['ready.json','offer.sdp','answer.sdp','bound.json']:
         (case/stale).unlink(missing_ok=True)
     children=[]
@@ -75,23 +84,23 @@ for fmt,name,depth,pt in cases:
         if pt is not None:
             file=case/('video.ivf' if name.startswith('vp9') else 'video.'+('h264' if name=='h264' else 'hevc'))
             # VP9 encodes a single BT709 color-space enum, not separate AVC/HEVC VUI fields.
-            expected_color={'color_range':'tv','color_space':'bt709'}
-            if not name.startswith('vp9'):expected_color.update(color_transfer='bt709',color_primaries='bt709')
+            expected_color={'color_range':'tv','color_space':space}
+            if not name.startswith('vp9'):expected_color.update(color_transfer=trc,color_primaries=prim)
             cached=[]
             if file.exists() and file.stat().st_size:
                 cached=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(file)],text=True)).get('streams',[])
             color_ok=bool(cached) and all(cached[0].get(k)==v for k,v in expected_color.items())
             if not color_ok:
                 pixel='yuv420p10le' if depth=='10' else 'yuv420p';ramp='64+876*X/W' if depth=='10' else '16+219*X/W';chroma='512' if depth=='10' else '128'
-                gen=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'nullsrc=s=1024x128:r=30,format={pixel},geq=lum={ramp}:cb={chroma}:cr={chroma}','-frames:v','300','-color_range','tv','-colorspace','bt709','-color_trc','bt709','-color_primaries','bt709']
+                gen=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'nullsrc=s=1024x128:r=30,format={pixel},geq=lum={ramp}:cb={chroma}:cr={chroma}','-frames:v','300','-color_range','tv','-colorspace',space,'-color_trc',trc,'-color_primaries',prim]
                 if name=='h264':gen+=['-c:v','libx264','-preset','ultrafast','-profile:v','baseline','-level:v','4.2','-x264-params','keyint=30:bframes=0:threads=1:colorprim=bt709:transfer=bt709:colormatrix=bt709','-crf','10']
-                elif name.startswith('main'):gen+=['-c:v','libx265','-preset','ultrafast','-profile:v',name,'-x265-params','crf=1:level-idc=4.1:high-tier=0:bframes=0:keyint=30:log-level=error:pools=1:frame-threads=1:colorprim=bt709:transfer=bt709:colormatrix=bt709']
+                elif name.startswith('main'):gen+=['-c:v','libx265','-preset','ultrafast','-profile:v',name,'-x265-params',f'crf=1:level-idc=4.1:high-tier=0:bframes=0:keyint=30:log-level=error:pools=1:frame-threads=1:colorprim={prim}:transfer={trc}:colormatrix={space}'+(':hdr10=1:max-cll=1000,400' if fixture=='pq' else '')]
                 else:gen+=['-c:v','libvpx-vp9','-profile:v',name[-1],'-lossless','1','-deadline','realtime','-cpu-used','8','-threads','1','-lag-in-frames','0','-g','30']
                 generated=subprocess.run(gen+[str(file)],capture_output=True,text=True,timeout=60)
                 assert generated.returncode==0,generated.stderr
             probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(file)],text=True));(case/'encoded.json').write_text(json.dumps(probe))
             assert all(probe['streams'][0].get(k)==v for k,v in expected_color.items()),probe
-            receiver=subprocess.Popen([str(WORK/'receiver'),info['endpoint'],depth],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);children.append(receiver)
+            receiver=subprocess.Popen([str(WORK/'receiver'),info['endpoint'],depth]+([mode] if mode else [])+([refusal] if refusal else []),env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);children.append(receiver)
             for _ in range(160):
                 if 'CONNECTED' in (case/'server.log').read_text() or receiver.poll() is not None:break
                 time.sleep(.05)
@@ -102,12 +111,14 @@ for fmt,name,depth,pt in cases:
         stdout,stderr=receiver.communicate(timeout=25)
         result=subprocess.CompletedProcess(receiver.args,receiver.returncode,stdout,stderr)
         (case/'receiver.log').write_text(result.stdout+result.stderr)
-        lines=[l for l in result.stdout.splitlines() if l.startswith('LOOPBACK_RESULT')];print(name,lines,flush=True)
-        row={'name':name,'result':lines,'passed':result.returncode==0}
+        lines=[l for l in result.stdout.splitlines() if l.startswith(('LOOPBACK_RESULT','LOOPBACK_FAILURE'))];print(label,lines,flush=True)
+        raw=[l for l in result.stderr.splitlines() if l.startswith('RAW_VIDEO')]
+        if raw:print(' ',raw[0],flush=True)
+        row={'name':label,'result':lines,'passed':result.returncode==0}
         if pt is None:row['passed']=row['passed'] and (case/'offer.sdp').exists() and 'jitter=50' in '\n'.join(lines)
         if not row['passed']:
             results.append(row);(case/'result.json').write_text(json.dumps(row,indent=2));(WORK/'results.json').write_text(json.dumps(results,indent=2));continue
-        if pt is not None:
+        if pt is not None and not refusal:
             bound=json.loads((case/'bound.json').read_text());assert bound['selected']==fmt and bound['video']['PayloadType']==pt,bound
             assert bound['audio']['MimeType'].lower()=='audio/opus',bound
             for sdp in ['offer.sdp','answer.sdp']:
@@ -121,6 +132,6 @@ for fmt,name,depth,pt in cases:
             try:child.wait(timeout=5)
             except subprocess.TimeoutExpired:child.kill();child.wait()
 results=json.loads((WORK/'results.json').read_text())
-assert len(results)==(1 if os.environ.get('PV_LOOPBACK_CASE') else 6)
+assert len(results)==(1 if os.environ.get('PV_LOOPBACK_CASE') else len(cases))
 assert all(r['passed'] for r in results),[r['name'] for r in results if not r['passed']]
 print('PASS requested compressed WHEP loopback cases')

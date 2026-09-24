@@ -1,7 +1,9 @@
 """Pairing failures are diagnosable from the log without ever logging the code."""
+import http.server
 import pathlib
 import subprocess
 import tempfile
+import threading
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -44,6 +46,64 @@ int main() {
             self.assertNotIn('object["device_token"]', line)
             self.assertNotIn('arg(code)', line)
             self.assertNotIn('arg(token', line)
+
+    def test_unpair_removes_the_device_from_the_account_with_its_own_token(self):
+        # Real QNetworkAccessManager against a loopback server: the Desktop sends
+        # DELETE /desktop/device with its device token, and 200/401/404 all mean
+        # the account no longer lists it; anything else is reported as not removed.
+        requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_DELETE(self):
+                requests.append((self.path, self.headers.get('Authorization')))
+                status = int(self.headers.get('Authorization', '').rsplit('-', 1)[-1])
+                self.send_response(status)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        code = r'''#include "frontend/utility/PixelviewDesktopConnection.hpp"
+#include <QtCore/QCoreApplication>
+#include <cassert>
+#include <cstdio>
+// The native control socket is not part of this test.
+void pixelview::DesktopConnection::closeSocket(bool) {}
+int main(int argc,char **argv) {
+ QCoreApplication app(argc,argv);
+ pixelview::DesktopConnection connection;
+ QStringList logged; connection.log=[&](QString line){logged<<line;};
+ const QUrl origin(argv[1]);
+ auto removed=[&](QUrl url,QString token){
+  int result=-1;
+  connection.unregister(url,token,[&](bool ok){result=ok;});
+  while(result<0) app.processEvents(QEventLoop::WaitForMoreEvents);
+  return result==1;
+ };
+ assert(removed(origin,"token-200"));
+ assert(removed(origin,"token-401"));
+ assert(removed(origin,"token-404"));
+ assert(!removed(origin,"token-500"));
+ assert(!removed(QUrl(argv[2]),"token-200")); // nothing listening
+ for(const QString &line : logged) assert(!line.contains("token-"));
+ std::puts("unregister PASS");
+}'''
+        with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            with tempfile.TemporaryDirectory() as tmp:
+                src = pathlib.Path(tmp) / 'unregister.cpp'
+                src.write_text(code)
+                subprocess.run(['clang++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I' + str(ROOT), '-F' + str(QT), '-framework', 'QtCore',
+                                '-framework', 'QtNetwork', '-Wl,-rpath,' + str(QT), str(src), '-o', tmp + '/test'], check=True)
+                closed = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+                closed_port = closed.server_address[1]
+                closed.server_close()
+                subprocess.run([tmp + '/test', 'http://127.0.0.1:%d' % server.server_address[1], 'http://127.0.0.1:%d' % closed_port],
+                               check=True, timeout=30)
+            server.shutdown()
+        self.assertEqual([path for path, _ in requests], ['/desktop/device'] * 4)
+        self.assertEqual([auth for _, auth in requests], ['Bearer token-%d' % s for s in (200, 401, 404, 500)])
 
     def test_https_pairing_has_a_bundled_tls_backend(self):
         # The exchange is the app's only Qt HTTPS client; upstream's plugin list has no TLS backend.

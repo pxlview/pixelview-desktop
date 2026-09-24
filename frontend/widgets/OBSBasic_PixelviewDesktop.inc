@@ -151,7 +151,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    RefreshPixelviewReconnect();
    return;
   }
-  pixelviewLease.fail(code==4401 ? "Device revoked. Pair again in Pixelview admin." :
+  pixelviewLease.fail(code==4401 ? "This Mac was unpaired from your Pixelview account." :
    code==4403 ? "Pixelview refused the control connection. If this device was revoked, unpair and pair again." :
    "Pixelview control disconnected. Stream stopped.",transient);
   if(code==4401) PixelviewDeviceRevoked();
@@ -307,10 +307,10 @@ void OBSBasic::ConnectPixelviewDesktop()
 }
 void OBSBasic::PixelviewDeviceRevoked()
 {
- // Revocation is not permission to delete a local credential or display UI.
  pixelviewDesktop->authorizedToken.clear();
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
  pixelviewPairingDurable=false; pixelviewUnpairRetry=true; SavePixelviewIdentity(); pixelviewReconnectAt=0;
+ CompletePixelviewRevocation();
 }
 bool OBSBasic::PixelviewLeaseValid() const {return pixelviewDesktop && !pixelviewShutdownPending && !pixelviewUnpairPending && pixelviewLease.authorized(pixelviewClock.elapsed());}
 bool OBSBasic::RequestPixelviewStart()
@@ -339,7 +339,7 @@ void OBSBasic::PixelviewOutputStopped()
  pixelviewActualStreaming=false;pixelviewStartPermit=false;
  if(!pixelviewLease.intent) pixelviewLease.outputStopped();
  if(pixelviewStreamingBusy) {pixelviewStreamingBusy=false; emit StreamingStopped();}
- if(pixelviewUnpairPending) FinishPixelviewUnpair();
+ if(pixelviewUnpairPending) UnregisterPixelviewDesktop();
  if(pixelviewClosingSocket) {pixelviewDesktop->closeSocket();pixelviewClosingSocket=false;}
  if(pixelviewPreviousService) {service=pixelviewPreviousService;pixelviewPreviousService=nullptr;}
  RefreshPixelviewReconnect();
@@ -406,7 +406,24 @@ bool OBSBasic::SavePixelviewIdentity()
  RefreshPixelviewPairing();
  return saved;
 }
-void OBSBasic::FinishPixelviewUnpair()
+void OBSBasic::UnregisterPixelviewDesktop()
+{
+ // Take the device token before it is forgotten; a restart may not have read it yet.
+ const bool validOrigin=pixelview::Desktop::validOrigin(pixelviewOrigin,pixelviewDev);
+ QString token=pixelviewDesktop->authorizedToken;
+ if(token.isEmpty() && validOrigin) token=pixelview::loadDevice(pixelviewOrigin.toString());
+ pixelviewReconnectAt=0;pixelviewAuthDeadline=0;
+ pixelviewDesktop->closeSocket();pixelviewLease.ready=false;
+ // Quitting mid-request must still leave the installation unpaired locally.
+ config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
+ if(token.isEmpty() || !validOrigin) {FinishPixelviewUnpair(PixelviewAccountRemoval::NoCredential);return;}
+ pixelviewConnectionStatus->setText(QStringLiteral("Removing this Mac from your Pixelview account…"));
+ pixelviewDesktop->unregister(pixelviewOrigin,token,[this](bool removed){
+  if(isClosing() || pixelviewShutdownPending) return;
+  FinishPixelviewUnpair(removed ? PixelviewAccountRemoval::Removed : PixelviewAccountRemoval::Unreachable);
+ });
+}
+void OBSBasic::FinishPixelviewUnpair(PixelviewAccountRemoval account)
 {
  pixelviewReconnectAt=0;pixelviewAuthDeadline=0;
  pixelviewDesktop->closeSocket();pixelviewLease.ready=false;
@@ -416,7 +433,7 @@ void OBSBasic::FinishPixelviewUnpair()
  pixelviewPairingDurable=false;
  SavePixelviewIdentity();
  const auto origin=pixelviewOrigin;
- pixelview::runKeychainUserAction(this,[origin]{return pixelview::removeDevice(origin.toString());},[this](bool removed){
+ pixelview::runKeychainUserAction(this,[origin]{return pixelview::removeDevice(origin.toString());},[this,account](bool removed){
  if(isClosing() || pixelviewShutdownPending) return;
  if(removed) {pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();}
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",removed);
@@ -426,10 +443,31 @@ void OBSBasic::FinishPixelviewUnpair()
   pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: identity could not be saved. Do not restart; retry Unpair."));
  } else if(!removed) {
   pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: Keychain removal failed. Check Keychain access, then click Unpair again. Connection remains disabled."));
- } else pixelviewConnectionStatus->setText(QStringLiteral("Not paired. This installation only; admin registration is not revoked."));
+ } else if(account==PixelviewAccountRemoval::Removed) {
+  pixelviewConnectionStatus->setText(QStringLiteral("Unpaired. This Mac was removed from your Pixelview account."));
+ } else if(account==PixelviewAccountRemoval::Unreachable) {
+  pixelviewConnectionStatus->setText(QStringLiteral("Unpaired on this Mac, but Pixelview could not be reached to remove it from your account. Remove it in Pixelview admin."));
+ } else pixelviewConnectionStatus->setText(QStringLiteral("Unpaired on this Mac. If it is still listed in your Pixelview account, remove it in Pixelview admin."));
  pixelviewUnpairPending=false;
  RefreshPixelviewPairing();
  });
+}
+void OBSBasic::CompletePixelviewRevocation()
+{
+ // Unpaired from the Pixelview account (admin Unpair, or a token the backend no
+ // longer accepts). Finish the local Unpair without any prompt; if the Keychain
+ // would need one, leave Unpair in place for the user to finish it.
+ if(!pixelview::removeDevice(pixelviewOrigin.toString())) {
+  pixelviewConnectionStatus->setText(QStringLiteral("This Mac was unpaired from your Pixelview account. Click Unpair to finish removing it from this Mac."));
+  RefreshPixelviewPairing();return;
+ }
+ pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();
+ config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",true);
+ pixelviewUnpairRetry=!SavePixelviewIdentity();
+ pixelviewConnectionStatus->setText(pixelviewUnpairRetry ?
+  QStringLiteral("This Mac was unpaired from your Pixelview account, but its settings could not be saved. Click Unpair to finish.") :
+  QStringLiteral("This Mac was unpaired from your Pixelview account. Pair again to stream from it."));
+ RefreshPixelviewPairing();
 }
 QJsonObject OBSBasic::PixelviewReportedSettings()
 {

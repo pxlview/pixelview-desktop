@@ -3,6 +3,8 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
 uniform float multiplier;
+// Pixelview: HLG nominal peak (nits) for DrawAlphaDivideR10LHLG.
+uniform float hdr_lw;
 
 sampler_state def_sampler {
 	Filter   = Linear;
@@ -51,6 +53,22 @@ float4 PSDrawAlphaDivideR10L(VertInOut vert_in) : TARGET
 	rgba.rgb *= (rgba.a > 0.) ? (multiplier / rgba.a) : 0.;
 	rgba.rgb = rec709_to_rec2020(rgba.rgb);
 	rgba.rgb = linear_to_st2084(rgba.rgb);
+	uint3 rgb1023 = uint3(mad(rgba.rgb, 876., 64.5));
+	uint b = (rgb1023.b & 0x3Fu) << 2;
+	uint g = ((rgb1023.b & 0x3C0u) >> 6) | ((rgb1023.g & 0xFu) << 4);
+	uint r = ((rgb1023.g & 0x3F0u) >> 4) | ((rgb1023.r & 0x3u) << 6);
+	uint a = ((rgb1023.r & 0x3FCu) >> 2);
+	return float4(uint4(r, g, b, a)) / 255.;
+}
+
+// Pixelview: the R10L packing above with the HLG OETF (as the P010/I010 HLG
+// conversions: multiplier is SDR white / 10000, hdr_lw the nominal peak).
+float4 PSDrawAlphaDivideR10LHLG(VertInOut vert_in) : TARGET
+{
+	float4 rgba = image.Sample(def_sampler, vert_in.uv);
+	rgba.rgb *= (rgba.a > 0.) ? (multiplier / rgba.a) : 0.;
+	rgba.rgb = rec709_to_rec2020(rgba.rgb);
+	rgba.rgb = linear_to_hlg(rgba.rgb, hdr_lw);
 	uint3 rgb1023 = uint3(mad(rgba.rgb, 876., 64.5));
 	uint b = (rgb1023.b & 0x3Fu) << 2;
 	uint g = ((rgb1023.b & 0x3C0u) >> 6) | ((rgb1023.g & 0xFu) << 4);
@@ -177,6 +195,15 @@ technique DrawAlphaDivideR10L
 	{
 		vertex_shader = VSDefault(vert_in);
 		pixel_shader  = PSDrawAlphaDivideR10L(vert_in);
+	}
+}
+
+technique DrawAlphaDivideR10LHLG
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawAlphaDivideR10LHLG(vert_in);
 	}
 }
 

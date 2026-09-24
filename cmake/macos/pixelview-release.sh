@@ -145,7 +145,7 @@ printf 'Target: %s; feed: %s\n' "$architecture" "$appcast_url"
 [[ "$mode" == validate ]] && exit 0
 
 [[ "$(uname -s)" == Darwin ]] || die "macOS is required"
-for command in git cmake codesign hdiutil security shasum spctl xcrun curl python3; do
+for command in git cmake codesign hdiutil osascript security shasum spctl xcrun curl python3; do
   command -v "$command" >/dev/null || die "missing command: $command"
 done
 
@@ -541,7 +541,8 @@ Source commit: $source_commit
 OBS base: $obs_base_describe ($obs_base_commit)
 EOF
 
-  hdiutil create -volname "Pixelview Desktop $version" -srcfolder "$stage" -ov -format UDZO "$dmg_path"
+  # Background, Finder window layout (app -> Applications, Licenses below) and compression.
+  bash "$root/cmake/macos/pixelview-dmg.sh" "$stage" "Pixelview Desktop $version" "$dmg_path"
   codesign --force --sign "$identity" --timestamp "$dmg_path"
   codesign --verify --verbose=2 "$dmg_path"
   xcrun notarytool submit "$dmg_path" "${notary_auth_args[@]}" --wait --output-format json \

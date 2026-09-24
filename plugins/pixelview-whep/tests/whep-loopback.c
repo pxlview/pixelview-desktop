@@ -12,12 +12,13 @@
 static GMutex audit_lock;
 static unsigned videos, codes;
 static bool seen[1024];
+static enum video_trc expected_trc=VIDEO_TRC_DEFAULT;
 static double audio_energy;
 static void audit_video(obs_source_t *s,const struct obs_source_frame2 *f)
 {
  g_assert_cmpint(f->format,==,VIDEO_FORMAT_P010);
  g_assert_cmpint(f->range,==,VIDEO_RANGE_PARTIAL);
- g_assert_cmpint(f->trc,==,VIDEO_TRC_DEFAULT);
+ g_assert_cmpint(f->trc,==,expected_trc);
  g_mutex_lock(&audit_lock);
  if (!videos++) for(unsigned y=0;y<f->height;y++) {
   const uint16_t *p=(const uint16_t *)(f->data[0]+y*f->linesize[0]);
@@ -93,26 +94,32 @@ static GstSample *audit_pull(GstAppSink *sink)
 #undef obs_source_output_audio
 int main(int argc,char **argv)
 {
- g_assert_cmpint(argc,==,3);
+ /* argv[3]: receive colour mode (absent = historical SDR connect); argv[4]: expected colour refusal. */
+ g_assert_true(argc>=3&&argc<=5);
  /* Bearer token for the WHEP resource DELETE/PATCH: decoded like the engine's url.Query(). */
  char *t=endpoint_token("https://api4.example/ingress/1/whep/2?viewer_id=v&token=YWJj-_%3D");g_assert_cmpstr(t,==,"YWJj-_=");wipe(&t);
  t=endpoint_token("https://api4.example/ingress/1/whep/2?token=a+b");g_assert_cmpstr(t,==,"a b");wipe(&t);
  g_assert_null(endpoint_token("https://api4.example/ingress/1/whep/2"));
  g_assert_null(endpoint_token("https://api4.example/ingress/1/whep/2?token="));
  g_assert_null(endpoint_token("not a url"));
- setbuf(stdout,NULL);gst_init(NULL,NULL);g_mutex_init(&audit_lock);
+ const char *color=argc>3?argv[3]:NULL,*refusal=argc>4?argv[4]:NULL;
+ expected_trc=color&&!strcmp(color,"pq")?VIDEO_TRC_PQ:color&&!strcmp(color,"hlg")?VIDEO_TRC_HLG:VIDEO_TRC_DEFAULT;setbuf(stdout,NULL);gst_init(NULL,NULL);g_mutex_init(&audit_lock);
  g_assert_true(obs_startup("en-US",NULL,NULL));struct obs_audio_info ai={.samples_per_sec=48000,.speakers=SPEAKERS_STEREO};g_assert_true(obs_reset_audio(&ai));g_assert_true(obs_module_load());
  obs_source_t *source=obs_source_create_private("pixelview_whep_source","isolated-loopback",NULL);g_assert_nonnull(source);
- proc_handler_t *ph=obs_source_get_proc_handler(source);calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint",argv[1]);calldata_set_int(&cd,"latency",50);g_assert_true(proc_handler_call(ph,"connect",&cd));
+ proc_handler_t *ph=obs_source_get_proc_handler(source);calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint",argv[1]);calldata_set_int(&cd,"latency",50);if(color)calldata_set_string(&cd,"color",color);g_assert_true(proc_handler_call(ph,"connect",&cd));
  bool negative=!strcmp(argv[2],"negative"),passed=false;uint64_t frames=0,audio=0;int jitter=-1;
  for(unsigned i=0;i<180;i++){
   g_usleep(100000);g_assert_true(proc_handler_call(ph,"get_status",&cd));
   frames=calldata_int(&cd,"frames");audio=calldata_int(&cd,"audio_frames");jitter=(int)calldata_int(&cd,"jitter_latency");
-  if(!strcmp(calldata_string(&cd,"state"),"error")){passed=negative&&!frames&&!audio;break;}
+  if(!strcmp(calldata_string(&cd,"state"),"error")){
+   const char *failure=calldata_string(&cd,"failure");
+   passed=refusal?!frames&&failure&&!strcmp(failure,refusal):negative&&!frames&&!audio;
+   printf("LOOPBACK_FAILURE %s\n",failure&&*failure?failure:"none");break;
+  }
   if(!negative&&frames>=30&&audio>=24000){passed=true;break;}
  }
  g_assert_true(proc_handler_call(ph,"disconnect",&cd));obs_source_release(source);obs_wait_for_destroy_queue();
  g_mutex_lock(&audit_lock);printf("LOOPBACK_RESULT frames=%llu audio=%llu jitter=%d audited=%u codes=%u energy=%g negative=%d passed=%d\n",(unsigned long long)frames,(unsigned long long)audio,jitter,videos,codes,audio_energy,negative,passed);
- if(!negative)passed=passed&&jitter==50&&videos>=30&&audio_energy>1&&codes>(!strcmp(argv[2],"10")?256u:0u);
+ if(!negative&&!refusal)passed=passed&&jitter==50&&videos>=30&&audio_energy>1&&codes>(!strcmp(argv[2],"10")?256u:0u);
  g_mutex_unlock(&audit_lock);calldata_free(&cd);obs_shutdown();g_mutex_clear(&audit_lock);return passed?0:1;
 }
