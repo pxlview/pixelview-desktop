@@ -295,6 +295,24 @@ An earlier backend handoff proposing receiver registration over the control sock
 - Video: decodebin3 -> P010 policy -> clocked appsink -> `obs_source_output_video2`. Audio: bounded
   queues -> F32 stereo 48 kHz -> clocked appsink -> `obs_source_output_audio`. Both share the
   pipeline clock, and the source runs libobs async-unbuffered so frames are not rebuffered twice.
+  OBS timestamps are the sink render time (base + running time + the sink's configured pipeline
+  latency), so unbuffered video and timestamped audio line up in OBS. Audio arriving more than
+  50 ms past its render time is withheld rather than delivered: libobs raises its global audio
+  buffering for stale audio and never lowers it, so one startup burst used to delay receive audio
+  (and later sending) for the rest of the session (640-960 ms seen).
+- The bundled `applemedia` plugin is rebuilt from gst-plugins-bad 1.28.3 with a vtdec patch that
+  sizes the HEVC output reorder queue from the stream's SPS. Upstream holds 16 frames (~640 ms at
+  25 fps) regardless of B-frames and cannot declare it without a caps framerate, so HEVC video
+  used to arrive ~600 ms behind audio and ~600 ms later than necessary. H.264 (baseline, no
+  reordering) and VP9 were not affected.
+- The log records the configured sink latency with each stage's cumulative latency once per
+  change (`[pixelview-whep] sink latency`) and the worst video/audio lateness against render time
+  plus withheld stale audio every 5 s (`[pixelview-whep] worst lateness`).
+- Verified 2026-09-28 against the production backend with an HEVC session and local monitoring
+  (no DeckLink): sink latency 120 ms (100 ms jitter buffer), video and audio 5-18 ms late, no
+  stale audio withheld, no receive-driven audio buffering, sync judged correct by ear. Before the
+  change the same setup measured video ~600 ms late and 896-960 ms of added audio buffering.
+  End-to-end glass-to-glass latency was not measured, and DeckLink output was not re-tested.
   Eight-bit sources are upconverted to P010 without gaining precision.
 - The patched signaller rejects POST redirects and pins the session `Location` to the accepted
   response origin. The endpoint's `?token=` is also set as the signaller `auth-token`, so session

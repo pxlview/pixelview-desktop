@@ -5,6 +5,7 @@
 #include <obs-module.h>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <gst/base/gstbasesink.h>
 #include <gst/video/video.h>
 #include <gst/audio/audio.h>
 #include <util/platform.h>
@@ -58,6 +59,10 @@ struct receiver {
  int jitter_latency;
  bool quit, changed, accept_samples;
  GstElement *pipe; /* worker-owned; callbacks finish before teardown */
+ GstClockTime logged_latency; /* worker-owned; last sink latency written to the log */
+ int64_t video_late, audio_late; /* lock; worst arrival minus stamped render time this window */
+ uint64_t audio_dropped; /* lock; stale audio frames withheld from OBS this window */
+ uint64_t late_window; /* worker-owned; start of the current lateness window */
 };
 /* libobs volume signals precede user_volume assignment; mute signals follow
  * user_muted assignment. Read calldata, NEVER those ordinary fields on media
@@ -267,16 +272,22 @@ static void disconnect_proc(void *opaque, calldata_t *cd)
  wipe(&r->endpoint); r->state = "idle"; r->changed = true; r->accept_samples = false;
  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
 }
-static uint64_t timestamp(GstSample *sample, GstElement *pipe)
+static uint64_t timestamp(GstSample *sample, GstElement *pipe, GstAppSink *sink)
 {
  GstBuffer *b = gst_sample_get_buffer(sample);
  const GstSegment *segment = gst_sample_get_segment(sample);
  GstClockTime time = GST_CLOCK_TIME_NONE;
  if (segment && GST_BUFFER_PTS_IS_VALID(b))
   time = gst_segment_to_running_time(segment, GST_FORMAT_TIME, GST_BUFFER_PTS(b));
- /* GstSystemClock and OBS use monotonic nanoseconds on macOS. Both media
-  * branches use the same pipeline base, preserving relative A/V PTS. */
- return GST_CLOCK_TIME_IS_VALID(time) ? gst_element_get_base_time(pipe) + time : os_gettime_ns();
+ /* GstSystemClock and OBS use monotonic nanoseconds on macOS. A clocked live
+  * sink releases a buffer at base + running + pipeline latency, so stamp that
+  * render time: without the latency every audio buffer reaches OBS already
+  * stale and libobs permanently raises global audio buffering, while
+  * unbuffered video shows on arrival (audio lags by the pipeline latency).
+  * Both branches share base and latency, preserving relative A/V PTS. */
+ return GST_CLOCK_TIME_IS_VALID(time) ?
+  gst_element_get_base_time(pipe) + time + (sink ? gst_base_sink_get_latency(GST_BASE_SINK(sink)) : 0) :
+  os_gettime_ns();
 }
 static gpointer preview_worker(gpointer opaque)
 {
@@ -361,7 +372,7 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
   }
  }
  if (native_preview) {
-  uint64_t pts = timestamp(sample, r->pipe);
+  uint64_t pts = timestamp(sample, r->pipe, sink);
   g_mutex_lock(&r->lock);
   bool current = !r->quit && (!native_preview || r->preview_enabled) && !r->changed && r->accept_samples && r->generation == r->active_generation;
   if (current) {
@@ -374,11 +385,14 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
   g_mutex_unlock(&r->lock);
   gst_sample_unref(sample); return GST_FLOW_OK;
  }
- frame.timestamp = timestamp(sample, r->pipe);
+ frame.timestamp = timestamp(sample, r->pipe, sink);
  g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation;
- if (deliver) { r->frames++; r->state = "playing"; r->last_video = os_gettime_ns(); }
+ if (deliver) {
+  r->frames++; r->state = "playing"; r->last_video = os_gettime_ns();
+  r->video_late = MAX(r->video_late, (int64_t)(r->last_video - frame.timestamp));
+ }
  g_mutex_unlock(&r->lock);
  if (deliver) obs_source_output_video2(r->source, &frame);
  g_rec_mutex_unlock(&r->delivery);
@@ -479,6 +493,11 @@ static GstPadProbeReturn early_audio_probe(GstPad *pad, GstPadProbeInfo *info, g
  }
  return GST_PAD_PROBE_OK;
 }
+/* libobs raises its global audio buffering for any audio older than its mix
+ * window and never lowers it again, so one startup burst (audio queued while
+ * the first video frame decodes) would delay receive audio for the whole
+ * session. Audio this far past its render time is withheld instead. */
+#define PV_STALE_AUDIO_NS (50 * GST_MSECOND)
 static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
 {
  struct receiver *r = opaque;
@@ -491,11 +510,16 @@ static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
  struct obs_source_audio audio = {0};
  audio.format = AUDIO_FORMAT_FLOAT; audio.speakers = SPEAKERS_STEREO;
  audio.samples_per_sec = info.rate; audio.frames = mapped.size / info.bpf;
- audio.data[0] = mapped.data; audio.timestamp = timestamp(sample, r->pipe);
+ audio.data[0] = mapped.data; audio.timestamp = timestamp(sample, r->pipe, sink);
  g_rec_mutex_lock(&r->delivery);
  g_mutex_lock(&r->lock);
  bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation;
- if (deliver) r->audio_frames += audio.frames;
+ if (deliver) {
+  const int64_t late = (int64_t)(os_gettime_ns() - audio.timestamp);
+  r->audio_late = MAX(r->audio_late, late);
+  if (late > (int64_t)PV_STALE_AUDIO_NS) { r->audio_dropped += audio.frames; deliver = false; }
+  else r->audio_frames += audio.frames;
+ }
  g_mutex_unlock(&r->lock);
  if (deliver) obs_source_output_audio(r->source, &audio);
  g_rec_mutex_unlock(&r->delivery);
@@ -760,6 +784,66 @@ static GstElement *make_pipeline(struct receiver *r, const char *endpoint)
  }
  return pipe;
 }
+/* Worker only, no receiver lock: which stage claims the latency every clocked
+ * sink waits for. Each value is the cumulative upstream minimum at that
+ * element's source pad. Logged once per change; names are GStreamer factories. */
+static void log_latency(struct receiver *r)
+{
+ GstElement *sink = gst_bin_get_by_name(GST_BIN(r->pipe), "video");
+ if (!sink) return;
+ GstClockTime latency = gst_base_sink_get_latency(GST_BASE_SINK(sink));
+ gst_object_unref(sink);
+ if (!GST_CLOCK_TIME_IS_VALID(latency) || latency == r->logged_latency) return;
+ r->logged_latency = latency;
+ static const char *stages[] = {"rtpjitterbuffer", "rtph264depay", "rtph265depay", "rtpvp9depay",
+  "rtpopusdepay", "h264parse", "h265parse", "vp9parse", "vtdec", "vtdec_hw", "opusdec",
+  "audioresample", NULL};
+ GString *text = g_string_new(NULL);
+ GstIterator *it = gst_bin_iterate_recurse(GST_BIN(r->pipe));
+ GValue item = G_VALUE_INIT;
+ for (GstIteratorResult next; (next = gst_iterator_next(it, &item)) != GST_ITERATOR_DONE && next != GST_ITERATOR_ERROR;) {
+  if (next == GST_ITERATOR_RESYNC) { g_string_truncate(text, 0); gst_iterator_resync(it); continue; }
+  GstElement *element = g_value_get_object(&item);
+  GstElementFactory *factory = gst_element_get_factory(element);
+  const char *name = factory ? gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory)) : NULL;
+  bool wanted = false;
+  for (int i = 0; name && stages[i]; i++) if (!strcmp(name, stages[i])) wanted = true;
+  GstPad *pad = wanted ? gst_element_get_static_pad(element, "src") : NULL;
+  if (pad) {
+   GstQuery *query = gst_query_new_latency();
+   gboolean live = FALSE; GstClockTime min = 0, max = 0;
+   if (gst_pad_query(pad, query)) {
+    gst_query_parse_latency(query, &live, &min, &max);
+    g_string_append_printf(text, " %s=%" G_GUINT64_FORMAT, name, min / GST_MSECOND);
+   }
+   gst_query_unref(query); gst_object_unref(pad);
+  }
+  g_value_reset(&item);
+ }
+ g_value_unset(&item); gst_iterator_free(it);
+ blog(LOG_INFO, "[pixelview-whep] sink latency %" G_GUINT64_FORMAT " ms; cumulative ms:%s",
+  latency / GST_MSECOND, text->str);
+ g_string_free(text, TRUE);
+}
+/* Worker only: worst lateness of delivered samples against their stamped render
+ * time, per 5 s window. Positive means OBS received the sample after it was due. */
+static void log_lateness(struct receiver *r)
+{
+ const uint64_t now = os_gettime_ns();
+ if (!r->late_window) { r->late_window = now; return; }
+ if (now - r->late_window < 5000000000ULL) return;
+ r->late_window = now;
+ g_mutex_lock(&r->lock);
+ const bool playing = r->frames || r->audio_frames;
+ const int64_t video = r->video_late, audio = r->audio_late;
+ const uint64_t dropped = r->audio_dropped;
+ r->video_late = r->audio_late = INT64_MIN; r->audio_dropped = 0;
+ g_mutex_unlock(&r->lock);
+ if (playing && (video != INT64_MIN || audio != INT64_MIN))
+  blog(LOG_INFO, "[pixelview-whep] worst lateness (5 s): video %lld ms, audio %lld ms, stale audio dropped %llu ms",
+   video == INT64_MIN ? -1LL : (long long)(video / 1000000), audio == INT64_MIN ? -1LL : (long long)(audio / 1000000),
+   (unsigned long long)(dropped / 48));
+}
 static void stop_pipeline(struct receiver *r)
 {
  g_mutex_lock(&r->lock); r->accept_samples=false; pv_feed_reset(&r->feed);
@@ -768,6 +852,8 @@ static void stop_pipeline(struct receiver *r)
   g_mutex_lock(&r->attempt->gate); r->attempt->receiver = NULL; g_mutex_unlock(&r->attempt->gate);
   attempt_unref(r->attempt, NULL); r->attempt = NULL;
  }
+ r->logged_latency = 0; r->late_window = 0;
+ g_mutex_lock(&r->lock); r->video_late = r->audio_late = INT64_MIN; r->audio_dropped = 0; g_mutex_unlock(&r->lock);
  bool had_pipeline=r->pipe != NULL;
  if (r->pipe) {
   gst_element_set_state(r->pipe, GST_STATE_NULL);
@@ -855,6 +941,7 @@ static gpointer worker(gpointer opaque)
    GstBus *bus = gst_element_get_bus(r->pipe);
    GstMessage *msg = gst_bus_timed_pop_filtered(bus, 100 * GST_MSECOND, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
    gst_object_unref(bus);
+   if (!msg) { log_latency(r); log_lateness(r); }
    g_mutex_lock(&r->lock);
    uint64_t last = r->native422_frames ? r->last_native_video : r->last_video;
    native422_failure_locked(r,msg);
@@ -886,6 +973,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
  sanitize(NULL, settings);
  struct receiver *r = g_new0(struct receiver, 1);
  r->source = source; r->state = "idle"; r->jitter_latency = -1;
+ r->video_late = r->audio_late = INT64_MIN;
  obs_source_set_async_unbuffered(source, true);
  r->preview_enabled = true;
  g_mutex_init(&r->lock); g_rec_mutex_init(&r->delivery); g_cond_init(&r->wake);

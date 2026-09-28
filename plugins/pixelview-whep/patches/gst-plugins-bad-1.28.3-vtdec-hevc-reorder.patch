@@ -1,0 +1,86 @@
+--- a/sys/applemedia/vtdec.c
++++ b/sys/applemedia/vtdec.c
+@@ -58,6 +58,7 @@
+ #include <gst/base/gstbytewriter.h>
+ #include <gst/video/video.h>
+ #include <gst/video/gstvideodecoder.h>
++#include <gst/codecparsers/gsth265parser.h>
+ #include <gst/gl/gstglcontext.h>
+ 
+ #include "vtutil.h"
+@@ -2034,12 +2035,75 @@
+ out:
+   gst_h264_decoder_config_record_free (config);
+   return ret;
++}
++
++/* The reorder queue only has to hold the stream's own reordering depth:
++ * sps_max_num_reorder_pics bounds how many frames can precede any frame in
++ * output order. Holding the level-agnostic DPB size instead delays every
++ * frame by up to 16 frames (640 ms at 25 fps) even when the stream has no
++ * B-frames, and that delay is not reported when the framerate is unknown. */
++static gboolean
++get_hevc_reorder_depth (GstVtdec * vtdec, GstBuffer * codec_data, gint * depth)
++{
++  GstH265Parser *parser;
++  GstH265DecoderConfigRecord *config = NULL;
++  GstMapInfo map;
++  gboolean found = FALSE;
++  guint i, j;
++
++  if (!codec_data || !gst_buffer_map (codec_data, &map, GST_MAP_READ))
++    return FALSE;
++
++  parser = gst_h265_parser_new ();
++  if (gst_h265_parser_parse_decoder_config_record (parser, map.data, map.size,
++          &config) != GST_H265_PARSER_OK) {
++    GST_WARNING_OBJECT (vtdec, "Failed to parse HEVC codec-data");
++    goto out;
++  }
++
++  *depth = 0;
++  for (i = 0; i < config->nalu_array->len; i++) {
++    GstH265DecoderConfigRecordNalUnitArray *array =
++        &g_array_index (config->nalu_array,
++        GstH265DecoderConfigRecordNalUnitArray, i);
++
++    for (j = 0; j < array->nalu->len; j++) {
++      GstH265NalUnit *nalu = &g_array_index (array->nalu, GstH265NalUnit, j);
++      GstH265SPS sps;
++
++      if (nalu->type != GST_H265_NAL_SPS)
++        continue;
++
++      if (gst_h265_parser_parse_sps (parser, nalu, &sps, FALSE) !=
++          GST_H265_PARSER_OK) {
++        GST_WARNING_OBJECT (vtdec, "Failed to parse HEVC SPS");
++        found = FALSE;
++        goto out;
++      }
++      *depth = MAX (*depth,
++          sps.max_num_reorder_pics[sps.max_sub_layers_minus1]);
++      found = TRUE;
++    }
++  }
++
++out:
++  if (config)
++    gst_h265_decoder_config_record_free (config);
++  gst_h265_parser_free (parser);
++  gst_buffer_unmap (codec_data, &map);
++  return found;
+ }
+ 
+ static gboolean
+ compute_hevc_decode_picture_buffer_size (GstVtdec * vtdec,
+     GstBuffer * codec_data, int *length)
+ {
++  if (get_hevc_reorder_depth (vtdec, codec_data, length)) {
++    *length = MIN (*length, 16);
++    GST_INFO_OBJECT (vtdec, "HEVC reorder depth from SPS: %d", *length);
++    return TRUE;
++  }
++
+   /* This value should be level dependent (table A.8)
+    * but let's assume the maximum possible one for simplicity. */
+   const gint max_luma_ps = 35651584;

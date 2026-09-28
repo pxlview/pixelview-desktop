@@ -74,6 +74,7 @@ fi
 # ordinary local development. Missing/unreviewed dependencies fail closed.
 python3 plugins/pixelview-whep/scripts/fetch-gstreamer.py
 python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
+python3 plugins/pixelview-whep/scripts/build-applemedia.py
 python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer
 
 # Upstream manual Xcode signing signs dependencies on copy. The release mode is

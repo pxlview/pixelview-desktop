@@ -9,6 +9,7 @@
       "Audited bundled FFmpeg reports GPL version 3 or later: resolve whole-combination GPLv3 distribution terms, full texts, exact FFmpeg sources/build configuration and transitive codec sources.",
       "Qt 6.11.1 exact module sources, third-party notices, patches, configure options and recipient replacement/relinking materials are incomplete.",
       "Official GStreamer 1.28.3 Cerbero recipes/patches and all exact transitive sources still need collection; SDK notices lack a separate gst-plugins-good directory.",
+      "gst-plugins-bad 1.28.3 applemedia is rebuilt from the pinned tarball with the vtdec patch; meson/ninja build tools are pinned by version but not archived.",
       "rswebrtc 0.15.2 source archive and MPL notice verified, but Cargo static dependency sources/notices and build-tool inputs remain incomplete.",
       "OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.",
       "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations."
@@ -17,8 +18,8 @@
   "runtime_bindings": [
     {
       "path": "plugins/pixelview-whep/runtime-lock.json",
-      "sha256": "50399fc7e59ef138c6eb0101839d4bce657dcc80ba60c9793db6f26fd1700282",
-      "size": 7835
+      "sha256": "9e960c000f483fc85fff8ca5f9ebd9dcd98cc9976aae45f868234697e327e20f",
+      "size": 9218
     },
     {
       "path": "CMakePresets.json",
@@ -76,8 +77,52 @@
         },
         {
           "path": "plugins/pixelview-whep/scripts/UPSTREAM.md",
-          "sha256": "e9722a39b5497078222380b30489ddbf341025dad312b2209f2fcf3e0935279c",
-          "size": 6004
+          "sha256": "1caaa02a48dd76a0f1059bdaa1b9f1586e716d0ea759dd63febde26e16a32115",
+          "size": 6480
+        }
+      ]
+    },
+    {
+      "id": "gst-plugins-bad-applemedia",
+      "version": "1.28.3",
+      "license": "LGPL-2.1-or-later",
+      "sources": [
+        {
+          "name": "gst-plugins-bad-1.28.3.tar.xz",
+          "url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.3.tar.xz",
+          "sha256": "4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00",
+          "size": 8003472
+        }
+      ],
+      "notices": [
+        {
+          "path": "plugins/pixelview-whep/licenses/applemedia/COPYING",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "size": 26530
+        }
+      ],
+      "patches": [
+        {
+          "path": "plugins/pixelview-whep/patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch",
+          "sha256": "ea34e1ae1b4616ed7dd847e26424f3bcaaf399e2ea6378495ddca1c9be716a84",
+          "size": 2769
+        }
+      ],
+      "recipes": [
+        {
+          "path": "plugins/pixelview-whep/scripts/build-applemedia.py",
+          "sha256": "ab00c0e1f3f1797ae2735275a03d5711739bda95f5d1103e8ce3d200e8720671",
+          "size": 5442
+        },
+        {
+          "path": "plugins/pixelview-whep/scripts/fetch-gstreamer.py",
+          "sha256": "d42eefd94ee02f3fb6dfef00d8e6c54178e0dacffe2bf0d622c3ac2a72c37371",
+          "size": 4985
+        },
+        {
+          "path": "plugins/pixelview-whep/scripts/UPSTREAM.md",
+          "sha256": "1caaa02a48dd76a0f1059bdaa1b9f1586e716d0ea759dd63febde26e16a32115",
+          "size": 6480
         }
       ]
     }

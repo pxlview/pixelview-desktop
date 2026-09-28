@@ -61,9 +61,6 @@
     "lib/libopus.0.dylib": "d8d4c08d2975ca4433ba70c7aa0664e18307bb4af78cd1421c886da35be0870a",
     "lib/gstreamer-1.0/libgstvideoparsersbad.dylib": "7bfbe26b72eeb328c3c31e3262e0c3191466e3e4c24b129cf744dac253638cf8",
     "lib/libgstcodecparsers-1.0.0.dylib": "add36d3decea85e4da730b5bf3ac9d1480538f239921244865947b676784fdbb",
-    "lib/gstreamer-1.0/libgstapplemedia.dylib": "91f01c2fe00a5ce11c06b9f6c05a2c2cd464cec8eff6aa577df8c60a818e047f",
-    "lib/libgstvulkan-1.0.0.dylib": "f86a2457b0d8889ac8a9ec0e95e9ec75bf83527ed7e563eda19f923cdb8e7e92",
-    "lib/libMoltenVK.dylib": "e50581be09547002fef15d4fa01ffd277e8726eb76969f338215770792e70eb8",
     "lib/libgstgl-1.0.0.dylib": "d3ef3faf5ebeeb54c4634bc57da0f5959d04bcebc26bbdb61c0f2cb1c7d79c66",
     "lib/gstreamer-1.0/libgstsctp.dylib": "501d74c6cc6f437e6b6889e10b789df31218d511faf0ac310ead0df709feaf71",
     "lib/gstreamer-1.0/libgstudp.dylib": "963baf1c88d7665022599477c9e0f5ad088c8a2b8f7dc9f5438d51ff7b229464",
@@ -87,6 +84,47 @@
       "--lib"
     ],
     "features": "upstream-default",
+    "sdk_distribution": {
+      "provider": "GStreamer project official macOS universal packages",
+      "version": "1.28.3",
+      "architecture": "arm64",
+      "minimum_macos": "14.0",
+      "authentication": "SHA-256 pinned from upstream HTTPS .sha256sum sidecars; packages are not Apple-signed; detached OpenPGP signatures published but not independently verified",
+      "packages": {
+        "runtime": {
+          "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-1.28.3-universal.pkg",
+          "sha256": "d2940ed843baae348f51e6c014ef4b39502e8dc419e99aac441f5b8d96d02456"
+        },
+        "devel": {
+          "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.3/gstreamer-1.0-devel-1.28.3-universal.pkg",
+          "sha256": "12c01972acb5668416248606bac6148c8d6f0395969650d05a18be9a08de0260"
+        }
+      }
+    }
+  },
+  "applemedia_build": {
+    "version": "1.28.3",
+    "source_url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.3.tar.xz",
+    "source_sha256": "4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00",
+    "patch": "gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch",
+    "patch_sha256": "ea34e1ae1b4616ed7dd847e26424f3bcaaf399e2ea6378495ddca1c9be716a84",
+    "meson": "1.9.1",
+    "ninja": "1.13.0",
+    "meson_args": [
+      "--buildtype=release",
+      "-Dauto_features=disabled",
+      "-Dapplemedia=enabled",
+      "-Dgl=enabled",
+      "-Dgpl=disabled",
+      "-Dexamples=disabled",
+      "-Dtests=disabled",
+      "-Dintrospection=disabled",
+      "-Dnls=disabled",
+      "-Dorc=disabled",
+      "-Ddoc=disabled"
+    ],
+    "target": "arm64-apple-darwin",
+    "minimum_macos": "14.0",
     "sdk_distribution": {
       "provider": "GStreamer project official macOS universal packages",
       "version": "1.28.3",

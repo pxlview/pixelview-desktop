@@ -50,19 +50,41 @@ Control procs are thread-safe and asynchronous. Source destruction joins the med
 
 ```sh
 python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
+python3 plugins/pixelview-whep/scripts/build-applemedia.py
 python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer
 cmake --build build_macos --config RelWithDebInfo --target pixelview-whep -j 4
 ```
 
 Configure the normal Pixelview preset/helper first. CMake links staged libraries and embeds the runtime in `pixelview-whep.plugin/Contents/Resources/GStreamer`; POST_BUILD rewrites module references, signs each nested Mach-O using the requested identity, then Xcode signs the plugin/app. Resources placement is intentional: a raw non-bundle directory under Frameworks fails Apple's nested-code validation. Developer ID/notarization acceptance is a parent release gate, not established by ad-hoc signing.
 
-Pinned inputs: official public GStreamer1.28.3 runtime/development packages and **source-built patched rswebrtc0.15.2**. `runtime-lock.json` pins package SHA256s and every curated SDK-relative binary input. `fetch-gstreamer.py` verifies and extracts packages locally without running installers; libnice comes from that SDK. No host GStreamer/Homebrew runtime is used. See `scripts/UPSTREAM.md` for acquisition, trust boundaries and tests.
+Pinned inputs: official public GStreamer1.28.3 runtime/development packages and **source-built patched rswebrtc0.15.2** and **source-built patched applemedia (gst-plugins-bad1.28.3)**. `runtime-lock.json` pins package SHA256s and every curated SDK-relative binary input. `fetch-gstreamer.py` verifies and extracts packages locally without running installers; libnice comes from that SDK. No host GStreamer/Homebrew runtime is used. See `scripts/UPSTREAM.md` for acquisition, trust boundaries and tests.
 
-**Minimum supported packaged OS is macOS14**, from the actual bundled dylib load commands. Both the macOS preset and Pixelview helper explicitly target14.0; existing app builds must be rebuilt before acceptance. The official-distribution runtime closure has53 arm64 Mach-O files, with no X11 chain; applemedia brings MoltenVK through its Vulkan dependency. Read the current generated SBOM rather than the historical Homebrew inventory.
+**Minimum supported packaged OS is macOS14**, from the actual bundled dylib load commands. Both the macOS preset and Pixelview helper explicitly target14.0; existing app builds must be rebuilt before acceptance. The official-distribution runtime closure has51 arm64 Mach-O files, with no X11 chain. The patched applemedia is built without Vulkan, so neither libgstvulkan nor MoltenVK is shipped. Read the current generated SBOM rather than the historical Homebrew inventory.
 
 Runtime initialization refuses an already initialized external GStreamer registry, replaces all plugin search/scanner paths with the bundled paths, uses `/dev/null` rather than an external registry, disables Gst debug/dot dumps, and checks required plugin origins. Packaging recursively rewrites/validates all load commands; missing dylibs/factories fail. Do not initialize a second GStreamer distribution in the same process.
 
 Do not run multiple stages/builds concurrently against the same `.deps/pixelview-gstreamer` directory: current staging recreates that directory. Parent should stage once before building. Source archive and build inputs live alongside it in `.deps/gst-build-inputs`. No system/Homebrew libraries are modified.
+
+## Patched vtdec reorder depth
+
+`patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch` changes only
+`sys/applemedia/vtdec.c`. Upstream sizes the HEVC output reorder queue from a
+level-agnostic worst case (16 frames at 1080p) and cannot report that latency
+when caps carry no framerate, as WebRTC caps do: every received HEVC frame was
+held ~640 ms at 25 fps behind a declared 120 ms pipeline latency. The patch
+takes the depth from the stream's SPS (`sps_max_num_reorder_pics` of the
+highest sub-layer, 0 without B-frames) and keeps the upstream worst case only
+when the codec data cannot be parsed. H.264 (baseline needs no reordering) and
+VP9 are unchanged.
+
+`build-applemedia.py` verifies the official gst-plugins-bad1.28.3 tarball
+SHA256, extracts it fresh, applies the patch and builds only the applemedia
+plugin with meson1.9.1/ninja1.13.0 from a private virtualenv, against the
+pinned SDK (`-Dauto_features=disabled -Dapplemedia=enabled -Dgl=enabled`).
+Output is `.deps/applemedia-upstream-patched/output/libgstapplemedia.dylib`
+with provenance, the patch and LGPL text; it never stages the runtime, and the
+packager rejects missing or stale provenance and never falls back to the SDK
+module.
 
 ## Patched WHEP signaling boundary
 

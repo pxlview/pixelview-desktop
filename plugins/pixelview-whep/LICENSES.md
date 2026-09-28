@@ -15,7 +15,7 @@ H.264/HEVC use the LGPL applemedia GStreamer bridge to Apple's OS-provided Video
 
 ## Current official-distribution payload
 
-The current build uses the pinned official GStreamer1.28.3 runtime/development packages, extracted locally without running installer scripts. See `scripts/UPSTREAM.md` for verified versions and provenance. The staged runtime has53 arm64 Mach-O files. It no longer uses the Homebrew GnuTLS/nettle/GMP/X11 dependency chain; OpenSSL and MoltenVK are present. The upstream libnice plugin is supplied by the SDK rather than built against host libraries.
+The current build uses the pinned official GStreamer1.28.3 runtime/development packages, extracted locally without running installer scripts. See `scripts/UPSTREAM.md` for verified versions and provenance. The staged runtime has51 arm64 Mach-O files. It no longer uses the Homebrew GnuTLS/nettle/GMP/X11 dependency chain; OpenSSL is present, and MoltenVK is not (the patched applemedia is built without Vulkan). The upstream libnice plugin is supplied by the SDK rather than built against host libraries.
 
 The official SDK's available notices and version inventory are retained, including notices for some SDK components not shipped. The missing separate gst-plugins-good notice directory and transitive Rust source/notices remain review items. Do not infer whole-app compliance from this curated runtime: the OBS dependency FFmpeg is GPLv3-or-later and Qt and other application dependencies have separate obligations.
 
@@ -49,9 +49,24 @@ No source-hosting/legal release clearance is implied: all statically linked
 crate notices and corresponding dependency source availability still require
 the transitive review below before distribution.
 
+## Pixelview applemedia vtdec patch
+
+The packaged applemedia plugin is built from the official gst-plugins-bad1.28.3
+release tarball, SHA256
+`4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00`, with
+`patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch`. The changed
+LGPL-2.1-or-later file is `sys/applemedia/vtdec.c`; original copyright/license
+headers remain. The change sizes the HEVC output reorder queue from the stream's
+SPS instead of a worst case. `licenses/applemedia/COPYING` is the tarball's
+LGPL text. `build-applemedia.py` records source, patch, tool and binary
+provenance, and the packager includes the patch, provenance and LGPL text in
+`licenses/applemedia`; the release source inventory carries the exact tarball.
+The module is dynamically loaded from the plugin bundle and can be replaced by
+rebuilding it with the supplied script and patch.
+
 ## Generated artifacts and obligations
 
-The bundle includes `licenses/` containing original available package license/notice texts, exact Homebrew formula source and installation receipts, rswebrtc MPL license/Cargo manifests/lock, and libnice texts. `sbom.json` records the exact recursive Mach-O closure, originating packages/versions, input SHA256s, and an explicit Rust-transitive-review-pending marker. `runtime-lock.json` fails builds on unreviewed binary input changes. This inventory is a custom provenance JSON, not a claim of complete SPDX/CycloneDX compliance. The source-built rswebrtc module includes statically linked crates not visible to otool; **Cargo.lock alone is not a complete third-party notice bundle**.
+The bundle includes `licenses/` containing original available package license/notice texts, exact Homebrew formula source and installation receipts, rswebrtc MPL license/Cargo manifests/lock, the applemedia patch/LGPL text/provenance, and libnice texts. `sbom.json` records the exact recursive Mach-O closure, originating packages/versions, input SHA256s, and an explicit Rust-transitive-review-pending marker. `runtime-lock.json` fails builds on unreviewed binary input changes. This inventory is a custom provenance JSON, not a claim of complete SPDX/CycloneDX compliance. The source-built rswebrtc module includes statically linked crates not visible to otool; **Cargo.lock alone is not a complete third-party notice bundle**.
 
 Before distributing: archive exact corresponding sources (including Homebrew patches/formulas, Rust crates and build inputs), publish the sources or a legally sufficient offer, retain notices, complete transitive Rust license/feature analysis, and document a working replacement/relink/rebuild procedure for LGPL libraries. Dynamic linking and source availability must not be defeated by an EULA or code-signing restrictions; users must be able to rebuild/ad-hoc sign their modified copy. The included native/build/packaging source and formula provenance help that process but do not fulfill source hosting alone. Full Developer ID/notarization and clean-Mac acceptance are separate release gates.
 

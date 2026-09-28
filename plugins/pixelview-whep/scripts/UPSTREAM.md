@@ -12,6 +12,7 @@ From the repository root, with Python 3.12+, Apple command-line developer tools,
 ```sh
 python3 plugins/pixelview-whep/scripts/fetch-gstreamer.py
 python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
+python3 plugins/pixelview-whep/scripts/build-applemedia.py
 python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer-upstream
 python3 plugins/pixelview-whep/scripts/build-rswebrtc.py --test
 python3 plugins/pixelview-whep/tests/test_packaging.py -v
@@ -64,10 +65,15 @@ directory concurrently.
   Rust toolchain, default features and Cargo lock. Output lives separately in
   `.deps/rswebrtc-upstream-patched/output`. Provenance includes the SDK package
   identities and staging checks its source, patch, lock and output digests.
+- The SDK's `libgstapplemedia` is never shipped either. It is rebuilt from the
+  pinned gst-plugins-bad **1.28.3** tarball with the vtdec HEVC reorder-depth
+  patch, meson 1.9.1 and ninja 1.13.0, applemedia only and without Vulkan.
+  Output lives in `.deps/applemedia-upstream-patched/output`; staging checks
+  its provenance, patch and binary digests.
 
 ## Payload and license-audit handoff
 
-Verified closure: **53 arm64 Mach-O files**. Required WHEP/ICE/VideoToolbox/Opus
+Verified closure: **51 arm64 Mach-O files**. Required WHEP/ICE/VideoToolbox/Opus
 factories are checked with the bundled scanner and inspection binary, without
 host plugin discovery. No libav, x264 or x265 plugin is shipped. `libgstnice` is
 provided by upstream, not compiled against a host libnice installation.
@@ -78,6 +84,7 @@ Versions from the official SDK `share/versions.txt` include:
 |---|---|
 | GStreamer core/base/good/bad | 1.28.3 |
 | Patched rswebrtc source | 0.15.2 |
+| Patched applemedia (gst-plugins-bad) source | 1.28.3 |
 | GLib | 2.82.4 |
 | proxy-libintl | 0.5 |
 | PCRE2 | 10.42 |
@@ -88,9 +95,8 @@ Versions from the official SDK `share/versions.txt` include:
 | OpenSSL | 3.5.0 |
 | libsrtp | 2.8.0 |
 | Opus | 1.5.2 |
-| MoltenVK | 1.3.283.0 |
 
-MoltenVK is pulled by applemedia's Vulkan library dependency. The prior
+The patched applemedia is built without Vulkan, so libgstvulkan and MoltenVK are not shipped. The prior
 GnuTLS/nettle/GMP/p11-kit/libidn2/libunistring/X11 chain is absent. Upstream bad's
 license directory explicitly includes `ext_sctp_usrsctp_LICENSE.md` for its
 statically included SCTP source.

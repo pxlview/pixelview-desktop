@@ -46,12 +46,32 @@ def patched_rswebrtc():
   raise RuntimeError('Patched rswebrtc source material mismatch')
  return binary, metadata
 
+def patched_applemedia():
+ # vtdec's HEVC reorder queue otherwise holds 16 frames. Same fail-closed
+ # provenance rules as rswebrtc: never fall back to the SDK module.
+ import importlib.util
+ spec=importlib.util.spec_from_file_location('build_applemedia', ROOT/'scripts/build-applemedia.py')
+ module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+ output=module.DEFAULT_WORK/'output'
+ binary=output/'libgstapplemedia.dylib'
+ metadata=json.loads((output/'provenance.json').read_text())
+ expected=json.loads((ROOT/'runtime-lock.json').read_text())['applemedia_build']
+ if module.provenance()!=expected or any(metadata.get(k)!=v for k,v in expected.items()):
+  raise RuntimeError('Patched applemedia provenance mismatch; rebuild reviewed source')
+ if sha(binary)!=metadata['binary_sha256']:
+  raise RuntimeError('Patched applemedia binary hash mismatch')
+ if sha(output/expected['patch'])!=expected['patch_sha256']:
+  raise RuntimeError('Patched applemedia source material mismatch')
+ return binary, metadata
+
 def stage(dest, write_lock=False):
  if not GST.is_dir(): raise RuntimeError('Official SDK missing; run fetch-gstreamer.py')
  lock=ROOT/'runtime-lock.json'; expected=json.loads(lock.read_text())
  if json.loads((GST/'upstream-provenance.json').read_text()) != expected['distribution']:
   raise RuntimeError('Official SDK provenance mismatch')
  rswebrtc,rs_metadata=patched_rswebrtc()
+ applemedia,am_metadata=patched_applemedia()
+ patched={rswebrtc:'patched-rswebrtc/libgstrswebrtc.dylib',applemedia:'patched-applemedia/libgstapplemedia.dylib'}
  inputs={}
  def add(p, relative):
   p=p.resolve()
@@ -64,10 +84,11 @@ def stage(dest, write_lock=False):
    dep=resolve(ref,p)
    if dep != p: add(dep,'lib/'+dep.name)
  for name in PLUGINS+['nice']:
-  add(rswebrtc if name=='rswebrtc' else GST/'lib/gstreamer-1.0'/f'libgst{name}.dylib',f'lib/gstreamer-1.0/libgst{name}.dylib')
+  source={'rswebrtc':rswebrtc,'applemedia':applemedia}.get(name,GST/'lib/gstreamer-1.0'/f'libgst{name}.dylib')
+  add(source,f'lib/gstreamer-1.0/libgst{name}.dylib')
  add(GST/'libexec/gstreamer-1.0/gst-plugin-scanner','libexec/gst-plugin-scanner')
  add(GST/'bin/gst-inspect-1.0','bin/gst-inspect-1.0')
- pins={str(p.relative_to(GST)):sha(p) for p in inputs if p!=rswebrtc}
+ pins={str(p.relative_to(GST)):sha(p) for p in inputs if p not in patched}
  if write_lock:
   expected['inputs']=pins
   expected.pop('libnice_source_sha256',None)
@@ -84,7 +105,7 @@ def stage(dest, write_lock=False):
    if run('lipo','-archs',src).split()==['arm64']: shutil.copy2(src,dst)
    else: subprocess.run(['lipo',str(src),'-thin','arm64','-output',str(dst)],check=True)
    dst.chmod(0o755)
-   record={'path':relative,'input':str(src.relative_to(GST)) if src!=rswebrtc else 'patched-rswebrtc/libgstrswebrtc.dylib','input_sha256':sha(src),'architecture':'arm64','minimum_macos':validate_minimum_os(run('otool','-arch','arm64','-l',dst))}
+   record={'path':relative,'input':patched.get(src) or str(src.relative_to(GST)),'input_sha256':sha(src),'architecture':'arm64','minimum_macos':validate_minimum_os(run('otool','-arch','arm64','-l',dst))}
    records.append(record)
    if dst.suffix=='.dylib': subprocess.run(['install_name_tool','-id','@rpath/'+dst.name,str(dst)],check=True)
    for ref in links(src):
@@ -104,12 +125,16 @@ def stage(dest, write_lock=False):
    source=rswebrtc.parent/name
    if not source.exists(): raise RuntimeError(f'Missing rswebrtc source/license material {source}')
    d=notices/'rswebrtc'; d.mkdir(exist_ok=True); shutil.copy2(source,d/name)
+  for name in ['COPYING','provenance.json',am_metadata['patch']]:
+   source=applemedia.parent/name
+   if not source.exists(): raise RuntimeError(f'Missing applemedia source/license material {source}')
+   d=notices/'applemedia'; d.mkdir(exist_ok=True); shutil.copy2(source,d/name)
   shutil.copy2(ROOT/'LICENSES.md',out/'THIRD-PARTY-NOTICES.md')
-  (out/'sbom.json').write_text(json.dumps({'format':'Pixelview runtime provenance v2','distribution':expected['distribution'],'rswebrtc_build':rs_metadata,'files':records,'license_review':'See THIRD-PARTY-NOTICES.md; upstream package membership is not a license grant'},indent=2)+'\n')
+  (out/'sbom.json').write_text(json.dumps({'format':'Pixelview runtime provenance v2','distribution':expected['distribution'],'rswebrtc_build':rs_metadata,'applemedia_build':am_metadata,'files':records,'license_review':'See THIRD-PARTY-NOTICES.md; upstream package membership is not a license grant'},indent=2)+'\n')
   verify(out)
   if dest.exists(): shutil.rmtree(dest)
   out.rename(dest)
- print(f'Staged {len(records)} arm64 Mach-O files from official packages + patched rswebrtc: {dest}')
+ print(f'Staged {len(records)} arm64 Mach-O files from official packages + patched rswebrtc/applemedia: {dest}')
 
 def validate_minimum_os(load_commands):
  values=re.findall(r'\bminos\s+(\d+(?:\.\d+)+)',load_commands)

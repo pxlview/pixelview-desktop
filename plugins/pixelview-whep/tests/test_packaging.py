@@ -28,6 +28,16 @@ class Packaging(unittest.TestCase):
   lock=json.loads((SCRIPT.parents[1]/'runtime-lock.json').read_text())
   self.assertIn('rswebrtc_build', lock)
   self.assertFalse(any('libgstrswebrtc.dylib' in p for p in lock['inputs']))
+ def test_applemedia_is_patched_not_sdk(self):
+  import json
+  spec=importlib.util.spec_from_file_location('bundle_runtime', SCRIPT)
+  m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  self.assertTrue(hasattr(m, 'patched_applemedia'), 'must require verified patched applemedia')
+  lock=json.loads((SCRIPT.parents[1]/'runtime-lock.json').read_text())
+  self.assertIn('applemedia_build', lock)
+  self.assertFalse(any('libgstapplemedia.dylib' in p for p in lock['inputs']))
+  patch=(SCRIPT.parents[1]/'patches'/lock['applemedia_build']['patch']).read_text()
+  self.assertIn('sps.max_num_reorder_pics[sps.max_sub_layers_minus1]', patch)
 class UpstreamAcquisition(unittest.TestCase):
  def test_package_hash_fails_closed(self):
   import hashlib, tempfile
@@ -99,6 +109,8 @@ class UpstreamAcquisition(unittest.TestCase):
   build=(repo/'cmake/macos/pixelview-build.sh').read_text()
   self.assertIn('scripts/fetch-gstreamer.py',build)
   self.assertLess(build.index('scripts/fetch-gstreamer.py'),build.index('scripts/build-rswebrtc.py'))
+  self.assertLess(build.index('scripts/fetch-gstreamer.py'),build.index('scripts/build-applemedia.py'))
+  self.assertLess(build.index('scripts/build-applemedia.py'),build.index('scripts/bundle-runtime.py'))
   cmake=(SCRIPT.parents[1]/'CMakeLists.txt').read_text()
   self.assertNotIn('pkg_check_modules',cmake)
   self.assertIn('PIXELVIEW_GST_SDK',cmake)

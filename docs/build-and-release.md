@@ -7,11 +7,12 @@ This runbook covers the toolchain, the canonical local Developer ID build and la
 - **Xcode / SDK.** Upstream OBS requires Xcode 26.5 / macOS SDK 26.5 (`cmake/macos/compilerconfig.cmake`). `cmake/macos/pixelview-build.sh` always passes `-DPIXELVIEW_LEGACY_TOOLCHAIN=ON`, lowering the floor to Xcode 15.3 / SDK 14.4 and excluding the Metal renderer (`libobs-metal`, needs Swift 6; OpenGL is used) and `mac-avcapture` (uses `AVCaptureDevice.backgroundReplacementActive`, absent in SDK 14.4). Native `decklink`, `mac-videotoolbox` and `obs-webrtc` (WHIP) stay enabled. `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; global `xcode-select` is untouched.
 - **Disabled upstream modules.** Browser/CEF, What's New, the inbound obs-websocket plugin, scripting, virtual camera, AJA, VST, Syphon, VLC. The outbound Desktop control socket uses NSURLSession, not obs-websocket.
 - **obs-deps and Qt.** `CMakePresets.json` pins pre-built obs-deps `2026-08-26` and, for `macos-universal`, the Qt6 bundle `2026-05-21` (deliberate Qt compatibility pin) with SHA-256 hashes; CMake downloads and verifies them into `.deps/`, and existing pinned `.deps` are reused on every build.
-- **GStreamer runtime (WHEP receiver).** `plugins/pixelview-whep` embeds the official GStreamer `1.28.3` macOS packages plus a source-built, patched `rswebrtc 0.15.2`, pinned by `plugins/pixelview-whep/runtime-lock.json`. The build helper runs these before CMake on every build (no Homebrew/host GStreamer):
+- **GStreamer runtime (WHEP receiver).** `plugins/pixelview-whep` embeds the official GStreamer `1.28.3` macOS packages plus a source-built, patched `rswebrtc 0.15.2` and a source-built `applemedia` plugin from gst-plugins-bad `1.28.3` with the vtdec HEVC reorder-depth patch (meson/ninja pinned in a private venv under `.deps`), pinned by `plugins/pixelview-whep/runtime-lock.json`. The build helper runs these before CMake on every build (no Homebrew/host GStreamer):
 
   ```sh
   python3 plugins/pixelview-whep/scripts/fetch-gstreamer.py
   python3 plugins/pixelview-whep/scripts/build-rswebrtc.py
+  python3 plugins/pixelview-whep/scripts/build-applemedia.py
   python3 plugins/pixelview-whep/scripts/bundle-runtime.py stage .deps/pixelview-gstreamer
   ```
 
