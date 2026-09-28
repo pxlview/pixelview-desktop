@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pixelview Desktop 0.0.5</title></head>
+<body>
+  <h1>Pixelview Desktop 0.0.5</h1>
+  <p>Fifth Apple Silicon release.</p>
+  <ul>
+    <li>Pixelview admin can control the Sending side of a paired Mac: choose the capture device and its DeckLink input settings, frame rate, encoder, bitrate, profile and mute, and start or stop the stream. The Mac's state appears live in admin.</li>
+    <li>The Mac always stays online and ready to stream. Starting without a project in admin no longer takes it offline until a restart; the stream simply fails and Start works again right away.</li>
+    <li>When Pixelview stops the streaming server (the project is deleted in admin, or the server shuts down after a long time without viewers), the stream stops quietly with a short note instead of an error box.</li>
+    <li>The DeckLink output no longer starts at launch. Its AutoStart applies to receiving only, so another application such as DaVinci Resolve can keep using the card while this Mac sends.</li>
+    <li>Receiving HDR: choose SDR, HDR PQ or HDR HLG to match the sender; the canvas and the DeckLink output follow it.</li>
+    <li>Unpairing from this Mac also removes it from your Pixelview account, and unpairing it in admin finishes the unpair on the Mac without a prompt.</li>
+    <li>Stop receiving now closes the viewer session on Pixelview right away.</li>
+    <li>Quitting while an error box is open no longer crashes the app.</li>
+    <li>The installer DMG opens with a laid-out window: drag Pixelview Desktop to Applications.</li>
+  </ul>
+  <p>Pixelview Desktop is a modified distribution based on OBS Studio development snapshot <code>32.2.1-66-g6b3e55072</code> (commit <code>6b3e550729f125b6c5b3767df88c08f5aef9d264</code>). It is not an official OBS Project release.</p>
+  <p>Corresponding source: <a href="https://github.com/pxlview/pixelview-desktop/tree/v0.0.5">https://github.com/pxlview/pixelview-desktop/tree/v0.0.5</a></p>
+</body>
+</html>
