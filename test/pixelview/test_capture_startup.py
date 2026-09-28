@@ -50,6 +50,7 @@ struct OBSBasic {
  bool PixelviewSettingsBusy(){return busy;}
  bool PixelviewConfigurationLocked(){return busy || !paired || pixelviewReceiving;}
  void RefreshPixelviewModes(){} void RefreshPixelviewAudio(){} void RefreshPixelviewFPS(){} void RefreshPixelviewEncoding(){} void RefreshPixelviewStreamHint(){}
+ void QueuePixelviewStatePush(){} // Admin state push; covered by test_remote_control.
  void RefreshPixelviewDevices(){REFRESH}
  void SelectPixelviewDevice(int index,bool initializing=false){
  SELECTION

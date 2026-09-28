@@ -1,5 +1,6 @@
 #include "frontend/utility/PixelviewDesktop.hpp"
 #include <cassert>
+#include <string>
 using pixelview::Desktop;
 static QJsonObject mutation(const char *name, QJsonObject data = {}) { return {{"mutation", name}, {"data", data}}; }
 static QJsonObject started(QJsonValue whip = QJsonObject{{"endpoint", "https://example.com/whip"}, {"bearer_token", "secret"}}) {
@@ -43,19 +44,27 @@ int main() {
  // Stopping is local: a new start needs no acknowledgement.
  assert(f.d.requestStart(7) && f.requests == 2);
  f.d.receive(started(QJsonValue::Null), 8);
- assert(f.starts == 1 && f.halts == 1 && !f.d.ready && !f.d.intent && !f.d.authorized(9));
+ assert(f.starts == 1 && f.halts == 1 && f.d.ready && !f.d.intent && !f.d.authorized(9)); // Unusable WHIP config: still online.
  // Server silence for PING_SILENCE_MS is a dead socket, reported once.
- f.d.receive(READY, 20000);
+ f.d.receive(PING, 20000);
  assert(!f.d.pingExpired(20000 + Desktop::PING_SILENCE_MS - 1));
  assert(f.d.pingExpired(20000 + Desktop::PING_SILENCE_MS));
  assert(!f.d.pingExpired(20000 + Desktop::PING_SILENCE_MS + 1) && f.d.ready);
  assert(!f.d.pingExpired(99999999)); // Cleared until the next ping or ready.
  f.d.receive(READY, 90000); assert(f.d.pingDeadline == 0); // Already ready: ignored.
- for (const char *code : {"active_session_required", "node_paused", "subscription_required", "start_failed", "unknown_message", "other"}) {
+ for (const char *code : {"active_session_required", "subscription_required", "start_failed", "unknown_message", "other"}) {
   Fixture e; e.d.receive(READY, 0); assert(e.d.requestStart(1));
   e.d.receive(mutation("DESKTOP_ERROR", {{"code", code}}), 2);
-  assert(!e.d.ready && !e.d.intent && !e.d.pending && e.halts == 1 && e.starts == 0);
+  if (std::string(code) == "unknown_message") { assert(e.d.ready && e.d.intent && e.d.pending && e.halts == 0); continue; }
+  // A refused start keeps the socket ready (online), and Start works again at once.
+  assert(e.d.ready && !e.d.intent && !e.d.pending && e.halts == 1 && e.starts == 0);
+  assert(e.d.requestStart(3) && e.d.pending);
  }
+ // An older backend's unknown_message (e.g. for DESKTOP_STATE) never stops a stream.
+ Fixture old; old.stream(); old.d.receive(mutation("DESKTOP_ERROR", {{"code", "unknown_message"}}), 3);
+ assert(old.d.ready && old.d.started && old.d.intent && old.halts == 0);
+ Fixture idle; idle.d.receive(READY, 0); idle.d.receive(mutation("DESKTOP_ERROR", {{"code", "start_failed"}}), 1);
+ assert(idle.d.ready && idle.halts == 0);
  Fixture u; u.d.receive(READY, 0); u.d.receive(mutation("SOMETHING_NEW"), 1); u.d.receive({{"type", "ready"}}, 2);
  assert(u.d.ready && u.halts == 0); // Unknown or legacy messages are ignored, never fatal.
  Fixture r; r.stream(); r.d.receive(mutation("SOCKET_DESKTOP_REVOKED"), 3);

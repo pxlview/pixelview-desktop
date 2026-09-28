@@ -1897,6 +1897,7 @@ void OBSBasic::SelectPixelviewFPS(int index)
 
 void OBSBasic::RefreshPixelviewDevices()
 {
+	QueuePixelviewStatePush();
 	RefreshPixelviewModes();
 	RefreshPixelviewAudio();
 	RefreshPixelviewFPS();

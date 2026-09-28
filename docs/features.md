@@ -53,8 +53,7 @@ the "Verification status" section says so explicitly.
 - Unpair from the account (admin **Unpair desktop**, i.e. `SOCKET_DESKTOP_REVOKED`, or a 4401 close
   for a token the backend no longer accepts) stops output, forgets the process-held token, disables
   reconnect and finishes the local Unpair without a prompt: the Keychain record and identity are
-  removed and Pair is offered again ("This Mac was unpaired from your Pixelview account. Pair again to
-  stream from it."). If the Keychain refuses a silent removal, identity is kept and Unpair stays
+  removed and Pair is offered again (with no extra status line). If the Keychain refuses a silent removal, identity is kept and Unpair stays
   available to finish it.
 - Verification: offline compiled suites (`test_pairing_ux`, `test_desktop_retry`,
   `test_media_failure_pairing`, `test_desktop`, and `test_pairing_diagnostics` with a real
@@ -77,12 +76,22 @@ behaviour is:
   or `null` if any field would fail server validation. 60 s without a ping is treated as a dead
   socket. There is no client heartbeat, lease, fence or resume.
 - `DESKTOP_START {}` yields `DESKTOP_STARTED {config: {whip: {endpoint, bearer_token}}}` or
-  `DESKTOP_ERROR {code}` with `active_session_required`, `node_paused`, `subscription_required`,
-  `start_failed` (socket stays open; shown as "Pixelview could not start the stream") or
-  `unknown_message`. Only `config.whip` is used; a missing WHIP config is an error and SRT is never
-  used. A second publisher is rejected by the engine at the WHIP POST; there is no `busy` code.
+  `DESKTOP_ERROR {code}` with `subscription_required` or `start_failed`. The Desktop is a plain
+  sender that stays online: it needs no project, and knows nothing about pause (pausing a node only
+  shows viewers the pause screen). Without a running project nothing listens at the WHIP endpoint,
+  so the WHIP POST fails with the ordinary stream-failure dialog. A refused start (or an unusable
+  WHIP config) only ends that start: the socket stays open and ready, the node stays Connected and
+  Start works again at once ("Pixelview could not start the stream" in the status bar).
+  `unknown_message` (an older backend answering e.g. `DESKTOP_STATE`) is ignored and never stops a
+  stream. Only `config.whip` is used and SRT is never used. A second publisher is rejected by the
+  engine at the WHIP POST; there is no `busy` code.
 - `DESKTOP_STOP {}` is sent after the local output has actually stopped; `DESKTOP_STOPPED {}` is not
   waited for.
+- `SOCKET_DESKTOP_STREAM_ENDED {reason}` is sent by the backend just before it takes the engine
+  away: `project_deleted` (the running project is deleted in admin) or `engine_stopped` (the engine
+  is paused, e.g. the no-viewers cooldown or the inactive-engine cron). A streaming or retrying
+  Desktop stops exactly like the Stop button, so the WHIP drop that follows shows no failure dialog;
+  the status line says why. The socket stays connected; an idle Desktop ignores it.
 - Terminal mutations arrive before their close (close code may be 1000): `SOCKET_DESKTOP_REVOKED`
   (see Pairing) and `SOCKET_DESKTOP_REPLACED` (a newer connection from the same device; this socket
   stops reconnecting, a running stream continues, the operator restarts the app to reconnect).
@@ -137,6 +146,12 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - Failures that show a dialog locally (encoding, FPS, device creation, audio save) are returned as
   the command's `error` instead (`PixelviewWarn`). A media failure after a remote start still shows
   the ordinary local failure dialog on the Mac; the admin sees the Desktop's status line.
+- The Desktop pushes its state as `DESKTOP_STATE {state}` whenever it changes: every sidebar
+  refresh (including the 2 s device poll), stream transition and audio refresh queues one push
+  per event-loop turn, sent only when the content differs from the last push, and a fresh socket
+  always gets one after `DESKTOP_READY`. The backend forwards it to the node's admins
+  (`SOCKET_DESKTOP_STATE`), which drives the modal and the project-view Desktop status without
+  polling. Every state carries `instance` (per launch) and `seq` so admins keep the newest.
 - `state` reports stream status (`streaming`, `starting`, `stopping`, `can_start`, `can_stop`,
   retries, the connection status and the Start hint), `locked`/`lock_reason`, the device list and
   selection, the DeckLink properties with their options, encoders, profiles, FPS options and the
@@ -336,7 +351,9 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
 ### DeckLink program output
 
 - The Receiving panel's Output group holds the native DeckLink output settings (device, mode,
-  AutoStart) with the keyer UI hidden. Ordinary Main/Main10 reception uses the stock OBS rendered
+  AutoStart) with the keyer UI hidden. AutoStart applies to receiving only: it starts the output
+  once received video arrives. Launching (Sending mode) never opens the output, so another
+  application such as DaVinci Resolve can keep using the card while this Mac only sends. Ordinary Main/Main10 reception uses the stock OBS rendered
   program output: main texture -> BGRA staging -> `decklink_output`, with audio from the ordinary
   OBS mix (source gain, mute and mixer routing apply; monitoring is separate). SDR output is 8-bit
   BGRA, not ten-bit 4:2:2 SDI.
@@ -358,8 +375,7 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   not start" warning with the reason as well as the `Start failed: <reason>` log line: nothing
   received yet, no saved settings, device or mode unavailable, the canvas could not follow the mode's
   rate, or the output's own `last_error` (device not connected, mode unavailable, card busy, and in
-  Sending mode a frame-rate mismatch naming the canvas rate and the output mode). Only the
-  launch-time AutoStart stays log-only when it is merely early (no video yet).
+  Sending mode a frame-rate mismatch naming the canvas rate and the output mode).
 
 ### Fullscreen and projector
 
@@ -460,6 +476,12 @@ gate) fail in the current environment regardless of changes.
   capture-device gate existed it went through `DESKTOP_START` to the WHIP POST (404, no engine).
   With the gate, `start` without a device is refused ("Choose a capture device to stream.") and
   `can_start` is false. SIGTERM afterwards shut down cleanly.
+- State push and DeckLink commands (2026-09-24, same setup with an UltraStudio 4K Mini attached):
+  a remote change reached the admin store as a `SOCKET_DESKTOP_STATE` push ~80 ms later; a mute
+  toggled on the Mac itself was pushed with no command involved; quitting the app pushed
+  `online: false` and relaunching pushed it back online. `set_capture` toggled `buffering` and
+  changed `color_range` and restored both, an unoffered `mode_id` and `device_hash` were refused,
+  `fit`, `select_device` and remote unmute applied, and `can_start` became true with the device.
 - Receiver control: live loopback login/registration with viewer-record read-back in Redis and exact
   removal after stop; live missing-session 401 mapping.
 - Receiving media (earlier build, 50 ms jitter era): local backend + engine + synthetic H.264/Opus
@@ -516,9 +538,8 @@ gate) fail in the current environment regardless of changes.
   attached); the WHIP grant was exercised only by the smoke tool.
 - A real Cloudflare/backend drop during an active WHIP stream on a production origin; only a local
   backend reload was exercised.
-- Admin remote control with a DeckLink device attached (`select_device`, `set_capture`, `fit`,
-  `set_mute` applied), a remote start that reaches an engine and streams, remote stop of a live
-  stream, and the relay across several backend workers (FakeRedis test only).
+- Admin remote control: a remote start that reaches an engine and streams, remote stop of a live
+  stream, and the relay and state push across several backend workers (FakeRedis test only).
 - Production notarization, Gatekeeper, R2 publication, appcast and the Sparkle update cycle;
   clean-Mac acceptance; the interactive Pair forms on the rebuilt bundle (offscreen tests only);
   clicking the red close button (SIGTERM shares the path).
@@ -532,8 +553,8 @@ gate) fail in the current environment regardless of changes.
 
 - Admin remote control covers the Sending controls only: no remote receiving, pairing, Advanced
   encoder options, local monitoring or DeckLink output settings.
-- No remote playout, engine provisioning, billing or engine-enforced fencing; an active project,
-  engine and subscription must already exist in admin. Admin's `streaming` flag is the client's own
+- No remote playout, engine provisioning, billing or engine-enforced fencing; a stream only reaches
+  viewers when a project (engine) is running in admin and the subscription is active. Admin's `streaming` flag is the client's own
   report, not independent media observation.
 - SRT fallback is intentionally unavailable; nodes without a WHIP config report an error.
 - Credential and transport implementations exist for macOS only (Keychain, NSURLSession); Windows and

@@ -87,6 +87,27 @@ class RemoteControl(unittest.TestCase):
         select = body((ROOT / 'frontend/widgets/OBSBasic.cpp').read_text(), 'void OBSBasic::SelectPixelviewDevice(')
         self.assertNotIn('QMessageBox::warning', select)
 
+    def test_state_is_pushed_on_change_not_polled(self):
+        push = body(self.control, 'void OBSBasic::PushPixelviewState(')
+        self.assertIn('!pixelviewLease.ready', push)
+        self.assertIn('content.remove("seq");', push)
+        self.assertLess(push.index('if (snapshot == pixelviewPushedState) return;'), push.index('"DESKTOP_STATE"'))
+        queue = body(self.control, 'void OBSBasic::QueuePixelviewStatePush(')
+        self.assertIn('if (pixelviewStatePushQueued) return;', queue)
+        self.assertIn('QTimer::singleShot(0, this', queue)
+        main = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
+        desktop = (ROOT / 'frontend/widgets/OBSBasic_PixelviewDesktop.inc').read_text()
+        audio = (ROOT / 'frontend/widgets/OBSBasic_PixelviewAudio.inc').read_text()
+        # Sidebar poll/changes, stream transitions and audio all trigger a (deduplicated) push.
+        self.assertIn('QueuePixelviewStatePush();', body(main, 'void OBSBasic::RefreshPixelviewDevices()'))
+        self.assertIn('QueuePixelviewStatePush();', body(desktop, 'void OBSBasic::RefreshPixelviewReconnect()'))
+        self.assertIn('QueuePixelviewStatePush();', body(audio, 'void OBSBasic::RefreshPixelviewAudio()'))
+        # A new socket always receives a full state.
+        ready = desktop.split('if(!wasReady && pixelviewLease.ready) {', 1)[1].split('\n  }', 1)[0]
+        self.assertIn('pixelviewPushedState.clear();', ready)
+        state = body(self.control, 'QJsonObject OBSBasic::PixelviewControlState()')
+        self.assertIn('{"instance", pixelviewStateInstance}, {"seq", (double)++pixelviewStateSeq}', state)
+
     def test_state_reports_every_remote_setting(self):
         state = body(self.control, 'QJsonObject OBSBasic::PixelviewControlState()')
         for key in ('"version", 1', '"lock_reason"', '"stream"', '"capture"', '"encoding"', '"audio"',

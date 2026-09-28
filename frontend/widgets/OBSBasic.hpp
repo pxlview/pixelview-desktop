@@ -358,9 +358,18 @@ private:
 	QJsonObject PixelviewReportedSettings();
 	// Admin remote control over the Desktop control socket (DESKTOP_CONTROL).
 	void HandlePixelviewControl(const QJsonObject &data);
+	// The backend is stopping the engine: stop quietly, no failure dialog.
+	void PixelviewStreamEnded(const QJsonObject &data);
 	QString RunPixelviewControl(const QJsonObject &command);
 	QJsonObject PixelviewControlState();
 	bool PixelviewCaptureSelected();
+	// Pushed as DESKTOP_STATE when it changes, so admins see it live.
+	void QueuePixelviewStatePush();
+	void PushPixelviewState();
+	bool pixelviewStatePushQueued = false;
+	QByteArray pixelviewPushedState;
+	QString pixelviewStateInstance;
+	quint64 pixelviewStateSeq = 0;
 	// Sender-setting failures are dialogs locally but errors for a remote command.
 	QString *pixelviewRemoteError = nullptr;
 	void PixelviewWarn(const QString &title, const QString &message);

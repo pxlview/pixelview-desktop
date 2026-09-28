@@ -6,6 +6,7 @@
 // configuration lock, and failures that would show a dialog locally are
 // returned as the error instead.
 #include <QJsonArray>
+#include <QUuid>
 
 void OBSBasic::PixelviewWarn(const QString &title, const QString &message)
 {
@@ -34,6 +35,33 @@ void OBSBasic::HandlePixelviewControl(const QJsonObject &data)
 		     QT_TO_UTF8(command["action"].toString()), error.isEmpty() ? "applied" : QT_TO_UTF8(error));
 		if (pixelviewLease.ready) pixelviewLease.send({{"message", "DESKTOP_CONTROL_RESULT"}, {"data", result}});
 	});
+}
+
+// State is pushed on every change (not polled): after each sidebar, stream or
+// audio refresh, coalesced to one event-loop turn and skipped when unchanged.
+// Every socket gets a full state right after DESKTOP_READY.
+void OBSBasic::QueuePixelviewStatePush()
+{
+	if (pixelviewStatePushQueued) return;
+	pixelviewStatePushQueued = true;
+	QTimer::singleShot(0, this, [this] {
+		pixelviewStatePushQueued = false;
+		PushPixelviewState();
+	});
+}
+
+void OBSBasic::PushPixelviewState()
+{
+	if (isClosing() || pixelviewShutdownPending || pixelviewUnpairPending || !pixelviewDesktop || !pixelviewLease.ready ||
+	    pixelviewClosingSocket)
+		return;
+	QJsonObject state = PixelviewControlState();
+	QJsonObject content = state;
+	content.remove("seq"); // The ordering stamp changes on every read; compare the content.
+	const QByteArray snapshot = QJsonDocument(content).toJson(QJsonDocument::Compact);
+	if (snapshot == pixelviewPushedState) return;
+	pixelviewPushedState = snapshot;
+	pixelviewLease.send({{"message", "DESKTOP_STATE"}, {"data", QJsonObject{{"state", state}}}});
 }
 
 namespace {
@@ -165,7 +193,9 @@ QJsonObject OBSBasic::PixelviewControlState()
 	if (!pixelviewReceiving) {
 		if (auto managed = PixelviewManagedSource()) audio = {{"available", true}, {"muted", obs_source_muted(managed)}};
 	}
-	return {{"version", 1}, {"paired", pixelviewPairingDurable}, {"receiving", pixelviewReceiving},
+	if (pixelviewStateInstance.isEmpty()) pixelviewStateInstance = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	return {{"version", 1}, {"instance", pixelviewStateInstance}, {"seq", (double)++pixelviewStateSeq},
+		{"paired", pixelviewPairingDurable}, {"receiving", pixelviewReceiving},
 		{"locked", locked}, {"lock_reason", locked ? QJsonValue(lockReason) : QJsonValue::Null},
 		{"stream", stream}, {"capture", capture}, {"encoding", encoding}, {"audio", audio}};
 }

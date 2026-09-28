@@ -73,7 +73,7 @@ int main() {
  Fixture success;success.start();success.d.fail("lost",true);success.now=2000;
  assert(success.d.takeRetry(success.now,true));success.ready();success.grant();
  assert(success.d.retries==1);success.d.outputStarted();assert(success.d.retries==0);
- for(const char *reason : {"Stop", "ForceStop", "Unpair", "revoked", "identity mismatch", "active_session_required", "node_paused", "subscription_required", "protocol", "Stopping before shutdown."}) {
+ for(const char *reason : {"Stop", "ForceStop", "Unpair", "revoked", "identity mismatch", "active_session_required", "subscription_required", "protocol", "Stopping before shutdown."}) {
   Fixture terminal;terminal.start();terminal.d.fail("lost",true);terminal.d.fail(reason);
   assert(!terminal.d.intent && !terminal.d.takeRetry(99999,true));
   terminal.ready();terminal.grant("delayed");assert(terminal.starts==1);
@@ -89,7 +89,7 @@ int main() {
  assert(!zero.d.intent && !zero.d.takeRetry(99999,true));
  Fixture immediate;immediate.start();immediate.d.retryDelay=0;immediate.d.fail("lost",true);
  assert(immediate.d.takeRetry(0,true));
- for(const char *code : {"active_session_required","node_paused","subscription_required","start_failed","unknown_message","unknown"}) {
+ for(const char *code : {"active_session_required","subscription_required","start_failed","unknown"}) {
   Fixture denial;denial.start();denial.d.receive(mutation("DESKTOP_ERROR",{{"code",code}}),0);
   assert(!denial.d.intent && !denial.d.authorized(0) && !denial.d.takeRetry(99999,true));
  }

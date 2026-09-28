@@ -199,7 +199,7 @@ int main(int argc,char **argv) {
  removed=true; completeRevocation();
  assert(!pixelviewUnpairRetry && credential.isEmpty() && pixelviewIdentity.nodeId.isEmpty());
  assert(unpair.isHidden() && !pair.isHidden() && pair.isEnabled());
- assert(connection.text()=="This Mac was unpaired from your Pixelview account. Pair again to stream from it.");
+ assert(connection.text().isEmpty() && connection.isHidden()); // The Pair button and hint say it.
 
 }'''.replace('GUARD',guard).replace('REFRESH',refresh).replace('INITIALIZATION',initialization).replace('CLEANUP',cleanup).replace('REVOCATION',revocation)
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +263,8 @@ int main(int argc,char **argv) {
  int pixelviewAuthDeadline=0,pixelviewReconnectAt=0,pixelviewBackoff=0;
  auto PixelviewDeviceRevoked=[]{};
  auto HandlePixelviewControl=[](QJsonObject){};
+ auto PixelviewStreamEnded=[](QJsonObject){};
+ QByteArray pixelviewPushedState;
  int saves=0; bool configOK=true;
  auto SavePixelviewIdentity=[&]{++saves;return configOK;};
  auto RefreshPixelviewReconnect=[]{};

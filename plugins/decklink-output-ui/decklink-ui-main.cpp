@@ -64,13 +64,11 @@ static void decklink_ui_render(void *param);
 
 // Pixelview: a start that does not happen is an operator-visible error, not
 // only a log line. Non-blocking so the watchdog timer never nests a modal loop.
-// The launch-time auto start may simply be early (nothing received yet): that
-// stays a log line, the watchdog starts the output once video arrives.
-static bool launch_auto_start = false;
-static void start_failed(const QString &reason, bool waiting = false)
+// Every start is either a click or a receive-mode AutoStart, so it always shows.
+static void start_failed(const QString &reason)
 {
 	blog(LOG_WARNING, "[decklink-output-ui] Start failed: %s", reason.toUtf8().constData());
-	if (shutting_down || (waiting && launch_auto_start)) {
+	if (shutting_down) {
 		return;
 	}
 	static QPointer<QMessageBox> box;
@@ -154,8 +152,7 @@ void output_start()
 	OBSSourceAutoRelease selected = receive_mode ? obs_weak_source_get_source(receive_source) : nullptr;
 	if (receive_mode && !selected) {
 		start_failed(QStringLiteral("Nothing is being received yet. Click Start receiving first; the output "
-					    "can start once video arrives."),
-			     true);
+					    "can start once video arrives."));
 		return;
 	}
 	OBSData settings = load_settings();
@@ -185,8 +182,7 @@ void output_start()
 			if (!bound) {
 				start_failed(ready ? QStringLiteral("The output refused to bind the received stream.")
 						   : QStringLiteral("No fresh video is being received yet. Start receiving "
-								    "and wait for the picture, then start the output."),
-					     !ready);
+								    "and wait for the picture, then start the output."));
 				obs_output_release(output);
 				return;
 			}
@@ -391,16 +387,11 @@ void addOutputUI(void)
 static void OBSEvent(enum obs_frontend_event event, void *)
 {
 	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
-		OBSData settings = load_settings();
-
-		if (settings && obs_data_get_bool(settings, "auto_start")) {
-			launch_auto_start = true;
-			output_start();
-			launch_auto_start = false;
-		}
-
-		// Pixelview exposes program output only. Never load legacy Preview
-		// settings here: a saved auto_start must not open an invisible output.
+		// Pixelview: AutoStart belongs to the Receiving panel and is armed by
+		// bind_receive_source when receiving starts. The app launches in
+		// Sending mode, which must not claim the card (another application,
+		// e.g. DaVinci Resolve, may be using it). Legacy Preview settings are
+		// never loaded either.
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		shutting_down = true;
 

@@ -95,6 +95,13 @@ public:
   ready=false; pending=false; started=false; mediaDraining=false; pingDeadline=0;
   halt(); error(message);
  }
+ // A refused or unusable start is not a control failure: the socket stays open
+ // and ready, so the Desktop stays online and Start works again at once.
+ void deny(QString message) {
+  ++generation;intent=false;retryAt=-1;transientFailure=false;
+  pending=false;started=false;mediaDraining=false;
+  halt();error(message);
+ }
  bool development=false;
  void receive(const QJsonObject &o, qint64 now) {
   const auto name=o["mutation"].toString();
@@ -116,15 +123,17 @@ public:
    QUrl endpoint(whip["endpoint"].toString());
    QUrl origin=endpoint; origin.setPath("");
    if(!validOrigin(origin, development) || whip["bearer_token"].toString().isEmpty()) {
-    fail("WHIP is unavailable or invalid for this node. SRT is not supported."); return;
+    deny("WHIP is unavailable or invalid for this node. SRT is not supported."); return;
    }
    started=true;
    publish(endpoint.toString(),whip["bearer_token"].toString());
   } else if(name=="DESKTOP_ERROR") {
+   // A refused start. unknown_message only means the backend is older than
+   // this message (e.g. DESKTOP_STATE); it never touches the stream.
    const QString code=data["code"].toString();
-   const QStringList known={"active_session_required","node_paused","subscription_required"};
-   fail(code=="start_failed" ? "Pixelview could not start the stream. Check admin and start manually." :
-        known.contains(code) ? "Pixelview: "+code+". Check admin and start manually." : "Pixelview protocol error. Stream stopped.");
+   if(code=="unknown_message" || (!intent && !pending)) return;
+   deny(code=="subscription_required" ? QStringLiteral("Pixelview could not start the stream: the subscription is not active.") :
+        QStringLiteral("Pixelview could not start the stream."));
   } else if(name=="SOCKET_DESKTOP_REVOKED") {
    revoked=true;
    fail("Device revoked. Pair again in Pixelview admin.");

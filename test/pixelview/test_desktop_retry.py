@@ -26,6 +26,13 @@ class DesktopRetry(unittest.TestCase):
         self.assertIn('pixelviewLease.intent', action)
         self.assertIn('OBS_OUTPUT_DISCONNECTED || code == OBS_OUTPUT_CONNECT_FAILED', stream)
         self.assertNotIn('reconnecting without resuming', inc)
+        # The backend announces an engine teardown (project deleted, idle
+        # shutdown): stop exactly like the Stop button, so no failure dialog.
+        ended = inc.split('void OBSBasic::PixelviewStreamEnded(')[1].split('\n}')[0]
+        self.assertIn('if(!pixelviewLease.intent && !pixelviewActualStreaming && !pixelviewStreamingBusy) return;', ended)
+        self.assertIn('StopStreaming();', ended)
+        self.assertNotIn('ForceStop', ended)
+        self.assertIn('else if(mutation=="SOCKET_DESKTOP_STREAM_ENDED" && pixelviewLease.ready) PixelviewStreamEnded(', inc)
         # Raw libobs retries would reuse the old service instead of acquiring authority.
         advanced = (ROOT/'frontend/utility/AdvancedOutput.cpp').read_text()
         self.assertIn('"whip_custom") == 0) reconnect = false', advanced)

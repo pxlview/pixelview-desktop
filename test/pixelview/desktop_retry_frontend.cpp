@@ -29,7 +29,7 @@ void obs_output_force_stop(Output *o) {++o->forceStops;o->active=false;}
 struct Handler {bool StreamingActive()const{return streamOutput && streamOutput->active;} Output *streamOutput=nullptr;int starts=0;bool StartStreaming(int*){++starts;return true;}};
 struct Connection {std::function<void(QByteArray)> message;std::function<void(int)> disconnected;bool exchanging=false;QString authorizedToken;int closes=0;void closeSocket(bool=true){++closes;}};
 struct Label {QString text;void setText(QString s){text=s;}};
-struct Status {QString text;void showMessage(QString s){text=s;}void clearMessage(){text.clear();}void StreamDelayStarting(int){}};
+struct Status {QString text;void showMessage(QString s,int=0){text=s;}void clearMessage(){text.clear();}void StreamDelayStarting(int){}};
 struct UI {Status *statusbar=nullptr;};
 struct QPushButton : Label {void *menu=nullptr;bool enabled=false;void setEnabled(bool b){enabled=b;}void setMenu(void *p){menu=p;}};
 struct Clock {qint64 now=0;qint64 elapsed()const{return now;}};
@@ -109,6 +109,8 @@ public:
  int revocationCleanups=0; void CompletePixelviewRevocation(){++revocationCleanups;}
  // Admin remote control is covered by test_remote_control.
  int controls=0; void HandlePixelviewControl(const QJsonObject &){++controls;}
+ int streamEnds=0; void PixelviewStreamEnded(const QJsonObject &){++streamEnds;}
+ int statePushes=0; QByteArray pixelviewPushedState; void QueuePixelviewStatePush(){++statePushes;}
  void PixelviewOutputStopped();
  void QueuePixelviewOutputStopped(int delay=0);
  void CancelPixelviewStart();
@@ -269,8 +271,10 @@ int main() {
   assert(tray.text=="Basic.Main.StoppingStreaming" && !tray.enabled);
   finish(true);assert(pending.handler.starts==0);
   setup.set_value();Timer::run();assert(!pending.pixelviewStopPending);
-  assert(pending.button.text=="Basic.Main.StartStreaming" && !pending.button.enabled);
-  assert(tray.text=="Basic.Main.StartStreaming" && !tray.enabled);
+  // A refused start leaves the socket ready, so Start is available again at once.
+  assert(pending.pixelviewLease.ready==terminal);
+  assert(pending.button.text=="Basic.Main.StartStreaming" && pending.button.enabled==terminal);
+  assert(tray.text=="Basic.Main.StartStreaming" && tray.enabled==terminal);
   assert(!pending.status.text.contains("Reconnecting") && !pending.pixelviewLease.intent);
   Timer::run();
  }
@@ -366,6 +370,13 @@ int main() {
  messages.connection.message(DENIED);
  assert(!messages.pixelviewLease.intent);
  std::cout<<"started clears start-request label; late terminal message cancels intent PASS\n";
+ {
+  const QByteArray ENDED=R"({"mutation":"SOCKET_DESKTOP_STREAM_ENDED","data":{"reason":"project_deleted"}})";
+  OBSBasic ended;ended.bind();ended.connection.message(ENDED);assert(ended.streamEnds==0); // Not ready: ignored.
+  ended.connection.message(READY);ended.connection.message(ENDED);
+  assert(ended.streamEnds==1 && ended.pixelviewLease.ready);
+ }
+ std::cout<<"stream-ended notice reaches the handler only on a ready socket PASS\n";
  OBSBasic delayed;delayed.bind();delayed.pixelviewLease.ready=true;delayed.pixelviewLease.started=true;
  delayed.pixelviewLease.intent=true;delayed.pixelviewLease.retries=2;
  delayed.OutputStartedSignal(true);

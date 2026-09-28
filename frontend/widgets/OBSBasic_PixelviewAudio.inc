@@ -112,6 +112,7 @@ void OBSBasic::RefreshPixelviewAudio()
 {
 	if (pixelviewAudioShuttingDown || isClosing() || !pixelviewListen || pixelviewAudioRefreshing)
 		return;
+	QueuePixelviewStatePush();
 	QScopedValueRollback<bool> refreshing(pixelviewAudioRefreshing, true);
 	auto source = PixelviewManagedSource();
 	auto previous = OBSGetStrongRef(pixelviewAudioSource);

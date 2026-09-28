@@ -42,6 +42,8 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
  pixelviewLease.error=[this](QString message){
   blog(LOG_WARNING,"Pixelview: control connection: %s",message.toUtf8().constData());
   pixelviewConnectionStatus->setText(message);RefreshPixelviewReconnect();
+  // A refused start keeps the socket ready, which hides the status line.
+  if(pixelviewLease.ready) ui->statusbar->showMessage(message,10000);
  };
  pixelviewLease.send=[this](QJsonObject o){pixelviewDesktop->sendSocket(QJsonDocument(o).toJson(QJsonDocument::Compact));};
  pixelviewLease.report=[this]{
@@ -114,6 +116,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    pixelviewPairingDurable=SavePixelviewIdentity();
    if(!pixelviewPairingDurable) {pixelviewUnpairRetry=true;pixelviewLease.fail("Could not save pairing identity. Click Unpair before pairing again.");return;}
    pixelviewExpectedIdentity.clear();pixelviewUnpairRetry=false;
+   pixelviewPushedState.clear();
    pixelviewAuthDeadline=0; pixelviewReconnectAt=0;
    pixelviewBackoff=1000;
    blog(LOG_INFO,"Pixelview: control socket ready (node %s, desktop %s)",pixelviewIdentity.nodeId.toUtf8().constData(),pixelviewIdentity.desktopId.toUtf8().constData());
@@ -123,6 +126,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   if(pixelviewLease.revoked) PixelviewDeviceRevoked();
   else if(pixelviewLease.replaced) {pixelviewReconnectAt=0; pixelviewAuthDeadline=0; pixelviewDesktop->closeSocket();}
   else if(mutation=="DESKTOP_CONTROL" && pixelviewLease.ready) HandlePixelviewControl(doc.object()["data"].toObject());
+  else if(mutation=="SOCKET_DESKTOP_STREAM_ENDED" && pixelviewLease.ready) PixelviewStreamEnded(doc.object()["data"].toObject());
   // Keep the media failure detail available after release (also in the node tooltip).
   RefreshPixelviewReconnect();
  };
@@ -233,7 +237,7 @@ void OBSBasic::RefreshPixelviewPairing()
  pixelviewUnpair->setText(QStringLiteral("Unpair"));
  pixelviewUnpair->setEnabled(!busy);
  const bool ordinaryConnected=pixelviewLease.ready && !pixelviewLease.pending && (!pixelviewLease.intent || pixelviewActualStreaming);
- pixelviewConnectionStatus->setVisible(!paired || !ordinaryConnected);
+ pixelviewConnectionStatus->setVisible((!paired || !ordinaryConnected) && !pixelviewConnectionStatus->text().isEmpty());
  pixelviewIdentityStatus->setToolTip(pixelviewConnectionStatus->text());
  pixelviewIdentityStatus->setText(paired ? QStringLiteral("Node %1 · %2").arg(pixelviewIdentity.nodeId,
   pixelviewLease.ready ? QStringLiteral("Connected") : pixelviewLease.intent ? QStringLiteral("Reconnecting…") : QStringLiteral("Offline")) :
@@ -365,6 +369,7 @@ void OBSBasic::CancelPixelviewStart()
 void OBSBasic::RefreshPixelviewReconnect()
 {
  if(isClosing()) return;
+ QueuePixelviewStatePush();
  RefreshPixelviewPairing();
  const bool recovering=pixelviewLease.intent && pixelviewLease.retries>0;
  if(recovering) {
@@ -467,8 +472,21 @@ void OBSBasic::CompletePixelviewRevocation()
  pixelviewUnpairRetry=!SavePixelviewIdentity();
  pixelviewConnectionStatus->setText(pixelviewUnpairRetry ?
   QStringLiteral("This Mac was unpaired from your Pixelview account, but its settings could not be saved. Click Unpair to finish.") :
-  QStringLiteral("This Mac was unpaired from your Pixelview account. Pair again to stream from it."));
+  QString()); // The unpaired sidebar (Pair button and hint) already says it all.
  RefreshPixelviewPairing();
+}
+void OBSBasic::PixelviewStreamEnded(const QJsonObject &data)
+{
+ // Pixelview is about to stop the engine (project deleted, idle shutdown).
+ // Stop like the Stop button, before the WHIP ingest drops: no failure dialog.
+ if(!pixelviewLease.intent && !pixelviewActualStreaming && !pixelviewStreamingBusy) return;
+ const QString reason=data["reason"].toString();
+ blog(LOG_INFO,"Pixelview: stream ended by Pixelview (%s)",reason.toUtf8().constData());
+ StopStreaming();
+ const QString message=reason=="project_deleted" ? QStringLiteral("Stream stopped: the project was deleted in Pixelview admin.") :
+  QStringLiteral("Stream stopped: Pixelview shut down the streaming server.");
+ pixelviewConnectionStatus->setText(message);
+ ui->statusbar->showMessage(message,15000);
 }
 QJsonObject OBSBasic::PixelviewReportedSettings()
 {
