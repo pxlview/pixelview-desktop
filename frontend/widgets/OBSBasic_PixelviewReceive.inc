@@ -641,7 +641,7 @@ void OBSBasic::StartPixelviewReceive()
 		pixelviewReceiveIntent = true;
 		QString password = pixelviewReceivePassword->text();
 		pixelviewReceiver->start(id, password, name); password.clear();
-		pixelviewReceiveTimer->start(); RefreshPixelviewModes();
+		pixelviewReceiveTimer->start(); RefreshPixelviewModes(); RefreshPixelviewReceiveTray();
 	};
 	// Authorization belongs to the ordinary Start action, never a separate
 	// Keychain control or an automatic reconnect/focus-out/polling callback.
@@ -733,6 +733,7 @@ void OBSBasic::StopPixelviewReceive(bool keepReceiving)
 	}
 	RefreshPixelviewModes();
 	RefreshPixelviewAudio();
+	RefreshPixelviewReceiveTray();
 }
 
 void OBSBasic::RefreshPixelviewModes()

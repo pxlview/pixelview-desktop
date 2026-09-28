@@ -232,6 +232,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 
 ## Receiving
 
+A started receive shows the same live indicators as sending: the red Dock overlay and the active
+menu-bar icon, from Start receiving until any stop (button, error, stall, kick or quit). An active
+OBS output keeps owning both. Verified by eye on 2026-09-28 in the development build.
+
 ### Session credentials
 
 - The Receiving panel takes a session ID, masked password (Show/Hide) and receiver name (hostname

@@ -293,6 +293,7 @@ private:
 	void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
 	void InitPixelviewReceive(QWidget *sidebar);
 	void RefreshPixelviewModes();
+	void RefreshPixelviewReceiveTray();
 	bool PixelviewModeBusy() const;
 	void SelectPixelviewMode(int index);
 	void StartPixelviewReceive();
@@ -920,6 +921,7 @@ private:
 #endif
 				trayIcon->setIcon(trayIconFile);
 			}
+			RefreshPixelviewReceiveTray();
 		} else if (outputHandler->Active() && trayIcon && trayIcon->isVisible()) {
 			if (os_atomic_load_bool(&recording_paused)) {
 #ifdef __APPLE__

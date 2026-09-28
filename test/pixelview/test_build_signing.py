@@ -22,7 +22,7 @@ class BuildSigningTests(unittest.TestCase):
             # or depend on Homebrew. Fail closed on future unlisted Python helpers.
             python = tmp / "python3"
             python.write_text(f'#!{sys.executable}\nimport os, sys\n'
-                              'if len(sys.argv) > 1 and sys.argv[1].endswith(("fetch-gstreamer.py", "build-rswebrtc.py")):\n'
+                              'if len(sys.argv) > 1 and sys.argv[1].endswith(("fetch-gstreamer.py", "build-rswebrtc.py", "build-applemedia.py")):\n'
                               '    assert len(sys.argv) == 2\n'
                               '    sys.exit(0)\n'
                               'if len(sys.argv) > 1 and sys.argv[1].endswith("bundle-runtime.py"):\n'

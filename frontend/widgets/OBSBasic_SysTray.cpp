@@ -74,6 +74,7 @@ void OBSBasic::SystemTrayInit()
 	if (Active()) {
 		OnActivate(true);
 	}
+	RefreshPixelviewReceiveTray();
 
 	connect(trayIcon.data(), &QSystemTrayIcon::activated, this, &OBSBasic::IconActivated);
 	connect(showHide, &QAction::triggered, this, &OBSBasic::ToggleShowHide);
@@ -82,6 +83,23 @@ void OBSBasic::SystemTrayInit()
 	connect(sysTrayReplayBuffer.data(), &QAction::triggered, this, &OBSBasic::ReplayBufferActionTriggered);
 	connect(sysTrayVirtualCam.data(), &QAction::triggered, this, &OBSBasic::VirtualCamActionTriggered);
 	connect(exit, &QAction::triggered, this, &OBSBasic::close);
+}
+
+// A started receive shows the same live indicators as an active output (the
+// red Dock overlay and the menu-bar icon), from Start receiving until any stop.
+// Active outputs keep owning both.
+void OBSBasic::RefreshPixelviewReceiveTray()
+{
+	if (outputHandler && outputHandler->Active()) return;
+	TaskbarOverlaySetStatus(pixelviewReceiveIntent ? TaskbarOverlayStatusActive : TaskbarOverlayStatusInactive);
+	if (!trayIcon || !trayIcon->isVisible()) return;
+#ifdef __APPLE__
+	QIcon icon(pixelviewReceiveIntent ? ":/res/images/pixelview-tray-active-macos.png" : ":/res/images/pixelview-tray-macos.png");
+	icon.setIsMask(true);
+#else
+	QIcon icon(pixelviewReceiveIntent ? ":/res/images/pixelview-tray-active.png" : ":/res/images/pixelview-tray.png");
+#endif
+	trayIcon->setIcon(icon);
 }
 
 void OBSBasic::IconActivated(QSystemTrayIcon::ActivationReason reason)

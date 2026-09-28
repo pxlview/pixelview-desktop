@@ -83,6 +83,8 @@ static bool fixtureGetVideo(obs_video_info *v) { *v=fixtureVideo; return true; }
 static int fixtureResetVideo(obs_video_info *v) { fixtureVideo=*v; return OBS_VIDEO_SUCCESS; }
 #define obs_get_video_info fixtureGetVideo
 #define obs_reset_video fixtureResetVideo
+// The tray lives in OBSBasic_SysTray.cpp; this harness has no tray.
+void OBSBasic::RefreshPixelviewReceiveTray() {}
 #include "frontend/widgets/OBSBasic_PixelviewReceive.inc"
 #undef obs_get_video_info
 #undef obs_reset_video
