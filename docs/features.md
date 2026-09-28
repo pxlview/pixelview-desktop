@@ -86,7 +86,9 @@ behaviour is:
   stream. Only `config.whip` is used and SRT is never used. A second publisher is rejected by the
   engine at the WHIP POST; there is no `busy` code.
 - `DESKTOP_STOP {}` is sent after the local output has actually stopped; `DESKTOP_STOPPED {}` is not
-  waited for.
+  waited for. Stop (the button, a remote `stop` or `SOCKET_DESKTOP_STREAM_ENDED`) ends only the
+  stream: a ready control socket stays connected, so the Desktop stays online and a remote stop gets
+  its `DESKTOP_CONTROL_RESULT`. Only a Stop without a ready socket reconnects it.
 - `SOCKET_DESKTOP_STREAM_ENDED {reason}` is sent by the backend just before it takes the engine
   away: `project_deleted` (the running project is deleted in admin) or `engine_stopped` (the engine
   is paused, e.g. the no-viewers cooldown or the inactive-engine cron). A streaming or retrying

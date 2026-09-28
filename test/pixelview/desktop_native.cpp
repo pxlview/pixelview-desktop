@@ -65,6 +65,12 @@ int main() {
  assert(old.d.ready && old.d.started && old.d.intent && old.halts == 0);
  Fixture idle; idle.d.receive(READY, 0); idle.d.receive(mutation("DESKTOP_ERROR", {{"code", "start_failed"}}), 1);
  assert(idle.d.ready && idle.halts == 0);
+ // Stop on a ready socket (CancelPixelviewStart) ends only the stream: the
+ // socket stays ready, DESKTOP_STOP follows the output stop, Start works again.
+ Fixture stop; stop.stream(); stop.d.mediaStopped("Stream stopped.");
+ assert(stop.d.ready && !stop.d.intent && !stop.d.authorized(3) && stop.halts == 1);
+ stop.d.outputStopped(); assert(stop.last == "DESKTOP_STOP" && stop.d.ready && !stop.d.started);
+ assert(stop.d.requestStart(4));
  Fixture u; u.d.receive(READY, 0); u.d.receive(mutation("SOMETHING_NEW"), 1); u.d.receive({{"type", "ready"}}, 2);
  assert(u.d.ready && u.halts == 0); // Unknown or legacy messages are ignored, never fatal.
  Fixture r; r.stream(); r.d.receive(mutation("SOCKET_DESKTOP_REVOKED"), 3);

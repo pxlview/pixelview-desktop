@@ -271,10 +271,10 @@ int main() {
   assert(tray.text=="Basic.Main.StoppingStreaming" && !tray.enabled);
   finish(true);assert(pending.handler.starts==0);
   setup.set_value();Timer::run();assert(!pending.pixelviewStopPending);
-  // A refused start leaves the socket ready, so Start is available again at once.
-  assert(pending.pixelviewLease.ready==terminal);
-  assert(pending.button.text=="Basic.Main.StartStreaming" && pending.button.enabled==terminal);
-  assert(tray.text=="Basic.Main.StartStreaming" && tray.enabled==terminal);
+  // Neither a refused start nor Stop drops the ready socket: Start is available again at once.
+  assert(pending.pixelviewLease.ready && pending.pixelviewReconnectAt==0);
+  assert(pending.button.text=="Basic.Main.StartStreaming" && pending.button.enabled);
+  assert(tray.text=="Basic.Main.StartStreaming" && tray.enabled);
   assert(!pending.status.text.contains("Reconnecting") && !pending.pixelviewLease.intent);
   Timer::run();
  }
@@ -356,7 +356,10 @@ int main() {
  finish(true);copy(true);assert(callback.handler.starts==1);
  callback.CancelPixelviewStart();finish(true);assert(callback.handler.starts==1);
  // A newer grant cannot authorize the old callback, even after the old setup settles.
- callback.pixelviewStopPending=false;callback.pixelviewClosingSocket=false;
+ // Stop keeps the ready socket; the stream is released once output has stopped.
+ assert(callback.pixelviewLease.ready && !callback.pixelviewClosingSocket);
+ callback.pixelviewNativeAttempt=false; // The native output reported its stop.
+ Timer::run();assert(!callback.pixelviewStopPending && !callback.pixelviewLease.started && !callback.pixelviewLease.mediaDraining);
  grant(callback);
  copy(true);assert(callback.handler.starts==1);
  auto fresh=callback.MakeSetup();fresh(true);assert(callback.handler.starts==2);

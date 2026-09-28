@@ -361,6 +361,13 @@ void OBSBasic::QueuePixelviewOutputStopped(int delay)
 void OBSBasic::CancelPixelviewStart()
 {
  if(!pixelviewDesktop) return;
+ // Stop ends the stream, not the control socket: with a ready socket the
+ // Desktop stays online (a remote stop still gets its answer) and
+ // DESKTOP_STOP follows once the output has stopped.
+ if(pixelviewLease.ready && !isClosing() && !pixelviewShutdownPending && !pixelviewUnpairPending) {
+  pixelviewLease.mediaStopped("Stream stopped.");
+  return;
+ }
  pixelviewLease.fail("Stream stopped.");
  // Restore idle control connectivity only; Stop has already erased streaming intent.
  if(!isClosing() && !pixelviewShutdownPending && !pixelviewUnpairPending) pixelviewReconnectAt=pixelviewClock.elapsed()+1000;
