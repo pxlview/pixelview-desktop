@@ -5,6 +5,7 @@
 #include "frontend/utility/PixelviewReceiver.hpp"
 #include "frontend/utility/PixelviewReceiveCredentialStore.hpp"
 #include "frontend/utility/PixelviewDeepLinkInbox.hpp"
+#include "frontend/utility/PixelviewLogShipper.hpp"
 #include <cassert>
 #include <Security/Security.h>
 namespace pixelview {
@@ -50,6 +51,7 @@ public:
 // DECLARATIONS
  OBSBasic() { pixelviewReceiveStore=fixtureStore(testService); }
  void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
+ QString pixelviewLogViewerToken; // Log upload credential (OBSBasic_PixelviewLogs.inc).
  QWidget *controlsDock=nullptr;
  QLabel *pixelviewStreamHint=nullptr;
  QComboBox *pixelviewDevices=nullptr;

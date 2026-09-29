@@ -43,6 +43,8 @@ class OBSBasic : public QMainWindow {
 public:
  Ui::OBSBasic storage; Ui::OBSBasic *ui = &storage;
  int logs=0, view=0, crashes=0, licenses=0, abouts=0;
+ QAction *pixelviewLogSharing=nullptr; bool pixelviewLogSharingOn=true; QList<bool> sharing;
+ void SetPixelviewLogSharing(bool on) { pixelviewLogSharingOn=on; sharing << on; }
  void ShowPixelviewLicense() { ++licenses; }
  void ShowPixelviewAbout() { ++abouts; }
  void InitMenu() {
@@ -75,7 +77,12 @@ int main(int argc, char **argv) {
  assert(!oldHelp->menuAction()->isVisible() && !oldHelp->menuAction()->isEnabled());
  assert(help->actions().contains(logs->menuAction()) && "Native Log Files submenu missing");
  assert(logs == w.ui->menuLogFiles && logs->isEnabled() && logs->menuAction()->isVisible());
- assert(visible(logs) == QStringList({"Basic.MainMenu.Help.Logs.ShowLogs", "Basic.MainMenu.Help.Logs.ViewCurrentLog"}));
+ assert(visible(logs) == QStringList({"Basic.MainMenu.Help.Logs.ShowLogs", "Basic.MainMenu.Help.Logs.ViewCurrentLog",
+  "Share Logs with Pixelview Support"}));
+ // The disclosed log-upload switch reflects and changes the saved setting.
+ assert(w.pixelviewLogSharing && w.pixelviewLogSharing->isCheckable() && w.pixelviewLogSharing->isChecked());
+ w.pixelviewLogSharing->trigger(); w.pixelviewLogSharing->trigger();
+ assert(w.sharing == QList<bool>({false, true}) && w.pixelviewLogSharingOn);
  logs->popup(QPoint(20,20)); app.processEvents();
  assert(logs->isVisible() && !logs->actionGeometry(w.ui->actionShowLogs).isEmpty());
  logs->hide();
