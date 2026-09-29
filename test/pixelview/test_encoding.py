@@ -104,6 +104,8 @@ int main() {
         harness = (ROOT / 'test/pixelview/encoding_refresh_harness.cpp.in').read_text()
         with tempfile.TemporaryDirectory() as tmp:
             src = pathlib.Path(tmp) / 'test.cpp'
+            labels = text.split('// BEGIN PROFILE LABELS', 1)[1].split('// END PROFILE LABELS', 1)[0]
+            harness = harness.replace('/* PRODUCTION_PROFILE_LABELS */', labels)
             src.write_text(harness.replace('/* PRODUCTION_REFRESH */', block))
             binary = pathlib.Path(tmp) / 'test'
             subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror', str(src), '-o', str(binary)], check=True)

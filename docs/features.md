@@ -183,6 +183,9 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
+- The sidebar Profile list labels HEVC Main10 "(recommended)" and Main 4:2:2 10 "(needs server
+  transcode)", each with a tooltip (only the Pixelview Player iOS app plays 4:2:2 natively; browsers
+  and Pixelview Desktop receivers get a server transcode). The saved profile value is unchanged.
 - HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
   range only). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.

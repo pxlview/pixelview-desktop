@@ -6,7 +6,12 @@ struct QString : std::string {
  using std::string::string;
  static QString fromUtf8(const char *s) { return QString(s); }
  QString toString() const { return *this; }
+ bool isEmpty() const { return empty(); }
 };
+inline QString operator+(const QString &a, const QString &b) { return QString((std::string(a) + std::string(b)).c_str()); }
+#define QStringLiteral(s) QString(s)
+namespace Qt { enum { ToolTipRole = 3 }; }
+/* PRODUCTION_PROFILE_LABELS */
 struct View { bool visible = false; bool isVisible() const { return visible; } };
 struct Combo {
  std::vector<std::pair<QString,QString>> entries;
@@ -16,8 +21,10 @@ struct Combo {
  View *view() { return &popup; }
  bool hasFocus() const { return focus; }
  int count() const { return (int)entries.size(); }
- void clear() { ++mutations; entries.clear(); current = -1; }
- void addItem(const QString &name, const QString &value) { ++mutations; entries.emplace_back(name,value); }
+ void clear() { ++mutations; entries.clear(); tips.clear(); current = -1; }
+ std::vector<QString> tips;
+ void addItem(const QString &name, const QString &value) { ++mutations; entries.emplace_back(name,value); tips.resize(entries.size()); }
+ void setItemData(int i, const QString &tip, int role) { assert(role == Qt::ToolTipRole); tips.at(i) = tip; }
  QString itemText(int i) const { return entries.at(i).first; }
  QString itemData(int i) const { return entries.at(i).second; }
  int findData(const QString &s) const { for (int i=0; i<count(); ++i) if (entries[i].second == s) return i; return -1; }
@@ -39,7 +46,7 @@ void refresh(Combo *pixelviewProfile, Property *props, const char *data, bool id
 /* PRODUCTION_REFRESH */
 }
 int main() {
- Combo combo; combo.entries = {{"Main","main"},{"Main 10","main10"}}; combo.current = 1;
+ Combo combo; combo.entries = {{"Main","main"},{"Main 10 (recommended)","main10"}}; combo.current = 1;
  Property props{{{"Main","main"},{"Main 10","main10"},{"Main 422 10","main42210"}}};
  combo.popup.visible = true;
  for (int i=0; i<3; ++i) refresh(&combo,&props,"main",true);
@@ -50,10 +57,13 @@ int main() {
  combo.focus = false;
  refresh(&combo,&props,"main",true);
  assert(combo.current == 0 && combo.count() == 3);
+ assert(combo.itemText(0) == "Main" && combo.tips[0].isEmpty());
+ assert(combo.itemText(1) == "Main 10 (recommended)" && combo.tips[1].find("Recommended") == 0);
+ assert(combo.itemText(2) == "Main 422 10 (needs server transcode)" && combo.tips[2].find("iOS app") != std::string::npos);
  combo.mutations = 0;
  for (int i=0; i<3; ++i) refresh(&combo,&props,"main",true);
  assert(combo.mutations == 0);
  props.entries[1].first = "Updated name";
  refresh(&combo,&props,"main10",true);
- assert(combo.itemText(1) == "Updated name" && combo.current == 1);
+ assert(combo.itemText(1) == "Updated name (recommended)" && combo.current == 1);
 }

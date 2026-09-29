@@ -127,6 +127,23 @@ void PixelviewAlignProperties(OBSPropertiesView *view)
 	align();
 }
 } // namespace
+// BEGIN PROFILE LABELS
+// HEVC guidance in the sender's profile list; the saved value is unchanged.
+static QString PixelviewProfileLabel(const QString &name, const QString &value)
+{
+	if (value == QStringLiteral("main10")) return name + QStringLiteral(" (recommended)");
+	if (value == QStringLiteral("main42210")) return name + QStringLiteral(" (needs server transcode)");
+	return name;
+}
+static QString PixelviewProfileTip(const QString &value)
+{
+	if (value == QStringLiteral("main10"))
+		return QStringLiteral("Recommended. Plays directly everywhere.");
+	if (value == QStringLiteral("main42210"))
+		return QStringLiteral("Native only in the Pixelview Player iOS app. Transcoded elsewhere: more latency, lower quality.");
+	return QString();
+}
+// END PROFILE LABELS
 
 void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 {
@@ -193,7 +210,7 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	pixelviewEncodingStatus->setObjectName(QStringLiteral("pixelviewEncodingStatus"));
 	pixelviewEncodingStatus->hide();
 	layout->addWidget(pixelviewEncodingStatus);
-	pixelviewProfile->setToolTip(QStringLiteral("Profiles are reported by the native encoder; registration does not prove hardware support. Main10 uses P010; Main 4:2:2 10 uses P216. 10-bit source detail also requires compatible input and Device settings (Allow 10 Bit in Auto mode). SDR Rec.709 is retained."));
+	pixelviewProfile->setToolTip(QStringLiteral("Encoder profile. Main10 is recommended; 10-bit detail also needs a 10-bit capture input."));
 	const bool initialized = config_get_bool(activeConfiguration, "Pixelview", "EncodingInitialized");
 	const QString saved = QString::fromUtf8(config_get_string(activeConfiguration, "AdvOut", "Encoder"));
 	int selected = initialized ? pixelviewEncoder->findData(saved) : -1;
@@ -281,7 +298,8 @@ void OBSBasic::RefreshPixelviewEncoding()
 		if (profile && obs_property_get_type(profile) == OBS_PROPERTY_LIST && obs_property_list_format(profile) == OBS_COMBO_FORMAT_STRING) {
 			for (size_t i = 0; i < obs_property_list_item_count(profile); ++i) {
 				if (obs_property_list_item_disabled(profile, i)) continue;
-				entries.emplace_back(QString::fromUtf8(obs_property_list_item_name(profile, i)), QString::fromUtf8(obs_property_list_item_string(profile, i)));
+				const QString value = QString::fromUtf8(obs_property_list_item_string(profile, i));
+				entries.emplace_back(PixelviewProfileLabel(QString::fromUtf8(obs_property_list_item_name(profile, i)), value), value);
 			}
 		}
 		bool changed = pixelviewProfile->count() != static_cast<int>(entries.size());
@@ -290,7 +308,11 @@ void OBSBasic::RefreshPixelviewEncoding()
 				  pixelviewProfile->itemData(static_cast<int>(i)).toString() != entries[i].second;
 		if (changed) {
 			pixelviewProfile->clear();
-			for (const auto &entry : entries) pixelviewProfile->addItem(entry.first, entry.second);
+			for (const auto &entry : entries) {
+				pixelviewProfile->addItem(entry.first, entry.second);
+				const QString tip = PixelviewProfileTip(entry.second);
+				if (!tip.isEmpty()) pixelviewProfile->setItemData(pixelviewProfile->count() - 1, tip, Qt::ToolTipRole);
+			}
 		}
 		const int selected = pixelviewProfile->findData(QString::fromUtf8(obs_data_get_string(data, "profile")));
 		if (pixelviewProfile->currentIndex() != selected) pixelviewProfile->setCurrentIndex(selected);
