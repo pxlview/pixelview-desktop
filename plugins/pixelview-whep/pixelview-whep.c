@@ -496,8 +496,11 @@ static GstPadProbeReturn early_audio_probe(GstPad *pad, GstPadProbeInfo *info, g
 /* libobs raises its global audio buffering for any audio older than its mix
  * window and never lowers it again, so one startup burst (audio queued while
  * the first video frame decodes) would delay receive audio for the whole
- * session. Audio this far past its render time is withheld instead. */
-#define PV_STALE_AUDIO_NS (50 * GST_MSECOND)
+ * session. Audio this far past its render time is withheld instead. 90 ms
+ * passes ordinary jitter (median 14 ms on production receives) and bounds any
+ * buffering growth to a lag viewers do not notice; startup floods and stalls
+ * (hundreds of ms to seconds) are still withheld. */
+#define PV_STALE_AUDIO_NS (90 * GST_MSECOND)
 static GstFlowReturn audio_sample(GstAppSink *sink, gpointer opaque)
 {
  struct receiver *r = opaque;

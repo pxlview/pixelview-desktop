@@ -304,9 +304,12 @@ An earlier backend handoff proposing receiver registration over the control sock
   pipeline clock, and the source runs libobs async-unbuffered so frames are not rebuffered twice.
   OBS timestamps are the sink render time (base + running time + the sink's configured pipeline
   latency), so unbuffered video and timestamped audio line up in OBS. Audio arriving more than
-  50 ms past its render time is withheld rather than delivered: libobs raises its global audio
+  90 ms past its render time is withheld rather than delivered: libobs raises its global audio
   buffering for stale audio and never lowers it, so one startup burst used to delay receive audio
-  (and later sending) for the rest of the session (640-960 ms seen).
+  (and later sending) for the rest of the session (640-960 ms seen). Production receives on
+  2026-09-28 had a median of 14 ms; 4 of 116 windows fell between 50 and 90 ms (short gaps under the
+  earlier 50 ms limit, now passed with at most ~90 ms of buffering); everything later was a receive
+  start (216-736 ms) or a stall, still withheld. Receive start typically drops 1-2 s of queued audio.
 - The bundled `applemedia` plugin is rebuilt from gst-plugins-bad 1.28.3 with a vtdec patch that
   sizes the HEVC output reorder queue from the stream's SPS. Upstream holds 16 frames (~640 ms at
   25 fps) regardless of B-frames and cannot declare it without a caps framerate, so HEVC video
