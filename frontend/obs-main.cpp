@@ -58,6 +58,7 @@ extern string currentLogFile;
 extern string lastLogFile;
 
 #include <utility/PixelviewConfig.hpp>
+#include <utility/PixelviewLogShipper.hpp>
 
 bool portable_mode = false;
 bool steam = false;
@@ -234,6 +235,8 @@ static void do_log(int log_level, const char *msg, va_list args, void *param)
 #endif
 		if (!too_many_repeated_entries(logFile, msg, str)) {
 			LogStringChunk(logFile, str, log_level);
+			// Pixelview modification, 2026-09-29: the same lines, for upload.
+			pixelview::LogCapture::instance().capture(log_level, str);
 		}
 	}
 

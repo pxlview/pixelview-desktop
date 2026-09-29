@@ -482,6 +482,35 @@ Fullscreen uses the OBS projector on a chosen display (View menu / sidebar displ
 existing Escape action to close. Stop receiving returns the canvas and outputs to the sending
 configuration.
 
+## Log upload
+
+- Every line the app writes to its log file (the same level and repeat filter, from the first line
+  of the launch) is also captured for upload to the backend's `POST /desktop/logs`, which forwards
+  it to the central Loki as `job="pixelview-desktop"` (backend `docs/desktop-log-ingestion.md`).
+  The Desktop never talks to Loki or Grafana directly.
+- On by default and disclosed as **Help > Log Files > Share Logs with Pixelview Support**
+  (`PixelviewDiagnostics/ShareLogs`). Switching it off stops capture and deletes buffered and
+  spooled lines.
+- Lines are tagged `send` (`[obs-webrtc]`, streaming start/stop, remote control), `receive`
+  (`[pixelview-whep]`, `[pixelview-receive]`, `[decklink-output-ui]`) or `app`. Receive lines carry
+  the session and viewer they were captured under; receiver state changes are logged for this.
+- Before anything leaves the Mac, device tokens, bearer values, `token=`/`password=`/`passphrase=`
+  style pairs and every URL query string are redacted and the home directory becomes `~`; the
+  backend redacts again.
+- A paired Desktop uploads with its device token and adds the receiver's viewer token when it
+  receives from the same backend, so the backend can attribute receive lines to that session; an
+  unpaired receiver uploads with its viewer token alone. Without either credential lines stay
+  queued. Identity is assigned by the backend from the credential, never from the batch.
+- Batches go out every 10 s (within 2 s of an error line, sooner while a backlog remains), at most
+  500 lines / 192 KiB and one launch per batch. 429/503 honour `Retry-After`; transport and 5xx
+  failures back off from 10 s to 5 min; 401/403 pause until the credential changes; a backend
+  without the endpoint (404/405) is retried hourly. Upload outcomes are logged on transitions only.
+- Unsent lines (up to 5000) are spooled to `obs-studio/pixelview-log-spool.ndjson` at most every
+  5 s, promptly after an error line and at close, and are uploaded by the next launch. Lines older
+  than 50 minutes are discarded on both sides: Loki rejects them on the shared streams, so an
+  offline or long-closed Desktop loses the older part of its spool.
+- Not included: crash reports, full log files on demand, debug-level lines and metrics.
+
 ## Shutdown and recovery
 
 - The main window carries `WA_DeleteOnClose`, so `OBSBasic::closeEvent` calls
@@ -515,7 +544,7 @@ configuration.
 ### Compiled and offline tests (`test/pixelview`, `plugins/*/tests`)
 
 The Python drivers compile production source slices (offscreen Qt, Objective-C++ transports against
-loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 225
+loopback servers, libobs harnesses). `python3 -m unittest discover -s test/pixelview` runs 230
 tests; `test_icon_assets` (needs Pillow) and `test_pixelview_sources` (corresponding-source inventory
 gate) fail in the current environment regardless of changes.
 
@@ -525,7 +554,9 @@ gate) fail in the current environment regardless of changes.
   60 s silence), `test_control_socket.py` (RFC 6455 keepalive, refused upgrade),
   `test_desktop_retry.py`, `test_media_failure_pairing.py`, `test_whip_retry.py`,
   `test_pairing_ux.py`, `test_pairing_defaults.py`, `test_backend_selection.py`, `test_stream_lock.py`,
-  `test_streaming_ui.py`, `test_remote_control.py` (admin remote-control source contracts).
+  `test_streaming_ui.py`, `test_remote_control.py` (admin remote-control source contracts),
+  `test_log_shipper.py` (`log_shipper.cpp`: capture bound and switch, redaction, roles, batching,
+  retry/pause outcomes, spool across launches; plus the log-handler, menu and receiver wiring).
   `desktop_backend_smoke.mm` is an opt-in live tool.
 - Keychain: `test_keychain_reliability.py`, `test_keychain_noninteractive.py`,
   `test_keychain_async.py` (mocked Security APIs), `test_receive_keychain_restart.py` and
@@ -741,6 +772,11 @@ gate) fail in the current environment regardless of changes.
   backend reload was exercised.
 - Admin remote control: a remote start that reaches an engine and streams, remote stop of a live
   stream, and the relay and state push across several backend workers (FakeRedis test only).
+- Log upload against a running backend: the signed build was launched unpaired with an isolated
+  settings root and spooled its log from the first line and at SIGTERM close (clean shutdown), but
+  no batch was posted to `/desktop/logs`, and the receive-session attribution and the menu switch
+  were exercised offline only. The backend side was checked by pushing through its forwarder into a
+  local Loki, not the AMS Loki.
 - Production notarization, Gatekeeper, R2 publication, appcast and the Sparkle update cycle;
   the interactive Pair forms on the rebuilt bundle (offscreen tests only);
   clicking the red close button (SIGTERM shares the path).
@@ -793,14 +829,16 @@ gate) fail in the current environment regardless of changes.
 - `frontend/widgets/OBSBasic_PixelviewDesktop.inc` - pairing UI, control-socket timers, in-memory
   WHIP service, streaming retry; `OBSBasic_PixelviewReceive.inc` - Receiving panel, viewer
   controller wiring, jitter setting, canvas precision transaction, DeckLink output binding;
-  `OBSBasic_PixelviewEncoding.inc`, `OBSBasic_PixelviewAudio.inc`, `OBSBasic_PixelviewDeepLinks.inc`.
+  `OBSBasic_PixelviewEncoding.inc`, `OBSBasic_PixelviewAudio.inc`, `OBSBasic_PixelviewDeepLinks.inc`,
+  `OBSBasic_PixelviewLogs.inc` (log upload transport and switch).
   Capture shell, FPS, mode persistence and the close gate are in `OBSBasic.cpp`.
 - `frontend/utility/Pixelview*.{hpp,cpp,mm}` - `PixelviewDesktop.hpp` (control policy),
   `PixelviewDesktopConnection.hpp` / `PixelviewDesktopMac.mm` (exchange, socket, Keychain),
   `PixelviewControlPing.hpp`, `PixelviewSocketWatchdog.hpp`, `PixelviewBackend.hpp` (origin
   defaults), `PixelviewReceiver*` (viewer flow), `PixelviewReceiveCredentialStore*`,
   `Pixelview*Keychain*.hpp`, `PixelviewDeepLink*`, `PixelviewEncoding.hpp`, `PixelviewFPS.hpp`,
-  `PixelviewCapturePolicy.hpp`, `PixelviewConfig.hpp`, `PixelviewAudio.hpp`, `PixelviewSparkle.*`.
+  `PixelviewCapturePolicy.hpp`, `PixelviewConfig.hpp`, `PixelviewAudio.hpp`, `PixelviewSparkle.*`,
+  `PixelviewLogShipper.hpp` (log capture and upload policy).
 - `plugins/pixelview-whep` - WHEP source, capability probe, profile offer, video-format policy,
   `codec-route.c` (codec/profile route selector), `scripts/` (runtime staging, rswebrtc build,
   SBOM), `patches/`, `tests/`.

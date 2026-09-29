@@ -52,6 +52,7 @@ class OBSBasic {
 public:
  bool pixelviewReceiving=false; void *pixelviewSendOutput=nullptr, *pixelviewReceiveScene=nullptr;
  void StopPixelviewReceive() {}
+ int logSpools=0; void PixelviewLogsTick() {++logSpools;} // Log spool flush before shutdown.
  void obs_set_output_source(int,void*) {}
  pixelview::Desktop pixelviewLease;
  Clock pixelviewClock;

@@ -359,6 +359,13 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		SetPixelviewReceiveStatus(QStringLiteral("Removed from session %1 by its host. This receiver cannot rejoin it.").arg(session), ReceiveStatusTone::Error);
 	};
 	pixelviewReceiver->onChanged = [this] {
+		// Receive lines carry the session and viewer they belong to, and the
+		// state machine itself is logged so uploads show what happened.
+		static const char *const states[] = {"idle", "authenticating", "registering", "ready", "reconnecting", "error"};
+		pixelview::LogCapture::instance().setReceiveContext(pixelviewReceiver->session(), pixelviewReceiver->viewer());
+		if (!pixelviewReceiver->clientToken().isEmpty()) pixelviewLogViewerToken = pixelviewReceiver->clientToken();
+		blog(LOG_INFO, "[pixelview-receive] receiver %s: %s", states[(int)pixelviewReceiver->state()],
+		     pixelviewReceiver->status().toUtf8().constData());
 		if (isClosing() || pixelviewShutdownPending) return;
 		// The stopped session's late Idle must not cancel a pending reconnect.
 		if (pixelviewReceiveRetryTimer && pixelviewReceiveRetryTimer->isActive()) return;

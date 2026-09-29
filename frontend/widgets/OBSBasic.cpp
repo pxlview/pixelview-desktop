@@ -96,6 +96,7 @@ using namespace std;
 #include "OBSBasic_PixelviewReceive.inc"
 #include "OBSBasic_PixelviewDeepLinks.inc"
 #include "OBSBasic_PixelviewControl.inc"
+#include "OBSBasic_PixelviewLogs.inc"
 
 extern bool portable_mode;
 extern bool disable_3p_plugins;
@@ -1537,6 +1538,7 @@ void OBSBasic::ShowPixelviewLicense()
 
 void OBSBasic::InitPixelview()
 {
+	InitPixelviewLogs();
 	SetPreviewProgramMode(false);
 	EnablePreviewDisplay(true);
 	ui->preview->SetLocked(false);
@@ -1578,6 +1580,14 @@ void OBSBasic::InitPixelview()
 	// Pixelview has no configured log-upload service; do not expose upload actions.
 	ui->menuLogFiles->removeAction(ui->actionUploadCurrentLog);
 	ui->menuLogFiles->removeAction(ui->actionUploadLastLog);
+	// Pixelview modification, 2026-09-29: the disclosed switch for log upload.
+	ui->menuLogFiles->addSeparator();
+	pixelviewLogSharing = ui->menuLogFiles->addAction(QStringLiteral("Share Logs with Pixelview Support"));
+	pixelviewLogSharing->setCheckable(true);
+	pixelviewLogSharing->setChecked(pixelviewLogSharingOn);
+	pixelviewLogSharing->setToolTip(QStringLiteral(
+		"Sends this app's log (sending, receiving and pairing events) to Pixelview so support can investigate problems."));
+	connect(pixelviewLogSharing, &QAction::toggled, this, &OBSBasic::SetPixelviewLogSharing);
 	appMenu->addMenu(ui->menuLogFiles);
 	if (ui->menuCrashLogs) {
 		ui->menuCrashLogs->removeAction(ui->actionUploadLastCrashLog);
@@ -2721,6 +2731,8 @@ bool OBSBasic::PixelviewDialogLoopsClosed()
 
 bool OBSBasic::PixelviewShutdownReady()
 {
+	// Unsent log lines are spooled and uploaded by the next launch.
+	PixelviewLogsTick();
 	StopPixelviewReceive();
 	if (pixelviewReceiving) {
 		obs_set_output_source(0, pixelviewSendOutput);
