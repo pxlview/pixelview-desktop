@@ -360,6 +360,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	};
 	pixelviewReceiver->onChanged = [this] {
 		if (isClosing() || pixelviewShutdownPending) return;
+		// The stopped session's late Idle must not cancel a pending reconnect.
+		if (pixelviewReceiveRetryTimer && pixelviewReceiveRetryTimer->isActive()) return;
 		using State = pixelview::PixelviewReceiver::State;
 		if (pixelviewReceiver->state() == State::Idle || pixelviewReceiver->state() == State::Error) pixelviewReceiveIntent = false;
 		pixelviewReceiveFrames = 0;
@@ -390,6 +392,14 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		if (!accepted) { StopPixelviewReceive(true); SetPixelviewReceiveStatus(QStringLiteral("Native receive connection unavailable."), ReceiveStatusTone::Error); return; }
 		SetPixelviewReceiveStatus(QStringLiteral("Authorized · connecting media…"), ReceiveStatusTone::Connecting); RefreshPixelviewAudio();
 	};
+	pixelviewReceiveRetryTimer = new QTimer(this);
+	pixelviewReceiveRetryTimer->setSingleShot(true);
+	connect(pixelviewReceiveRetryTimer, &QTimer::timeout, this, [this] {
+		if (!pixelviewReceiveIntent || !pixelviewReceiving || isClosing() || pixelviewShutdownPending) return;
+		pixelviewReceiveIntent = false; // StartPixelviewReceive refuses while busy
+		StartPixelviewReceive();
+		if (!pixelviewReceiveIntent) { RefreshPixelviewModes(); RefreshPixelviewReceiveTray(); }
+	});
 	pixelviewReceiveTimer = new QTimer(this);
 	pixelviewReceiveTimer->setInterval(500);
 	connect(pixelviewReceiveTimer, &QTimer::timeout, this, [this] {
@@ -408,6 +418,14 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 				const bool hevc422 = failure && strcmp(failure, "unsupported-hevc-main-422-10") == 0;
 				const bool hevcOther = failure && strcmp(failure, "unsupported-hevc-profile") == 0;
 				const auto is = [failure](const char *reason) { return failure && strcmp(failure, reason) == 0; };
+				const bool typed = (failure && *failure) || hevc422 || hevcOther;
+				if (!typed) {
+					// A stalled or ended stream reconnects on its own; typed
+					// refusals need an operator change and never retry.
+					RetryPixelviewReceive();
+					calldata_free(&data);
+					return;
+				}
 				StopPixelviewReceive(true);
 				SetPixelviewReceiveStatus(
 					is("hdr-source-needs-hdr-receive") ?
@@ -424,6 +442,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
 			} else if (state && strcmp(state, "playing") == 0 && fresh) {
+				pixelviewReceiveRetries = 0;
 				SetPixelviewReceiveStatus(QStringLiteral("Receiving"), ReceiveStatusTone::Receiving);
 			} else {
 				SetPixelviewReceiveStatus(QStringLiteral("Waiting for video…"), ReceiveStatusTone::Connecting);
@@ -689,6 +708,23 @@ void OBSBasic::StartPixelviewReceive()
 	start();
 }
 
+// Tear the stalled session down and start a fresh one after a backoff
+// (2, 4, 8, then every 10 s). The intent stays set while waiting, so the button
+// reads Stop receiving (which cancels) and the mode stays locked.
+void OBSBasic::RetryPixelviewReceive()
+{
+	StopPixelviewReceive(true);
+	if (!pixelviewReceiving || isClosing() || pixelviewShutdownPending || !pixelviewReceiveRetryTimer) return;
+	const int seconds = pixelviewReceiveRetries < 3 ? 2 << pixelviewReceiveRetries : 10;
+	++pixelviewReceiveRetries;
+	blog(LOG_WARNING, "[pixelview-receive] media stopped; reconnecting in %d s (attempt %d)", seconds, pixelviewReceiveRetries);
+	pixelviewReceiveIntent = true;
+	SetPixelviewReceiveStatus(QStringLiteral("Stream interrupted. Reconnecting in %1 s…").arg(seconds), ReceiveStatusTone::Connecting);
+	pixelviewReceiveRetryTimer->start(seconds * 1000);
+	RefreshPixelviewModes();
+	RefreshPixelviewReceiveTray();
+}
+
 void OBSBasic::DisconnectPixelviewReceiveMedia()
 {
 	PixelviewBindDeckLinkReceive(nullptr, pixelviewReceiving);
@@ -707,6 +743,7 @@ void OBSBasic::DisconnectPixelviewReceiveMedia()
 
 void OBSBasic::StopPixelviewReceive(bool keepReceiving)
 {
+	if (pixelviewReceiveRetryTimer) pixelviewReceiveRetryTimer->stop();
 	pixelviewReceiveFrames = 0;
 	if (pixelviewReceiveStatus) SetPixelviewReceiveStatus(keepReceiving && !isClosing() && !pixelviewShutdownPending ?
 		QStringLiteral("Stopped. Click Start receiving to reconnect.") : QStringLiteral("Not receiving."), ReceiveStatusTone::Idle);

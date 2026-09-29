@@ -155,7 +155,7 @@ static void color_failure(struct receiver *r, GstCaps *caps, enum pixelview_colo
    colorimetry ? colorimetry : "unsignalled");
  }
 }
-static void log_media_stop(GstMessage *msg,bool stale)
+static void log_media_stop(GstMessage *msg,unsigned stale_seconds)
 {
  if(msg) {
   if(GST_MESSAGE_TYPE(msg)==GST_MESSAGE_EOS) {
@@ -169,8 +169,8 @@ static void log_media_stop(GstMessage *msg,bool stale)
   blog(LOG_ERROR,"[pixelview-whep] media pipeline error: source=%s domain=%s code=%d",
    source?GST_OBJECT_NAME(source):"unknown",domain?domain:"unknown",error?error->code:0);
   g_clear_error(&error);g_free(debug);
- } else if(stale) {
-  blog(LOG_ERROR,"[pixelview-whep] media stopped: no video received for 15 seconds");
+ } else if(stale_seconds) {
+  blog(LOG_ERROR,"[pixelview-whep] media stopped: no video received for %u seconds",stale_seconds);
  }
 }
 static void status_proc(void *opaque, calldata_t *cd)
@@ -826,7 +826,9 @@ static void log_latency(struct receiver *r)
  g_string_free(text, TRUE);
 }
 /* Worker only: worst lateness of delivered samples against their stamped render
- * time, per 5 s window. Positive means OBS received the sample after it was due. */
+ * time, per 5 s window. Positive means OBS received the sample after it was due.
+ * Only abnormal windows are logged: OBS drops a line that repeats with similar
+ * text, which hid a real stall behind 158 healthy windows. */
 static void log_lateness(struct receiver *r)
 {
  const uint64_t now = os_gettime_ns();
@@ -839,7 +841,7 @@ static void log_lateness(struct receiver *r)
  const uint64_t dropped = r->audio_dropped;
  r->video_late = r->audio_late = INT64_MIN; r->audio_dropped = 0;
  g_mutex_unlock(&r->lock);
- if (playing && (video != INT64_MIN || audio != INT64_MIN))
+ if (playing && (video > 200000000 || audio > 200000000 || dropped))
   blog(LOG_INFO, "[pixelview-whep] worst lateness (5 s): video %lld ms, audio %lld ms, stale audio dropped %llu ms",
    video == INT64_MIN ? -1LL : (long long)(video / 1000000), audio == INT64_MIN ? -1LL : (long long)(audio / 1000000),
    (unsigned long long)(dropped / 48));
@@ -946,11 +948,16 @@ static gpointer worker(gpointer opaque)
    uint64_t last = r->native422_frames ? r->last_native_video : r->last_video;
    native422_failure_locked(r,msg);
    unsupported_profile_locked(r,msg);
-   bool stale = os_gettime_ns() - last > 15ULL * 1000000000;
+   /* The first frame waits for ICE and, in passthrough, the sender's next
+    * keyframe (up to its GOP length). Once video has flowed, a 5 s gap is a
+    * dead session: the engine does not re-attach a viewer after its input
+    * reconnects, and the Receiving panel reconnects with a fresh session. */
+   const unsigned limit = r->native422_frames || r->frames ? 5 : 15;
+   bool stale = os_gettime_ns() - last > limit * 1000000000ULL;
    if ((msg || stale) && !r->changed) {
     r->accept_samples = false;
     r->state = msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS ? "ended" : "error";
-    log_media_stop(msg,stale);
+    log_media_stop(msg,stale ? limit : 0);
    }
    g_mutex_unlock(&r->lock);
    if (msg || stale) stop_pipeline(r); /* no reconnect spin, no raw errors */

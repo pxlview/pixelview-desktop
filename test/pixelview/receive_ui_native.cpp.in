@@ -369,7 +369,14 @@ int main(int argc,char **argv) {
    layout.pixelviewReceiveIntent=true; mediaFailure="not-a-known-reason"; poll();
    assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed") && !layout.pixelviewReceiveStatus->text().contains("not-a-known-reason"));
    layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
-   layout.pixelviewReceiveIntent=true; mediaFailure=""; poll(); assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed"));
+   // An unexplained stall or end reconnects with backoff instead of stopping;
+   // the intent stays set so the button reads Stop receiving, which cancels.
+   layout.pixelviewReceiveIntent=true; mediaFailure=""; poll();
+   assert(!green() && layout.pixelviewReceiveIntent && layout.pixelviewReceiveStatus->text().contains("Reconnecting in 2 s"));
+   assert(layout.pixelviewReceiveRetryTimer->isActive() && layout.pixelviewReceiveRetries==1 && layout.pixelviewReceiveButton->text()=="Stop receiving");
+   layout.StopPixelviewReceive(true);
+   assert(!layout.pixelviewReceiveIntent && !layout.pixelviewReceiveRetryTimer->isActive() && layout.pixelviewReceiveButton->text()=="Start receiving");
+   layout.pixelviewReceiveRetries=0;
    layout.StopPixelviewReceive(true); app.processEvents(); assert(!green());
    assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==app.palette().color(QPalette::WindowText));
    auto red=[&]{app.processEvents(); return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585");};

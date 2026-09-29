@@ -847,11 +847,18 @@ int main(int argc, char **argv)
 		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
 		assert(calldata_bool(&health, "healthy"));
 		calldata_free(&health);
-		ordinaryStatus.state = "error";
+		ordinaryStatus.state = "error"; // a stalled or ended receive keeps the rendered card playing
 		calldata_init(&health);
 		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
-		assert(!calldata_bool(&health, "healthy") && strstr(calldata_string(&health, "reason"), "left playing (state error"));
+		assert(calldata_bool(&health, "healthy"));
 		calldata_free(&health);
+		assert(retained->BindReceive(nullptr, false)); // a running rendered output rebinds on reconnect
+		calldata_init(&health);
+		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
+		assert(calldata_bool(&health, "healthy"));
+		calldata_free(&health);
+		assert(!retained->BindReceive(renderedSource, true)); // native ownership stays start-time only
+		assert(retained->BindReceive(renderedSource, false));
 		ordinaryStatus.state = "playing"; ordinaryStatus.native = 1;
 		calldata_init(&health);
 		assert(proc_handler_call(obs_output_get_proc_handler(realOutput), "receive_status", &health));
@@ -860,7 +867,7 @@ int main(int argc, char **argv)
 		ordinaryStatus.native = 0;
 		assert(obs_output_active(realOutput)); // health is advisory; the UI watchdog drains
 	}
-	puts("ordinary receive health: frame gaps tolerated, playing/native changes named PASS");
+	puts("ordinary receive health: frame gaps, stalls and live rebinds tolerated, native change named PASS");
 	assert(!obs_source_get_monitoring_enabled(renderedSource));
 	obs_output_stop(realOutput);
 	for (int i=0; i<100 && obs_output_active(realOutput); ++i) os_sleep_ms(2);

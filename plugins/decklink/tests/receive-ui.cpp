@@ -7,7 +7,8 @@
 #include <obs.hpp>
 #include <cassert>
 #include <cstdio>
-static bool shutting_down = false, main_output_running = false, healthy = true;
+static bool shutting_down = false, main_output_running = false, healthy = true, rebind_ok = false;
+static unsigned rebinds = 0;
 static unsigned starts = 0, stops = 0;
 static obs_output_t *fixtureOutput = nullptr;
 static struct {
@@ -50,6 +51,12 @@ static void *create_output(obs_data_t *, obs_output_t *o)
 	proc_handler_add(
 		obs_output_get_proc_handler(o), "void receive_status(out bool healthy)",
 		[](void *, calldata_t *cd) { calldata_set_bool(cd, "healthy", healthy); }, nullptr);
+	proc_handler_add(
+		obs_output_get_proc_handler(o), "void bind_receive(ptr source, bool native, out bool bound)",
+		[](void *, calldata_t *cd) {
+			++rebinds;
+			calldata_set_bool(cd, "bound", rebind_ok && !calldata_bool(cd, "native"));
+		}, nullptr);
 	return o;
 }
 int main(int argc, char **argv)
@@ -137,19 +144,35 @@ int main(int argc, char **argv)
 	assert(starts == 5 && main_output_running);
 	receive_output_watchdog();
 	assert(stops == 4);
+	// A running rendered output survives a receive stop and reconnect: it is
+	// only rebound (no card drain, no AutoStart re-arm). A native one drains.
+	rebind_ok = true;
+	calldata_set_ptr(&cd, "source", nullptr);
+	bind_receive_source(nullptr, &cd);
+	assert(stops == 4 && rebinds == 1 && main_output_running && !receive_source && !receive_auto_pending);
+	calldata_set_ptr(&cd, "source", source);
+	bind_receive_source(nullptr, &cd);
+	assert(stops == 4 && rebinds == 2 && main_output_running && receive_source && !receive_auto_pending);
+	receive_output_native = true;
+	bind_receive_source(nullptr, &cd);
+	assert(stops == 5 && rebinds == 2 && !main_output_running && receive_auto_pending);
+	receive_output_native = false;
+	rebind_ok = false;
+	receive_output_watchdog();
+	assert(starts == 6 && main_output_running);
 	context.output = fixtureOutput;
 	calldata_set_ptr(&cd, "source", nullptr);
 	bind_receive_source(nullptr, &cd);
-	assert(stops == 5 && receive_mode && !receive_source && !receive_auto_pending);
+	assert(stops == 6 && receive_mode && !receive_source && !receive_auto_pending);
 	calldata_set_bool(&cd, "receiving", false);
 	bind_receive_source(nullptr, &cd);
 	assert(!receive_mode);
 	receive_output_watchdog();
-	assert(starts == 5);
+	assert(starts == 6);
 	obs_output_release(fixtureOutput);
 	obs_source_release(source);
 	obs_data_release(settings);
 	calldata_free(&cd);
 	obs_shutdown();
-	puts("compiled production receive UI: exact weak source, ready-only AutoStart, source-change drain, loss watchdog and bounded resume PASS");
+	puts("compiled production receive UI: exact weak source, ready-only AutoStart, source-change drain, live rendered rebind, loss watchdog and bounded resume PASS");
 }

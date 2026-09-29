@@ -14,12 +14,36 @@ static const unsigned RECEIVE_RESUME_LIMIT = 3;
 static bool receive_output_seen_running = false;
 static uint64_t receive_output_started_ns = 0;
 static unsigned receive_resume_failures = 0;
+// Set by output_start: a native output owns the source's private media, a
+// rendered one only plays the program canvas.
+static bool receive_output_native = false;
+// A running rendered output keeps playing across receive stops and reconnects
+// and only changes its health source. Stopping the card while frames are still
+// outstanding after a media stall can deadlock inside the DeckLink SDK.
+static bool rebind_running_output(obs_source_t *source)
+{
+	if (!main_output_running || receive_output_native) {
+		return false;
+	}
+	calldata_t cd;
+	calldata_init(&cd);
+	calldata_set_ptr(&cd, "source", source);
+	calldata_set_bool(&cd, "native", false);
+	const bool bound = proc_handler_call(obs_output_get_proc_handler(context.output), "bind_receive", &cd) &&
+			   calldata_bool(&cd, "bound");
+	calldata_free(&cd);
+	return bound;
+}
 static void bind_receive_source(void *, calldata_t *cd)
 {
 	const bool receiving = calldata_bool(cd, "receiving");
 	auto *source = static_cast<obs_source_t *>(calldata_ptr(cd, "source"));
+	bool kept = false;
 	if (context.output) {
-		output_stop(); // synchronous card drain before source switch
+		kept = receiving && rebind_running_output(source);
+		if (!kept) {
+			output_stop(); // synchronous card drain before source switch
+		}
 	}
 	obs_weak_source_release(receive_source);
 	receive_source = source ? obs_source_get_weak_source(source) : nullptr;
@@ -27,7 +51,7 @@ static void bind_receive_source(void *, calldata_t *cd)
 	receive_resume_failures = 0;
 	receive_output_seen_running = false;
 	OBSData settings = load_settings();
-	receive_auto_pending = receiving && source && settings && obs_data_get_bool(settings, "auto_start");
+	receive_auto_pending = !kept && receiving && source && settings && obs_data_get_bool(settings, "auto_start");
 	calldata_set_bool(cd, "bound", true);
 }
 static void receive_output_watchdog()

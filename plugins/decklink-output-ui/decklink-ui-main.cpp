@@ -167,6 +167,7 @@ void output_start()
 						    "installation."));
 			return;
 		}
+		receive_output_native = false;
 		if (receive_mode) {
 			calldata_t cd;
 			calldata_init(&cd);
@@ -193,6 +194,7 @@ void output_start()
 				return;
 			}
 			if (native) {
+				receive_output_native = true;
 				context.output = output;
 				main_output_running = obs_output_start(output);
 				if (!shutting_down) {

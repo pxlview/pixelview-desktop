@@ -310,8 +310,10 @@ An earlier backend handoff proposing receiver registration over the control sock
   used to arrive ~600 ms behind audio and ~600 ms later than necessary. H.264 (baseline, no
   reordering) and VP9 were not affected.
 - The log records the configured sink latency with each stage's cumulative latency once per
-  change (`[pixelview-whep] sink latency`) and the worst video/audio lateness against render time
-  plus withheld stale audio every 5 s (`[pixelview-whep] worst lateness`).
+  change (`[pixelview-whep] sink latency`), and the worst video/audio lateness against render time
+  plus withheld stale audio for any 5 s window over 200 ms late or with withheld audio
+  (`[pixelview-whep] worst lateness`). Healthy windows are not logged: OBS's repeated-line filter
+  hid a real stall behind 158 near-identical healthy lines.
 - Verified 2026-09-28 against the production backend with an HEVC session and local monitoring
   (no DeckLink): sink latency 120 ms (100 ms jitter buffer), video and audio 5-18 ms late, no
   stale audio withheld, no receive-driven audio buffering, sync judged correct by ear. Before the
@@ -322,8 +324,25 @@ An earlier backend handoff proposing receiver registration over the control sock
   response origin. The endpoint's `?token=` is also set as the signaller `auth-token`, so session
   PATCH/DELETE carry `Authorization: Bearer <token>` (the engine's `Location` has no token; engine
   DELETE accepts the header from pxlview/pv-engine#58, older engines answer 401 and clean the viewer
-  up when the peer connection closes). A bus error, EOS or 15 s without video ends the attempt; the
-  plugin has no reconnect loop of its own. Endpoints stay in private memory; OBS-log diagnostics are limited to
+  up when the peer connection closes). A bus error, EOS, 15 s without a first frame or 5 s without
+  video after frames have flowed ends the attempt; the plugin has no reconnect loop of its own. The
+  Receiving panel reconnects an attempt that ended without a typed reason: it stops the session and
+  starts a fresh login and WHEP session after 2, 4, 8, then every 10 s
+  (`[pixelview-receive] media stopped; reconnecting in N s`), showing
+  "Stream interrupted. Reconnecting in N s…". The intent stays set while waiting, so the button
+  reads Stop receiving (which cancels) and the mode stays locked; the backoff resets on fresh video.
+  Typed refusals (colour mode, HEVC profile), kicks, deleted sessions and control-plane errors never
+  retry. A fresh session is required because the engine tears a viewer down on a transient ICE
+  disconnect (pxlview/pv-engine#61).
+- Verified 2026-09-29 against the local pentest backend and a local pv-engine (HEVC Main 1080p25
+  x265 over SRT) with a headless harness running the real `PixelviewReceiver` and the built
+  `pixelview-whep` module under the same reconnect rule (the GUI reconnect code itself is covered
+  offline by `test_receive_ui.py`): a 5 s engine freeze self-heals without a reconnect; a 5 s
+  sender cut, a 30 s sender outage, a 25 s engine freeze and an engine kill/restart each recover
+  with fresh sessions (13-50 s, dominated by the engine: viewers that join just before or while its
+  input restarts, and viewers present across a sender reconnect, never get media). About one first
+  connect in ten fails with a codec-route CORE/NEGOTIATION error and recovers on the retry. The
+  real DeckLink card was not exercised through a reconnect (no GUI control available). Endpoints stay in private memory; OBS-log diagnostics are limited to
   timeout/EOS and GStreamer domain/code.
 
 ### HEVC 4:2:2 10 refusal
@@ -387,10 +406,14 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   `DrawAlphaDivideR10LHLG` technique in `libobs/data/default.effect`. Without HDR metadata support
   the HDR canvas is tone-mapped to 8-bit SDR. The start logs `[decklink] output video: ...` with the
   mode chosen.
-- `bind_receive(source, native=false)` keeps the source identity for the watchdog only. The health
-  check stays healthy while the source is `playing` and has not turned native 4:2:2; leaving
-  `playing` (the source's own 15 s stale/EOS/error detection), source removal, card removal or a
-  native scheduling failure still drains the output. There is no per-frame freshness cutoff.
+- `bind_receive(source, native=false)` keeps the source identity for the watchdog only, and a
+  running rendered output accepts a new (or no) source. The rendered output plays the program
+  canvas, so it keeps running across a stalled, ended, stopped or reconnecting receive (repeating
+  the last canvas frame) and is only rebound; it drains only when the stream turns native 4:2:2,
+  the card output stops, the device is removed or Receiving mode is left. Stopping the card with
+  frames still outstanding after a stall deadlocked the main thread inside the DeckLink SDK
+  (`DisableVideoOutput` → `releaseAllOutstandingFrames`, macOS hang reports 2026-09-28 20:53 and
+  22:33). A native output still drains on source loss or a native scheduling failure.
 - `receive_status` returns a `reason`; the UI watchdog (100 ms poll) logs
   `[decklink-output-ui] receive output stopped after N ms: <reason>`, resumes automatically when the
   source is ready again, bounded to three consecutive attempts that fail within ten seconds of
@@ -428,7 +451,9 @@ configuration.
   the next launch; it offers neither safe mode nor crash upload and blocks until dismissed.
 - Reconnect summary: sender control socket 1-30 s backoff, media unaffected by control drops,
   stream retries per profile reconnect settings; receiver control 1-30 s re-authentication with 7 s
-  media grace; DeckLink receive output resumes up to three times after a named stop. Relaunch
+  media grace; receive media reconnects with a fresh session (2-10 s backoff) while a rendered
+  DeckLink output keeps playing; a DeckLink receive output resumes up to three times after a named
+  stop. Relaunch
   reconnects pairing but never invents streaming or receiving intent.
 - Qt is pinned to the OBS 6.10.3 package on macOS because 6.11.1 crashes in `QImage::toCGImage`
   during scene activation.

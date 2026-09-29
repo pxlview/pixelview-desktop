@@ -343,6 +343,11 @@ private:
 	OBSSource pixelviewReceiveSource, pixelviewSendOutput;
 	OBSScene pixelviewReceiveScene;
 	QTimer *pixelviewReceiveTimer = nullptr;
+	// Automatic reconnect after a media stall or end: a fresh WHEP session
+	// with backoff, until the operator stops receiving.
+	QTimer *pixelviewReceiveRetryTimer = nullptr;
+	int pixelviewReceiveRetries = 0;
+	void RetryPixelviewReceive();
 	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
 	void ShowPixelviewAbout(); // Pixelview modification, 2026-09-14: version in About.
 	void InitPixelviewDesktop(QWidget *sidebar);
