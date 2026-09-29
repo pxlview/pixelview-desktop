@@ -117,7 +117,7 @@ Use a disposable node device and a mode-0600 input file. The harness deletes the
 
 ## 4. Release
 
-Local-only, arm64-only, one stable Sparkle feed (`https://downloads.pixelview.io/desktop/macos/appcast-arm64.xml`), no beta channel. Create no tag, GitHub release, notarized DMG, R2 upload or public appcast before the app is accepted and the compliance gate (4.7) is cleared.
+Local-only, arm64-only, one stable Sparkle feed (`https://downloads.pixelview.io/desktop/macos/appcast-arm64.xml`), no beta channel. Create no tag, GitHub release, notarized DMG, R2 upload or public appcast before the compliance gate (4.7) is cleared.
 
 ### 4.1 `version.json`
 
@@ -185,23 +185,21 @@ desktop/macos/
 
 `--publish` re-verifies the Sparkle key and the whole prepared release, checks that `refs/tags/v<version>` on the canonical GitHub repository equals `HEAD`, establishes the appcast precondition (`If-Match: <ETag>` after validating the current feed, or `If-None-Match: *` on 404), then HEADs every immutable key: byte-identical existing objects are accepted as a retry; any differing object aborts before the first write. Immutable objects are PUT with `If-None-Match: *` (SigV4 `curl`), read back through the public domain and compared byte-for-byte; only then is `appcast-arm64.xml` PUT and read back. Never overwrite or delete a published `releases/<version>-<build>/` object.
 
-### 4.6 Publishing order and acceptance
+### 4.6 Publishing order
 
-1. Push source and tag, then create the GitHub release for the tag (draft until acceptance; binaries stay on R2):
+1. Push source and tag (binaries stay on R2; the GitHub release is created after publish):
 
    ```sh
    git push origin HEAD
    git push origin v0.0.1
    ```
 
-2. `release/pixelview-macos.sh --prepare`; approve the 1Password prompt.
-3. Clean/quarantined-Mac acceptance with the prepared DMG: Gatekeeper accepts it; drag to Applications; launch; verify capture, pairing, WHIP streaming, audio monitoring and retained configuration.
-4. `release/pixelview-macos.sh --publish`; approve the 1Password prompt.
-5. Download the DMG through the public domain on a clean Mac and repeat step 3.
-6. Update cycle: publish an older internal build and a higher-build replacement on a temporary staging feed (not a permanent beta channel); verify **Help → Check for Updates…** downloads, replaces, relaunches and preserves configuration and Keychain state.
-7. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub. Publish the GitHub release and announce only after every check passes; the website download button can point permanently at `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg` (updated by publish, after the appcast; `--publish-latest` re-points it for a prepared release that is already public), and `latest/latest.json` gives the version, checksum and immutable URL for display.
+2. `release/pixelview-macos.sh --prepare`; approve the 1Password prompt. `--prepare` itself checks Gatekeeper, notarization and stapling.
+3. `release/pixelview-macos.sh --publish`; approve the 1Password prompt. A transport failure is safe to rerun: byte-identical uploaded objects are accepted.
+4. Update cycle: publish an older internal build and a higher-build replacement on a temporary staging feed (not a permanent beta channel); verify **Help → Check for Updates…** downloads, replaces, relaunches and preserves configuration and Keychain state.
+5. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub, then create the GitHub release (`gh release create v<version> --notes-file docs/releases/<version>.md`); the website download button can point permanently at `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg` (updated by publish, after the appcast; `--publish-latest` re-points it for a prepared release that is already public), and `latest/latest.json` gives the version, checksum and immutable URL for display.
 
-The repository cannot create the R2 bucket/domain/token, the App Store Connect API key, the GitHub tag/release or the acceptance Mac; those are operator steps.
+The repository cannot create the R2 bucket/domain/token, the App Store Connect API key or the GitHub tag/release; those are operator steps.
 
 ### 4.7 Corresponding source
 

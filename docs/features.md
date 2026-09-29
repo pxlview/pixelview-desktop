@@ -596,7 +596,7 @@ gate) fail in the current environment regardless of changes.
 - Admin remote control: a remote start that reaches an engine and streams, remote stop of a live
   stream, and the relay and state push across several backend workers (FakeRedis test only).
 - Production notarization, Gatekeeper, R2 publication, appcast and the Sparkle update cycle;
-  clean-Mac acceptance; the interactive Pair forms on the rebuilt bundle (offscreen tests only);
+  the interactive Pair forms on the rebuilt bundle (offscreen tests only);
   clicking the red close button (SIGTERM shares the path).
 - Long hardware soak, Internet loss/recovery, glass-to-glass latency, 4K/interlaced/HDR inputs, hot
   unplug, multiple capture devices, NVENC/QSV/AMF/VAAPI hardware, Windows/Linux runtime.
