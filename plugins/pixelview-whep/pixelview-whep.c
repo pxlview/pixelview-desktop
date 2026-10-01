@@ -137,7 +137,7 @@ static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
  const char *reason=gst_structure_get_string(s,"reason");
  if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_MAIN_422_10)) r->failure=PV_UNSUPPORTED_HEVC_MAIN_422_10;
  else if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_PROFILE)) r->failure=PV_UNSUPPORTED_HEVC_PROFILE;
- if(r->failure) blog(LOG_ERROR,"[pixelview-whep] %s: the sender must use the HEVC Main or Main10 profile",r->failure);
+ if(r->failure) blog(LOG_ERROR,"[pixelview-whep] %s: this Mac did not verify that profile; the sender must use HEVC Main or Main10",r->failure);
 }
 /* First colour-mode refusal per generation; the reason names the fix, not the stream. */
 static void color_failure(struct receiver *r, GstCaps *caps, enum pixelview_color color)
@@ -362,7 +362,8 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
   color_failure(r, caps, color); gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
  if (!native_preview) {
-  /* The ordinary clocked appsink maps and delivers directly to OBS. */
+  /* The ordinary clocked appsink maps and delivers directly to OBS (P010, or
+   * v210 for an HEVC 4:2:2 stream). */
   if (!gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
    gst_sample_unref(sample); return GST_FLOW_ERROR;
   }
@@ -573,7 +574,7 @@ static bool attempt_current(struct receive_attempt *a)
  * can impose the older level-120 HD30 envelope; absent HEVC has level zero. */
 static unsigned receive_max_fps(const struct pixelview_receive_capabilities *caps)
 {
- bool hevc = caps->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10);
+ bool hevc = caps->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10);
  return hevc && caps->hevc_level_id < 123 ? 30u : 60u;
 }
 static void configure_transceiver(GstElement *rtc, GObject *transceiver, gpointer opaque)
@@ -681,8 +682,10 @@ static void selected_audio_route(GObject *policy, GParamSpec *pspec, gpointer op
  if(caps && gst_caps_is_fixed(caps)) {
   const GstStructure *s=gst_caps_get_structure(caps,0);
   const char *profile=gst_structure_get_string(s,"profile");
+  /* Main 4:2:2 10 is ordinary too unless the dormant native path is switched on. */
   ordinary=gst_structure_has_name(s,"video/x-h264") || gst_structure_has_name(s,"video/x-vp9") ||
-   (gst_structure_has_name(s,"video/x-h265") && (!g_strcmp0(profile,"main") || !g_strcmp0(profile,"main-10")));
+   (gst_structure_has_name(s,"video/x-h265") && (!g_strcmp0(profile,"main") || !g_strcmp0(profile,"main-10") ||
+    (!g_strcmp0(profile,"main-422-10") && !pv_main422_25p_enabled())));
  }
  if(caps) gst_caps_unref(caps);
  g_mutex_lock(&a->gate);
@@ -715,6 +718,7 @@ static GstElement *request_encoded_filter(GstElement *rx, const char *peer, cons
   gst_object_unref(policy);
   pv_native422_filter_require_rtp(filter,rx);
   pv_native422_filter_admit_native(filter,pv_main422_25p_enabled());
+  pv_native422_filter_admit_main422(filter,(a->caps.profiles & PV_PROFILE_HEVC_MAIN422_10)!=0);
   const char *format = caps && gst_caps_get_size(caps) ? gst_structure_get_string(gst_caps_get_structure(caps, 0), "format") : NULL;
   pv_native422_filter_preview_format(filter, !g_strcmp0(format, "NV12"));
   /* The signal's object GValue transfers an owned reference to Rust. A floating

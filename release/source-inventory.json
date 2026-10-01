@@ -18,7 +18,7 @@
   "runtime_bindings": [
     {
       "path": "plugins/pixelview-whep/runtime-lock.json",
-      "sha256": "9e960c000f483fc85fff8ca5f9ebd9dcd98cc9976aae45f868234697e327e20f",
+      "sha256": "c199546894d5908ceec8dfef638647056ce806f96d67500985f188a22bac47af",
       "size": 9218
     },
     {
@@ -103,16 +103,16 @@
       ],
       "patches": [
         {
-          "path": "plugins/pixelview-whep/patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch",
-          "sha256": "ea34e1ae1b4616ed7dd847e26424f3bcaaf399e2ea6378495ddca1c9be716a84",
-          "size": 2769
+          "path": "plugins/pixelview-whep/patches/gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch",
+          "sha256": "d222b1ec0107bad76a64b20ed12df775fd2d6b7e4e78e65ac91f11449fc16291",
+          "size": 5352
         }
       ],
       "recipes": [
         {
           "path": "plugins/pixelview-whep/scripts/build-applemedia.py",
-          "sha256": "ab00c0e1f3f1797ae2735275a03d5711739bda95f5d1103e8ce3d200e8720671",
-          "size": 5442
+          "sha256": "a2be03d555beb2ec0fdc300790bca71c11f24772ec85a918b16843104a02497f",
+          "size": 5488
         },
         {
           "path": "plugins/pixelview-whep/scripts/fetch-gstreamer.py",

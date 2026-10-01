@@ -14,6 +14,8 @@ static void test_profile(const char *profile)
  GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));
  assert(gst_element_set_state(pipe,GST_STATE_PLAYING)!=GST_STATE_CHANGE_FAILURE);
+ /* A probed Main 4:2:2 10 decoder admits that profile on the SAME stock route. */
+ if(!strcmp(profile,"main-422-10")) pv_native422_filter_admit_main422(filter,TRUE);
  GstPad *input=gst_element_get_static_pad(filter,"sink");
  assert(gst_pad_send_event(input,gst_event_new_stream_start(profile)));
  GstCaps *caps=gst_caps_new_simple("video/x-h265","stream-format",G_TYPE_STRING,"hvc1","alignment",G_TYPE_STRING,"au","profile",G_TYPE_STRING,profile,NULL);
@@ -24,6 +26,10 @@ static void test_profile(const char *profile)
  assert(!queue && "ordinary route still allocates native422 queue");
  GstElement *tap=gst_bin_get_by_name(GST_BIN(filter),"native-transform");
  assert(!tap && "ordinary route still allocates native422 tap");
+ /* The selector pinned exactly this profile for the rest of the attempt. */
+ GstElement *route=gst_bin_get_by_name(GST_BIN(filter),"codec-route");GstCaps *pinned=NULL;g_object_get(route,"caps",&pinned,NULL);
+ assert(!g_strcmp0(gst_structure_get_string(gst_caps_get_structure(pinned,0),"profile"),profile));
+ gst_caps_unref(pinned);gst_object_unref(route);
  GstSegment segment;gst_segment_init(&segment,GST_FORMAT_TIME);
  assert(gst_pad_send_event(input,gst_event_new_segment(&segment)));
  for(unsigned i=0;i<32;i++) {
@@ -69,8 +75,8 @@ static void native_dependency_failure(void)
  assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
-/* Normal-build policy: a sender on HEVC 4:2:2 10-bit (or any non-Main profile)
- * is refused before its first AU with the typed reason the frontend maps to
+/* Without a probed 4:2:2 decoder, a sender on HEVC 4:2:2 10-bit (or, always,
+ * any other non-Main profile) is refused before its first AU with the typed reason the frontend maps to
  * "use HEVC Main or Main10". No native tap, queue or decoder is created. */
 static void unsupported_profile_refusal(const char *profile,const char *reason,gboolean admit)
 {
@@ -98,10 +104,10 @@ static void unsupported_profile_refusal(const char *profile,const char *reason,g
 }
 int main(void)
 {
- gst_init(NULL,NULL);test_profile("main");test_profile("main-10");missing_profile_failure();native_dependency_failure();
+ gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");missing_profile_failure();native_dependency_failure();
  unsupported_profile_refusal("main-422-10",PV_UNSUPPORTED_HEVC_MAIN_422_10,FALSE);
  unsupported_profile_refusal("main-422-12",PV_UNSUPPORTED_HEVC_PROFILE,FALSE);
  unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_PROFILE,TRUE); /* admission covers main-422-10 only */
- assert(released==7);
- puts("Main/Main10: no native tap/queue, all 64 compressed AUs unchanged; missing native dependency fails closed; 4:2:2/4:4:4 refused with typed Main/Main10 guidance");
+ assert(released==8);
+ puts("Main/Main10 and probed Main 4:2:2 10: no native tap/queue, all 96 compressed AUs unchanged; missing native dependency fails closed; unprobed 4:2:2 and 4:4:4 refused with typed Main/Main10 guidance");
 }

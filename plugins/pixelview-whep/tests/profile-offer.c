@@ -73,9 +73,13 @@ int main(int argc, char **argv)
   gst_caps_unref(base); g_assert_true(c.captured); return 0;
  }
 #ifndef PROFILE_POLICY_LEGACY
- struct pixelview_receive_limits limits = {31,123,1920,1080,60};
+ struct pixelview_receive_limits limits = {63,123,1920,1080,60};
  GstCaps *limited = pixelview_profile_offer_caps_limited(base,&limits);
  g_assert_nonnull(limited); g_assert_cmpuint(gst_caps_get_size(limited),==,6); gst_caps_unref(limited);
+ /* Without the Main 4:2:2 10 probe bit there is no profile-id 4 entry. */
+ limits.profiles=31; limited = pixelview_profile_offer_caps_limited(base,&limits);
+ g_assert_nonnull(limited); g_assert_cmpuint(gst_caps_get_size(limited),==,5); gst_caps_unref(limited);
+ limits.profiles=63;
  limits.max_width=3840; g_assert_null(pixelview_profile_offer_caps_limited(base,&limits));
  limits.max_width=1920; limits.hevc_level_id=93;
  g_assert_null(pixelview_profile_offer_caps_limited(base,&limits));

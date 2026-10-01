@@ -24,18 +24,25 @@ spec=importlib.util.spec_from_file_location('selection',ROOT/'tests/engine-profi
 server=(ENGINE/'internal/av/whep/server.go').read_text();mapper=(ENGINE/'internal/av/codec/mapper.go').read_text()
 source='\n'.join(selection.extract(server,start) for start in ['func parseSupportedCodecs(','func (s *Server) findBestCodecMatch('])
 source+='\n'+(ENGINE/'internal/av/codec/negotiation.go').read_text().split(')\n',1)[1]
-source=selection.remove_logs(source).replace('codec.MatchesReceiver','MatchesReceiver').replace('codec.Codec','Codec').replace('codec.WebRTCConfig','WebRTCConfig')
+source=source.replace('codec.MatchesReceiver','MatchesReceiver').replace('codec.Codec','Codec').replace('codec.WebRTCConfig','WebRTCConfig')
 binding=(ENGINE/'internal/av/whep/h264_binding.go').read_text()
 source+='\n'+selection.extract(binding,'func codecForOffer(')
 source+='\n'+binding[binding.index('// receiverBindingTrack adapts'):]
+# Engines with the transcode policy (H264/HEVC passthrough-only, VP9 last resort): exact policy code, shimmed encoder probe.
+policy=ENGINE/'internal/av/codec/policy.go'
+if policy.exists():
+    text=policy.read_text()
+    source+='\nconst LastResortFormatID = "vp9-8bit-420"\n'+'\n'.join(selection.extract(text,start) for start in ['func IsPassthroughOnly(','type CandidateDecision struct','func (m *Mapper) FilterOutputCandidates('])
+    assert 'LastResortFormatID = "vp9-8bit-420"' in text
+    source=source.replace('func (m *Mapper) FilterOutputCandidates(','func (m Mapper) FilterOutputCandidates(').replace('codec.LastResortFormatID','LastResortFormatID')
 receiver_codec=ENGINE/'internal/av/whep/receiver_codec.go'
 if receiver_codec.exists():
     source+='\n'+selection.extract(receiver_codec.read_text(),'func receiverCodec(')
 registration=selection.extract(server,'func newWHEPMediaEngine(')
-registration=selection.remove_logs(registration).replace('newWHEPMediaEngine(codecMap *codec.Mapper','register(fixtures []Codec').replace('codecMap.Codecs','fixtures').replace('codec.MediaTypeVideo','1').replace('codec.IsABRFormat','isABR')
+registration=registration.replace('newWHEPMediaEngine(codecMap *codec.Mapper','register(fixtures []Codec').replace('codecMap.Codecs','fixtures').replace('codec.MediaTypeVideo','1').replace('codec.IsABRFormat','isABR')
 source+='\n'+registration
 source=source.replace('codec.MatchesReceiver','MatchesReceiver').replace('codec.Codec','Codec').replace('codec.WebRTCConfig','WebRTCConfig')
-provenance_paths=[ENGINE/'internal/av/whep/server.go',ENGINE/'internal/av/codec/mapper.go',ENGINE/'internal/av/codec/negotiation.go',ENGINE/'internal/av/whep/h264_binding.go',ENGINE/'go.mod',ENGINE/'go.sum']
+provenance_paths=[p for p in [policy] if p.exists()]+[ENGINE/'internal/av/whep/server.go',ENGINE/'internal/av/codec/mapper.go',ENGINE/'internal/av/codec/negotiation.go',ENGINE/'internal/av/whep/h264_binding.go',ENGINE/'go.mod',ENGINE/'go.sum']
 if receiver_codec.exists(): provenance_paths.append(receiver_codec)
 (WORK/'provenance.json').write_text(json.dumps({str(p.relative_to(ENGINE)):hashlib.sha256(p.read_bytes()).hexdigest() for p in provenance_paths},indent=2))
 template=(ROOT/'tests/whep-loopback.go.in').read_text()
@@ -59,11 +66,14 @@ if os.environ.get('PV_LOOPBACK_BUILD_ONLY') == '1':
     raise SystemExit(0)
 # (format, encoder profile, depth, payload type, fixture colour, receive mode, expected colour refusal).
 # Receive mode None is the historical connect without a colour argument.
-cases=[('h264-8bit-420','h264','8',97,'sdr',None,None),('hevc-8bit-420','main','8',96,'sdr',None,None),('hevc-10bit-420','main10','10',120,'sdr',None,None),('vp9-8bit-420','vp9_0','8',98,'sdr',None,None),('vp9-10bit-420','vp9_2','10',121,'sdr',None,None),('negative','negative','negative',None,'sdr',None,None),
+cases=[('h264-8bit-420','h264','8',97,'sdr',None,None),('hevc-8bit-420','main','8',96,'sdr',None,None),('hevc-10bit-420','main10','10',120,'sdr',None,None),('vp9-8bit-420','vp9_0','8',98,'sdr',None,None),('vp9-10bit-420','vp9_2','10',122,'sdr',None,None),('negative','negative','negative',None,'sdr',None,None),
  ('hevc-10bit-420','main10','10',120,'pq','pq',None),('hevc-10bit-420','main10','10',120,'hlg','hlg',None),
- ('vp9-10bit-420','vp9_2','10',121,'pq','pq',None),('vp9-10bit-420','vp9_2','10',121,'hlg','hlg',None),
+ ('vp9-10bit-420','vp9_2','10',122,'pq','pq',None),('vp9-10bit-420','vp9_2','10',122,'hlg','hlg',None),
  ('hevc-10bit-420','main10','10',120,'pq','hlg','hdr-transfer-mismatch'),('hevc-10bit-420','main10','10',120,'pq','sdr','hdr-source-needs-hdr-receive'),
- ('hevc-10bit-420','main10','10',120,'sdr','pq','sdr-source-in-hdr-receive'),('vp9-10bit-420','vp9_2','10',121,'pq','sdr','hdr-source-needs-hdr-receive')]
+ ('hevc-10bit-420','main10','10',120,'sdr','pq','sdr-source-in-hdr-receive'),('vp9-10bit-420','vp9_2','10',122,'pq','sdr','hdr-source-needs-hdr-receive'),
+ # HEVC Main 4:2:2 10 passthrough: v210 at the source with per-row chroma, in SDR and HDR.
+ ('hevc-10bit-422','main422-10','422',121,'sdr',None,None),('hevc-10bit-422','main422-10','422',121,'pq','pq',None),('hevc-10bit-422','main422-10','422',121,'hlg','hlg',None),
+ ('hevc-10bit-422','main422-10','422',121,'pq','sdr','hdr-source-needs-hdr-receive')]
 HDR_TAGS={'pq':('bt2020','smpte2084','bt2020nc'),'hlg':('bt2020','arib-std-b67','bt2020nc'),'sdr':('bt709','bt709','bt709')}
 results=[]
 for fmt,name,depth,pt,fixture,mode,refusal in cases:
@@ -91,8 +101,10 @@ for fmt,name,depth,pt,fixture,mode,refusal in cases:
                 cached=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(file)],text=True)).get('streams',[])
             color_ok=bool(cached) and all(cached[0].get(k)==v for k,v in expected_color.items())
             if not color_ok:
-                pixel='yuv420p10le' if depth=='10' else 'yuv420p';ramp='64+876*X/W' if depth=='10' else '16+219*X/W';chroma='512' if depth=='10' else '128'
-                gen=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'nullsrc=s=1024x128:r=30,format={pixel},geq=lum={ramp}:cb={chroma}:cr={chroma}','-frames:v','300','-color_range','tv','-colorspace',space,'-color_trc',trc,'-color_primaries',prim]
+                pixel={'10':'yuv420p10le','422':'yuv422p10le'}.get(depth,'yuv420p');ramp='16+219*X/W' if depth=='8' else '64+876*X/W';chroma='128' if depth=='8' else '512'
+                # 4:2:2: Cb alternates on every row, which no 4:2:0 path can carry.
+                blue="'if(mod(Y,2),312,712)'" if depth=='422' else chroma
+                gen=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'nullsrc=s=1024x128:r=30,format={pixel},geq=lum={ramp}:cb={blue}:cr={chroma}','-frames:v','300','-color_range','tv','-colorspace',space,'-color_trc',trc,'-color_primaries',prim]
                 if name=='h264':gen+=['-c:v','libx264','-preset','ultrafast','-profile:v','baseline','-level:v','4.2','-x264-params','keyint=30:bframes=0:threads=1:colorprim=bt709:transfer=bt709:colormatrix=bt709','-crf','10']
                 elif name.startswith('main'):gen+=['-c:v','libx265','-preset','ultrafast','-profile:v',name,'-x265-params',f'crf=1:level-idc=4.1:high-tier=0:bframes=0:keyint=30:log-level=error:pools=1:frame-threads=1:colorprim={prim}:transfer={trc}:colormatrix={space}'+(':hdr10=1:max-cll=1000,400' if fixture=='pq' else '')]
                 else:gen+=['-c:v','libvpx-vp9','-profile:v',name[-1],'-lossless','1','-deadline','realtime','-cpu-used','8','-threads','1','-lag-in-frames','0','-g','30']

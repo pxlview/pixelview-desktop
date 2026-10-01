@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Build ONLY the pinned applemedia plugin (vtdec) with Pixelview's HEVC
-reorder-depth patch; never stage. Requires the locally extracted official
+"""Build ONLY the pinned applemedia plugin (vtdec) with Pixelview's patch (HEVC
+reorder depth from the SPS, v210 output for 4:2:2 streams); never stage. Requires the locally extracted official
 GStreamer SDK; meson and ninja are pinned in a private virtualenv.
 The default output is separate from the mutable embedded runtime.
 """
@@ -22,7 +22,7 @@ SOURCE_URL = f'https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins
 SOURCE_SHA = '4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00'
 MESON = '1.9.1'
 NINJA = '1.13.0'
-PATCH = ROOT/'patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch'
+PATCH = ROOT/'patches/gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch'
 DEFAULT_WORK = REPO/'.deps/applemedia-upstream-patched'
 SDK = REPO/f'.deps/gstreamer-upstream-{VERSION}/sdk'
 # Only applemedia; every other feature off so nothing else is configured or linked.

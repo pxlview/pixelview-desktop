@@ -4,7 +4,8 @@
 #include <gst/gst.h>
 /* Verified end-to-end receive profiles, NOT merely installed decoder factories.
  * No default mask: caller must supply hardware/decoder/output-path probe results.
- * HEVC 4:2:2 is deliberately absent: its receive precision path is unverified.
+ * HEVC Main 4:2:2 10 is offered only when the probe decoded it to v210 (the
+ * patched vtdec), so the chroma is never silently subsampled to 4:2:0.
  * VP9 profile 3 is deliberately absent until a 4:2:2/4:4:4 decode path is proven. */
 enum pixelview_receive_profile {
  PV_PROFILE_H264 = 1u,
@@ -12,6 +13,7 @@ enum pixelview_receive_profile {
  PV_PROFILE_HEVC_MAIN10 = 4u,
  PV_PROFILE_VP9_0 = 8u,
  PV_PROFILE_VP9_2 = 16u,
+ PV_PROFILE_HEVC_MAIN422_10 = 32u,
 };
 /* Transfer-full result; input unchanged. HEVC advertises the exact supplied valid
  * level-id. Zero or an invalid level removes HEVC, never upgrades capability.

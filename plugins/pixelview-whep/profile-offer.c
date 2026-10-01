@@ -32,8 +32,9 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
   if (hevc && valid_level) {
    choices[0] = profiles & PV_PROFILE_HEVC_MAIN;
    choices[1] = profiles & PV_PROFILE_HEVC_MAIN10;
-   /* Explicit 25p policy, not a Main422 probe result. Preserve ordinary profiles/levels. */
-   choices[2] = (choices[0] || choices[1]) && pv_main422_25p_enabled();
+   /* Probed Main 4:2:2 10 at the probed level, or the dormant explicit 25p
+    * native policy (level 4.0). Ordinary profiles/levels are preserved. */
+   choices[2] = (profiles & PV_PROFILE_HEVC_MAIN422_10) || ((choices[0] || choices[1]) && pv_main422_25p_enabled());
   }
   if (vp9) { choices[0] = profiles & PV_PROFILE_VP9_0; choices[1] = profiles & PV_PROFILE_VP9_2; }
   if (opus) choices[0] = 1;
@@ -59,7 +60,7 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
     /* GstSDP serializes string fields in insertion order. Reinsert in engine order. */
     gst_structure_remove_fields(s,"level-id","profile-id","tier-flag","tx-mode",NULL);
     gst_structure_set(s,"level-id",G_TYPE_STRING,level_string,"profile-id",G_TYPE_STRING,j ? "2" : "1","tier-flag",G_TYPE_STRING,"0","tx-mode",G_TYPE_STRING,"SRST",NULL);
-    if (j == 2) gst_structure_set(s,"level-id",G_TYPE_STRING,"120",
+    if (j == 2) gst_structure_set(s,"level-id",G_TYPE_STRING,(profiles & PV_PROFILE_HEVC_MAIN422_10) ? level_string : "120",
      "profile-id",G_TYPE_STRING,"4","interop-constraints",G_TYPE_STRING,"1d0800000000",NULL);
    }
    if (vp9) gst_structure_set(s,"profile-id",G_TYPE_STRING,j ? "2" : "0",NULL);
@@ -74,7 +75,7 @@ GstCaps *pixelview_profile_offer_caps_limited(const GstCaps *input,
 {
  if (!l || !l->max_width || !l->max_height || !l->max_fps ||
      l->max_width > 1920 || l->max_height > 1080 || l->max_fps > 60) return NULL;
- if (l->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10)) {
+ if (l->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10)) {
   /* H.265 Table A.6 MaxLumaPs / MaxLumaSr, limited to current HD policy. */
   guint64 ps=0, sr=0;
   switch (l->hevc_level_id) {

@@ -17,6 +17,11 @@ GstElement *pv_native422_filter_new(pv_native422_delivery delivery, void *opaque
 #define PV_UNSUPPORTED_HEVC_MAIN_422_10 "unsupported-hevc-main-422-10"
 #define PV_UNSUPPORTED_HEVC_PROFILE "unsupported-hevc-profile"
 void pv_native422_filter_admit_native(GstElement *filter, gboolean admit);
+/* Admits a parsed main-422-10 stream on the ordinary stock route (no native
+ * tap): the caller's raw policy and the patched vtdec deliver it as v210. Set
+ * only when the capability probe decoded Main 4:2:2 10. Native admission wins
+ * when both are set. Same call-before-publication rule. */
+void pv_native422_filter_admit_main422(GstElement *filter, gboolean admit);
 /* Before adding/starting the filter only. FALSE stores the eight-bit preview in
  * P010 containers to preserve the existing downstream precision-policy caps. */
 /* Production WHEP contract: call before publishing the filter. Observes the

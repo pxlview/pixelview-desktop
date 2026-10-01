@@ -183,9 +183,9 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
-- The sidebar Profile list labels HEVC Main10 "(recommended)" and Main 4:2:2 10 "(needs server
-  transcode)", each with a tooltip (only the Pixelview Player iOS app plays 4:2:2 natively; browsers
-  and Pixelview Desktop receivers get a server transcode). The saved profile value is unchanged.
+- The sidebar Profile list labels HEVC Main10 "(recommended)" and Main 4:2:2 10 "(transcoded for
+  browsers)", each with a tooltip (the Pixelview Player iOS app and Pixelview Desktop on Apple
+  silicon play 4:2:2 natively; browsers get a server transcode). The saved profile value is unchanged.
 - HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
   range only). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
@@ -284,12 +284,13 @@ An earlier backend handoff proposing receiver registration over the control sock
   (source-built patched rswebrtc 0.15.2, libnice, VideoToolbox decoders, libopus) in the plugin
   bundle. No host GStreamer is used.
 - On each connection the plugin probes the VideoToolbox decoders and offers only verified profiles:
-  H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main and Main10, VP9 profiles 0
-  and 2, plus stereo Opus. The raw policy is P010 at up to 1920x1080 (30 or 60 fps depending on the
-  negotiated HEVC level) in the operator's colour mode, passed as `connect(..., color)`:
+  H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10 and Main 4:2:2 10
+  (see below), VP9 profiles 0 and 2, plus stereo Opus. The raw policy is P010 (v210 for a 4:2:2
+  stream) at up to 1920x1080 (30 or 60 fps depending on the negotiated HEVC level) in the
+  operator's colour mode, passed as `connect(..., color)`:
   - SDR (default): limited-range BT.709 only. BT.2020 or PQ/HLG input stops with
     `hdr-source-needs-hdr-receive`.
-  - HDR PQ or HLG: limited-range BT.2020 P010, delivered with `VIDEO_TRC_PQ`/`VIDEO_TRC_HLG` and
+  - HDR PQ or HLG: limited-range BT.2020 P010 or v210, delivered with `VIDEO_TRC_PQ`/`VIDEO_TRC_HLG` and
     the Rec.2100 matrix. The stream's own transfer is used when signalled (HEVC VUI:
     `bt2100-pq`/`bt2100-hlg`). VP9 signals only the BT.2020 gamut (`bt2020-10`), so there the
     operator's PQ/HLG choice labels the frames; wholly unsignalled colour is also trusted. An
@@ -299,7 +300,7 @@ An earlier backend handoff proposing receiver registration over the control sock
   The typed reason is reported in `get_status.failure` and the Receiving panel names the fix. The
   engine's WebRTC colour-space RTP header extension (what Chrome uses) is not read by the GStreamer
   receiver; the Desktop relies on the bitstream plus the operator setting.
-- Video: decodebin3 -> P010 policy -> clocked appsink -> `obs_source_output_video2`. Audio: bounded
+- Video: decodebin3 -> P010/v210 policy -> clocked appsink -> `obs_source_output_video2`. Audio: bounded
   queues -> F32 stereo 48 kHz -> clocked appsink -> `obs_source_output_audio`. Both share the
   pipeline clock, and the source runs libobs async-unbuffered so frames are not rebuffered twice.
   OBS timestamps are the sink render time (base + running time + the sink's configured pipeline
@@ -314,7 +315,8 @@ An earlier backend handoff proposing receiver registration over the control sock
   sizes the HEVC output reorder queue from the stream's SPS. Upstream holds 16 frames (~640 ms at
   25 fps) regardless of B-frames and cannot declare it without a caps framerate, so HEVC video
   used to arrive ~600 ms behind audio and ~600 ms later than necessary. H.264 (baseline, no
-  reordering) and VP9 were not affected.
+  reordering) and VP9 were not affected. The same patch adds v210 as a decoder output, chosen only
+  for 4:2:2 streams (upstream has no 4:2:2 raw format and would subsample them to P010).
 - The log records the configured sink latency with each stage's cumulative latency once per
   change (`[pixelview-whep] sink latency`), and the worst video/audio lateness against render time
   plus withheld stale audio for any 5 s window over 200 ms late or with withheld audio
@@ -351,17 +353,29 @@ An earlier backend handoff proposing receiver registration over the control sock
   real DeckLink card was not exercised through a reconnect (no GUI control available). Endpoints stay in private memory; OBS-log diagnostics are limited to
   timeout/EOS and GStreamer domain/code.
 
-### HEVC 4:2:2 10 refusal
+### HEVC 4:2:2 10 reception
 
-- `plugins/pixelview-whep/main422-25p.h` is the single switch and returns FALSE. The offer omits
-  profile 4, and the parsed-CAPS route selector refuses `main-422-10` (or any other non-Main/Main10
-  HEVC profile) before the first access unit with a typed `GST_STREAM_ERROR_WRONG_TYPE`.
+- HEVC Main 4:2:2 10 is received on the same route as Main/Main10: the capability probe decodes a
+  Main 4:2:2 10 fixture to v210 through the patched `vtdec_hw`, and only then does the offer add
+  `profile-id=4` (`interop-constraints=1d0800000000`, at the probed level), which is what makes the
+  engine pass a 4:2:2 sender through instead of transcoding it to VP9. The route selector admits
+  `main-422-10` on the stock decoder path, VideoToolbox delivers v210 (4:2:2 chroma intact; P010
+  would subsample it), and the frames reach OBS as `VIDEO_FORMAT_V210` in SDR, PQ or HLG. Jitter
+  buffer, A/V sync, reconnect, preview and the rendered DeckLink output are the ordinary ones.
+- The limits are the ordinary ones too: up to 1920x1080, 60 fps at level 4.1, limited range. The
+  canvas is RGB, so the card receives the picture through the rendered output (8-bit BGRA in SDR,
+  10-bit RGB in HDR), not as untouched v210.
+- Where the probe does not decode 4:2:2 (no hardware 4:2:2 decoder, or the probe's known EOS race
+  dropped the bit for this app run), profile 4 is not offered and the engine transcodes to VP9 as
+  before. A `main-422-10` stream that arrives anyway, or any other non-Main/Main10 HEVC profile, is
+  refused before the first access unit with a typed `GST_STREAM_ERROR_WRONG_TYPE`:
   `get_status.failure` reports `unsupported-hevc-main-422-10` or `unsupported-hevc-profile`, and the
-  Receiving panel stops with "The sender is streaming HEVC 4:2:2 10-bit, which cannot be received.
-  Please use the HEVC Main or Main10 profile on the sender."
-- The native VideoToolbox x422 -> v210 decode path, its DeckLink A/V scheduler and offline suites
-  remain in the tree; flipping the switch to TRUE restores the earlier strict 1080p25 path, which
-  was never certified (an intermittent 701 ms first-frame failure is unresolved).
+  Receiving panel stops with "The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot
+  decode. Please use the HEVC Main or Main10 profile on the sender."
+- The earlier native path (own VideoToolbox x422 -> v210 decoder feeding DeckLink directly, its A/V
+  scheduler and offline suites) remains in the tree but dormant behind
+  `plugins/pixelview-whep/main422-25p.h` (FALSE). It was never certified (an intermittent 701 ms
+  first-frame failure is unresolved) and nothing in a normal build reaches it.
 
 ### Jitter buffer
 
@@ -402,7 +416,7 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
 - The Receiving panel's Output group holds the native DeckLink output settings (device, mode,
   AutoStart) with the keyer UI hidden. AutoStart applies to receiving only: it starts the output
   once received video arrives. Launching (Sending mode) never opens the output, so another
-  application such as DaVinci Resolve can keep using the card while this Mac only sends. Ordinary Main/Main10 reception uses the stock OBS rendered
+  application such as DaVinci Resolve can keep using the card while this Mac only sends. Reception (including HEVC 4:2:2) uses the stock OBS rendered
   program output: main texture -> BGRA staging -> `decklink_output`, with audio from the ordinary
   OBS mix (source gain, mute and mixer routing apply; monitoring is separate). SDR output is 8-bit
   BGRA, not ten-bit 4:2:2 SDI.
@@ -502,8 +516,9 @@ gate) fail in the current environment regardless of changes.
   `run-codecs.py`, `run-production-offer.py`, `run-profile-offer.py`, `run-capability-probe.py`,
   `run-decoder-profiles.py`, `run-video-precision.py`, `run-ordinary-route.py`,
   `run-preview-dispatch.py`, `run-audio-route.py`, `run-whep-loopback.py` (synthetic loopback WHEP
-  through a real engine build: all five video alternatives plus HTTP 406 negative, HEVC Main10 and
-  VP9 profile 2 PQ/HLG, and the four colour-mode refusals), `run-main422-25p.py`
+  through a real engine build: all five 4:2:0 video alternatives plus HTTP 406 negative, HEVC
+  Main10 and VP9 profile 2 PQ/HLG, HEVC Main 4:2:2 10 in SDR/PQ/HLG, and the colour-mode refusals),
+  `run-main422-25p.py`
   and the `run-native-422*.py` suites (native branch admitted explicitly per filter).
 - DeckLink (`plugins/decklink/tests`): `run-receive.py` (complete output owner under ASan/UBSan with
   a refusing fake SDK: rendered path takes OBS mixed audio, 600 ms frame gap stays healthy, named
@@ -550,6 +565,26 @@ gate) fail in the current environment regardless of changes.
   Frames arrived as P010 with the expected transfer and 876 codes; SDR-in-HDR, HDR-in-SDR and
   PQ-as-HLG stopped with their typed reasons. One VP9 run failed earlier, at SDP negotiation (the
   offer lacked profile 2), and passed on three reruns.
+- HEVC 4:2:2 receive decode (offline loopback 2026-10-01):
+  x265 Main 4:2:2 10 in SDR, PQ and HLG through the real `pixelview_whep_source`, the patched
+  `vtdec_hw` and a loopback server built from the WHEP negotiation of `pv-engine` `main` (`d04faf6`),
+  which selected `hevc-10bit-422` passthrough for the Desktop offer. Frames reached OBS as
+  `VIDEO_FORMAT_V210` with 831-840 luma codes, and a fixture whose Cb alternates on every row kept
+  that alternation on all 127 row pairs (impossible after 4:2:0); PQ-in-SDR stopped with its typed
+  reason. The same run passed the fourteen earlier cases, now against engine `main`. Separately, a
+  1080p25 x265 Main 4:2:2 10 clip decoded by the patched `vtdec_hw` matched FFmpeg's software
+  decode in all but 4 of 1,382,400 v210 words. On the M1 Pro test Mac the decode cost about
+  1.3 ms per 1080p frame.
+- HEVC 4:2:2 receive live (2026-10-01, local pentest backend + local pv-engine `main`, x265 Main
+  4:2:2 10 1080p25 over SRT, headless harness running the real `PixelviewReceiver` and the
+  `pixelview-whep` module from the signed development build): the engine detected `hevc-10bit-422`
+  and served it to the Desktop viewer as passthrough; every frame the module handed to OBS in two
+  runs (60 s and 30 s, no reconnects) was 1920x1080 `VIDEO_FORMAT_V210`, and a sender whose Cb
+  alternates per row kept it on all 540 sampled row pairs. Sink latency 160 ms, video at most
+  17 ms late. A Main10 clip sent the same way still arrived as P010. Not verified: the app window
+  itself (preview/GPU conversion of v210; screen control was declined), DeckLink output of a 4:2:2
+  receive, a Pixelview Desktop sender (VideoToolbox 4:2:2 rather than x265), HDR 4:2:2 live,
+  production, runs longer than a minute and other Mac models.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
@@ -615,15 +650,17 @@ gate) fail in the current environment regardless of changes.
 - Credential and transport implementations exist for macOS only (Keychain, NSURLSession); Windows and
   Linux have source-level branding only and no pairing, receiving or updater.
 - Receiving accepts limited-range BT.709 SDR, or limited-range BT.2020 PQ/HLG when the operator
-  ticks HDR and picks the matching transfer; full range, other colour, eight-bit HDR, HEVC 4:2:2 (see
-  above) and VP9 profiles 1/3 are refused. HDR is not detected automatically, and HDR DeckLink output
-  is 10-bit RGB with metadata derived from the nits setting, not 4:2:2 or the sender's own mastering
-  metadata. SDR DeckLink receive output is 8-bit BGRA; fullscreen is 8-bit. The sender can still
-  select HEVC Main 4:2:2 10, which the Pixelview receiver refuses.
+  ticks HDR and picks the matching transfer; full range, other colour, eight-bit HDR, HEVC profiles
+  beyond Main/Main10/Main 4:2:2 10 and VP9 profiles 1/3 are refused. HDR is not detected
+  automatically, and HDR DeckLink output is 10-bit RGB with metadata derived from the nits setting,
+  not 4:2:2 or the sender's own mastering metadata. SDR DeckLink receive output is 8-bit BGRA, so a
+  received 4:2:2 10-bit SDR stream loses two bits at the card; fullscreen is 8-bit.
 - The sender enforces limited range only for Main 4:2:2 10 (P216); Main/Main10 honour a saved Full
   setting.
 - Capability probing caches a reduced decoder mask for the process if the pinned applemedia decoder
-  sends EOS before its last probe frame; an isolated decoder patch was evaluated and rejected.
+  sends EOS before its last probe frame (about one probe in twelve in a 2026-10-01 repetition, a
+  different profile each time); an isolated decoder patch was evaluated and rejected. A run that
+  loses the Main 4:2:2 10 bit receives a 4:2:2 sender as the engine's VP9 transcode until restart.
 - Signal-lock and frozen-frame telemetry are not implemented; device presence only.
 - Deep-link HTTPS dispatch needs Associated Domains and a served AASA; only the custom scheme works
   today. Fit has no undo; UI strings are English only.

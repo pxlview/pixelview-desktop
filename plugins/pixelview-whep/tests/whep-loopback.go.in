@@ -2,13 +2,19 @@
 package main
 import("fmt";"strings";"strconv";"slices";"encoding/json";"os";"io";"net";"net/http";"time";"sync";"github.com/pion/sdp";"github.com/pion/webrtc/v4";"github.com/pion/rtp")
 type WebRTCConfig struct {MimeType string;ClockRate uint32;Channels uint16;SDPFmtpLine string;SDPFmtpLines []string;PayloadType uint8}
-type Codec struct {FormatID string;PreferredOutputCodec []string;WebRTC *WebRTCConfig;Profile struct{Name string};Type int}
+type Codec struct {FormatID string;PreferredOutputCodec []string;WebRTC *WebRTCConfig;Profile struct{Name string};Type int;Settings *struct{EncoderName string}}
 type Mapper map[string]Codec
 func(m Mapper)GetCodec(id string)(Codec,bool){c,ok:=m[id];return c,ok}
-type Router struct{transcode bool};func(r Router)TranscodeRequired()bool{return r.transcode}
+type Router struct{transcode bool};func(r *Router)TranscodeRequired()bool{return r!=nil&&r.transcode}
+// Logging in the extracted engine code stays in place and lands here.
+type zapLog struct{};func(zapLog)Warn(string,...any){};func(zapLog)Debug(string,...any){};func(zapLog)Info(string,...any){};func(zapLog)Error(string,...any){}
+type zapShim struct{};func(zapShim)L()zapLog{return zapLog{}};func(zapShim)String(string,string)any{return nil};func(zapShim)Strings(string,[]string)any{return nil};func(zapShim)Bool(string,bool)any{return nil};func(zapShim)Int(string,int)any{return nil};func(zapShim)Uint8(string,uint8)any{return nil};func(zapShim)Uint32(string,uint32)any{return nil};func(zapShim)Uint16(string,uint16)any{return nil};func(zapShim)Error(error)any{return nil};func(zapShim)Any(string,any)any{return nil}
+var zap zapShim
+// The production image encodes VP9 only (no libx264/libx265).
+func(m Mapper)EncoderAvailable(id string)bool{return strings.HasPrefix(id,"vp9")}
 type Config struct{};func(c *Config)GetLimit4KEncoding()bool{return false}
 type Stats struct{};func(s *Stats)GetInputResolution()(int,int){return 0,0}
-type Server struct{codecMap Mapper;router Router;config *Config;statsManager *Stats}
+type Server struct{codecMap Mapper;router *Router;config *Config;statsManager *Stats}
 func isABR(id string)bool{return id=="vp9-8bit-420-abr-half"||id=="vp9-8bit-420-abr-quarter"}
 type observedTrack struct{webrtc.TrackLocal;rtp *webrtc.TrackLocalStaticRTP;bound webrtc.RTPCodecParameters}
 func(t *observedTrack)WriteRTP(p *rtp.Packet)error{return t.rtp.WriteRTP(p)}

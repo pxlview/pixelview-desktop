@@ -106,8 +106,8 @@
     "version": "1.28.3",
     "source_url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.3.tar.xz",
     "source_sha256": "4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00",
-    "patch": "gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch",
-    "patch_sha256": "ea34e1ae1b4616ed7dd847e26424f3bcaaf399e2ea6378495ddca1c9be716a84",
+    "patch": "gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch",
+    "patch_sha256": "d222b1ec0107bad76a64b20ed12df775fd2d6b7e4e78e65ac91f11449fc16291",
     "meson": "1.9.1",
     "ninja": "1.13.0",
     "meson_args": [

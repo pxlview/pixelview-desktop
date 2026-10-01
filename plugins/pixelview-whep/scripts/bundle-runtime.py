@@ -47,7 +47,8 @@ def patched_rswebrtc():
  return binary, metadata
 
 def patched_applemedia():
- # vtdec's HEVC reorder queue otherwise holds 16 frames. Same fail-closed
+ # vtdec's HEVC reorder queue otherwise holds 16 frames, and upstream has no
+ # 4:2:2 output format. Same fail-closed
  # provenance rules as rswebrtc: never fall back to the SDK module.
  import importlib.util
  spec=importlib.util.spec_from_file_location('build_applemedia', ROOT/'scripts/build-applemedia.py')

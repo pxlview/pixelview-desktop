@@ -49,7 +49,37 @@ static void hdr_cases(void)
  expect("bt2100-pq",SDR,PV_COLOR_HDR_SOURCE); expect("bt2100-hlg",SDR,PV_COLOR_HDR_SOURCE); expect("bt2020",SDR,PV_COLOR_HDR_SOURCE);
  expect("bt709",SDR,NULL); expect(NULL,SDR,PV_COLOR_UNSUPPORTED);
  GstCaps *nv12=gst_caps_from_string("video/x-raw,format=NV12,width=64,height=32,colorimetry=bt2100-pq"); GstVideoInfo info;
- assert(!pixelview_video_info(nv12,PQ,&info)); gst_caps_unref(nv12); /* HDR is ten-bit P010 only */
+ assert(!pixelview_video_info(nv12,PQ,&info)); gst_caps_unref(nv12); /* HDR is ten-bit P010 or v210 only */
+}
+/* HEVC 4:2:2 arrives as v210: one packed plane, six pixels per sixteen bytes. */
+static void v210_cases(void)
+{
+ const struct { const char *colorimetry; enum pixelview_color color; enum video_trc trc; enum video_colorspace space; } cases[]={
+  {"bt709",PIXELVIEW_COLOR_SDR,VIDEO_TRC_DEFAULT,VIDEO_CS_709},
+  {"bt2100-pq",PIXELVIEW_COLOR_PQ,VIDEO_TRC_PQ,VIDEO_CS_2100_PQ},
+  {"bt2100-hlg",PIXELVIEW_COLOR_HLG,VIDEO_TRC_HLG,VIDEO_CS_2100_HLG}};
+ for(unsigned n=0;n<3;n++) for(unsigned odd=0;odd<2;odd++) {
+  const unsigned width=odd?65:1920,height=odd?33:1080;
+  char *text=g_strdup_printf("video/x-raw,format=v210,width=%u,height=%u,framerate=25/1,colorimetry=%s",width,height,cases[n].colorimetry);
+  GstCaps *caps=gst_caps_from_string(text); g_free(text); GstVideoInfo info;
+  assert(!pixelview_video_color_mismatch(caps,cases[n].color));
+  assert(pixelview_video_info(caps,cases[n].color,&info));
+  GstBuffer *b=gst_buffer_new_allocate(NULL,info.size,NULL); GstVideoFrame m={0};
+  assert(gst_video_frame_map(&m,&info,b,GST_MAP_READ));
+  struct obs_source_frame2 f; assert(pixelview_video_frame(&m,cases[n].color,&f));
+  assert(f.format==VIDEO_FORMAT_V210 && f.range==VIDEO_RANGE_PARTIAL && f.trc==cases[n].trc);
+  assert(f.width==width && f.height==height && f.data[0]==GST_VIDEO_FRAME_PLANE_DATA(&m,0) && !f.data[1]);
+  /* libobs uploads ((w+5)/6)*4 RGB10A2 texels per row from this stride. */
+  assert(f.linesize[0]==(uint32_t)GST_VIDEO_FRAME_PLANE_STRIDE(&m,0) && f.linesize[0]>=((width+5)/6)*16);
+  if(!odd) assert(f.linesize[0]==5120);
+  float matrix[16],min[3],max[3];
+  assert(video_format_get_parameters_for_format(cases[n].space,VIDEO_RANGE_PARTIAL,VIDEO_FORMAT_V210,matrix,min,max));
+  assert(!memcmp(matrix,f.color_matrix,sizeof(matrix)) && !memcmp(min,f.color_range_min,sizeof(min)) && !memcmp(max,f.color_range_max,sizeof(max)));
+  /* The same frame never satisfies another colour mode. */
+  for(unsigned other=0;other<3;other++) if(other!=n) assert(!pixelview_video_frame(&m,cases[other].color,&f));
+  m.info.stride[0]=(int)((width+5)/6)*16-1; assert(!pixelview_video_frame(&m,cases[n].color,&f));
+  gst_video_frame_unmap(&m); gst_buffer_unref(b); gst_caps_unref(caps);
+ }
 }
 int main(void)
 {
@@ -98,6 +128,8 @@ int main(void)
  gst_structure_remove_field(gst_caps_get_structure(caps,0),"colorimetry");
  assert(!pixelview_video_info(caps,PIXELVIEW_COLOR_SDR,&parsed));gst_caps_unref(caps);
  hdr_cases();
+ v210_cases();
  puts("PASS P010/NV12/BGRA/I210, odd padded planes, SDR709 limited YUV/full RGB; rejects PQ/gamut/unknown range/invalid strides/bounds");
+ puts("PASS v210 (HEVC 4:2:2): SDR/PQ/HLG single packed plane, odd widths, short stride refused");
  puts("PASS HDR PQ/HLG: BT.2100 caps and VP9-style unsignalled transfer labelled; SDR/full/other-transfer/non-P010 refused with typed reasons");
 }

@@ -437,7 +437,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					is("unsupported-colorimetry") ?
 					QStringLiteral("The sender's colour format is not supported. Use limited-range BT.709 SDR or limited-range BT.2020 PQ/HLG on the sender.") :
 					hevc422 ?
-					QStringLiteral("The sender is streaming HEVC 4:2:2 10-bit, which cannot be received. Please use the HEVC Main or Main10 profile on the sender.") :
+					QStringLiteral("The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);

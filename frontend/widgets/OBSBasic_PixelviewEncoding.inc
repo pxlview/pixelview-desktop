@@ -132,7 +132,7 @@ void PixelviewAlignProperties(OBSPropertiesView *view)
 static QString PixelviewProfileLabel(const QString &name, const QString &value)
 {
 	if (value == QStringLiteral("main10")) return name + QStringLiteral(" (recommended)");
-	if (value == QStringLiteral("main42210")) return name + QStringLiteral(" (needs server transcode)");
+	if (value == QStringLiteral("main42210")) return name + QStringLiteral(" (transcoded for browsers)");
 	return name;
 }
 static QString PixelviewProfileTip(const QString &value)
@@ -140,7 +140,7 @@ static QString PixelviewProfileTip(const QString &value)
 	if (value == QStringLiteral("main10"))
 		return QStringLiteral("Recommended. Plays directly everywhere.");
 	if (value == QStringLiteral("main42210"))
-		return QStringLiteral("Native only in the Pixelview Player iOS app. Transcoded elsewhere: more latency, lower quality.");
+		return QStringLiteral("Native in the Pixelview Player iOS app and in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, lower quality.");
 	return QString();
 }
 // END PROFILE LABELS

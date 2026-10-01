@@ -38,6 +38,8 @@ class Packaging(unittest.TestCase):
   self.assertFalse(any('libgstapplemedia.dylib' in p for p in lock['inputs']))
   patch=(SCRIPT.parents[1]/'patches'/lock['applemedia_build']['patch']).read_text()
   self.assertIn('sps.max_num_reorder_pics[sps.max_sub_layers_minus1]', patch)
+  self.assertIn('kCVPixelFormatType_422YpCbCr10', patch)
+  self.assertIn('GST_VIDEO_FORMAT_v210', patch)
 class UpstreamAcquisition(unittest.TestCase):
  def test_package_hash_fails_closed(self):
   import hashlib, tempfile

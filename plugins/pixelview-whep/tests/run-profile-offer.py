@@ -50,10 +50,12 @@ def main():
     assert 'profile-level-id='+profile_level in result.stdout, result.stdout
     assert 'OPUS/48000/2' in result.stdout, result.stdout
     print('PASS real Main + H264 mode1 + stereo Opus offer')
-    result = subprocess.run([str(binary),'31','123'],env=env,capture_output=True,text=True,timeout=30)
+    result = subprocess.run([str(binary),'63','123'],env=env,capture_output=True,text=True,timeout=30)
     assert result.returncode == 0, result.stderr
     (work/'alternatives.sdp').write_text(result.stdout)
     assert 'level-id=123;profile-id=2;tier-flag=0;tx-mode=SRST' in result.stdout, result.stdout
+    # The engine matches profile 4 on these exact interop constraints (order-insensitive).
+    assert 'level-id=123;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000' in result.stdout, result.stdout
     assert result.stdout.count('H265/90000') == 3, result.stdout
     assert result.stdout.count('VP9/90000') == 2, result.stdout
     assert 'profile-id=0' in result.stdout and 'profile-id=2' in result.stdout
@@ -61,16 +63,17 @@ def main():
     payloads = re.findall(r'a=rtpmap:(\d+)', result.stdout)
     assert len(payloads) == len(set(payloads)) == 7, payloads
     print('PASS separate Main/Main10/Main422/VP9-0/VP9-2/H264 payloads + Opus')
-    for mask, level, hevc, vp9 in [(31,153,3,2),(31,0,0,2),(31,124,0,2),(5,123,2,0),(9,0,0,1),(17,0,0,1)]:
+    for mask, level, hevc, vp9 in [(63,153,3,2),(31,123,2,2),(63,0,0,2),(63,124,0,2),(5,123,1,0),(37,123,2,0),(33,123,1,0),(9,0,0,1),(17,0,0,1)]:
         result = subprocess.run([str(binary),str(mask),str(level)],env=env,capture_output=True,text=True,timeout=30)
         assert result.returncode == 0, result.stderr
         assert result.stdout.count('H265/90000') == hevc, result.stdout
         assert result.stdout.count('VP9/90000') == vp9, result.stdout
+        assert ('profile-id=4;' in result.stdout) == bool(mask & 32 and hevc), result.stdout
         if mask == 5:
             assert 'profile-id=1;' not in result.stdout
             assert 'profile-id=2;' in result.stdout
     print('PASS level gate and independent Main10/VP9 profile gates')
-    for mask, label in [(0,'raw-whep'),(31,'policy-whep')]:
+    for mask, label in [(0,'raw-whep'),(63,'policy-whep')]:
         result = subprocess.run([str(binary),str(mask),'123','whep'],env=env,capture_output=True,text=True,timeout=30)
         assert result.returncode == 0, result.stderr
         (work/(label+'.sdp')).write_text(result.stdout)

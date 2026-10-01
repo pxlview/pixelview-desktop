@@ -272,7 +272,7 @@ struct route_selector {
  void *opaque;
  GDestroyNotify destroy;
  struct rate_observer *rate;
- gboolean require_rtp, preview_nv12, selected, admit_native;
+ gboolean require_rtp, preview_nv12, selected, admit_native, admit_main422;
 };
 static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
 {
@@ -308,8 +308,11 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
   return GST_PAD_PROBE_OK;
  }
  s->selected=TRUE;
- gboolean native=gst_structure_has_name(wire,"video/x-h265") &&
+ gboolean main422=gst_structure_has_name(wire,"video/x-h265") &&
   !g_strcmp0(gst_structure_get_string(wire,"profile"),"main-422-10");
+ /* Main 4:2:2 10 normally stays on the stock decoder route (v210 from the
+  * patched vtdec); only explicit native admission builds the v210 tap. */
+ gboolean native=main422 && s->admit_native;
  GstCaps *policy=gst_caps_new_empty_simple(gst_structure_get_name(wire));
  if(gst_structure_has_name(wire,"video/x-h265")) {
   gst_caps_set_simple(policy,"stream-format",G_TYPE_STRING,"hvc1","alignment",G_TYPE_STRING,"au",NULL);
@@ -317,11 +320,11 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
    * decoding or silently enable native admission on a populated ordinary path. */
   const char *profile=gst_structure_get_string(wire,"profile");
   if(!profile) { gst_caps_unref(policy);goto failed; }
-  if(g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !(native && s->admit_native)) {
+  if(g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !native && !(main422 && s->admit_main422)) {
    /* A sender configured for HEVC 4:2:2 10-bit (or another non-Main profile)
     * is refused with a canonical reason before any AU; the profile string
     * itself is never copied into the message. */
-   unsupported=native?PV_UNSUPPORTED_HEVC_MAIN_422_10:PV_UNSUPPORTED_HEVC_PROFILE;
+   unsupported=main422?PV_UNSUPPORTED_HEVC_MAIN_422_10:PV_UNSUPPORTED_HEVC_PROFILE;
    gst_caps_unref(policy);goto failed;
   }
   gst_caps_set_simple(policy,"profile",G_TYPE_STRING,profile,NULL);
@@ -411,4 +414,9 @@ void pv_native422_filter_admit_native(GstElement *filter, gboolean admit)
 {
  struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
  if(s) s->admit_native=admit;
+}
+void pv_native422_filter_admit_main422(GstElement *filter, gboolean admit)
+{
+ struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
+ if(s) s->admit_main422=admit;
 }

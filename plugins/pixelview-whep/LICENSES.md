@@ -54,10 +54,12 @@ the transitive review below before distribution.
 The packaged applemedia plugin is built from the official gst-plugins-bad1.28.3
 release tarball, SHA256
 `4213f43ddb875bb141e5040e97735579d74665bec3d17b51052aade395b83f00`, with
-`patches/gst-plugins-bad-1.28.3-vtdec-hevc-reorder.patch`. The changed
-LGPL-2.1-or-later file is `sys/applemedia/vtdec.c`; original copyright/license
-headers remain. The change sizes the HEVC output reorder queue from the stream's
-SPS instead of a worst case. `licenses/applemedia/COPYING` is the tarball's
+`patches/gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch`. The changed
+LGPL-2.1-or-later files are `sys/applemedia/vtdec.c` and
+`sys/applemedia/helpers.m`; original copyright/license headers remain. The
+changes size the HEVC output reorder queue from the stream's SPS instead of a
+worst case, and add v210 (`kCVPixelFormatType_422YpCbCr10`) as a decoder output
+format chosen for 4:2:2 streams. `licenses/applemedia/COPYING` is the tarball's
 LGPL text. `build-applemedia.py` records source, patch, tool and binary
 provenance, and the packager includes the patch, provenance and LGPL text in
 `licenses/applemedia`; the release source inventory carries the exact tarball.

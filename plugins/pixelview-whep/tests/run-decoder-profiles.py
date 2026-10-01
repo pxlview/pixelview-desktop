@@ -64,7 +64,7 @@ def main():
         for decoder in ('vtdec','vtdec_hw'):
             formats = ('auto','P010_10LE','AYUV64') if codec=='hevc' else ('auto','P010_10LE')
             if name == 'hevc-main42210':
-                formats += ('I422_10LE','Y210')
+                formats += ('I422_10LE','Y210','v210')
             for fmt in formats:
                 dump = work/f'{name}-{decoder}-{fmt}.raw'
                 result = subprocess.run([str(exe),str(fixture),codec,decoder,fmt],env={**env,'DECODER_FIRST_FRAME':str(dump)},text=True,capture_output=True,timeout=25)

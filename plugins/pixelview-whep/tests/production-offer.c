@@ -45,7 +45,7 @@ static void admitted_envelope(unsigned profiles, unsigned level, unsigned fps)
  r.pipe=make_pipeline(&r,"http://127.0.0.1:9/offline-offer");g_assert_nonnull(r.pipe);
  GstElement *filter=gst_bin_get_by_name(GST_BIN(r.pipe),"video-policy");g_assert_nonnull(filter);
  GstCaps *raw=NULL;g_object_get(filter,"caps",&raw,NULL);g_assert_nonnull(raw);
- char *bounds=g_strdup_printf("video/x-raw,format=P010_10LE,width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]",fps);
+ char *bounds=g_strdup_printf(PIXELVIEW_RECEIVE_RAW_CAPS ",width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]",fps);
  GstCaps *expected_raw=gst_caps_from_string(bounds);g_free(bounds);
  g_assert_true(gst_caps_is_equal(raw,expected_raw));
  gst_caps_unref(expected_raw);gst_caps_unref(raw);gst_object_unref(filter);
@@ -70,7 +70,7 @@ static void admitted_envelope(unsigned profiles, unsigned level, unsigned fps)
  gst_caps_unref(expected_offer);gst_caps_unref(offered);gst_caps_unref(input);
  stop_pipeline(&r);gst_object_unref(trans);gst_object_unref(rtc);
  g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
- printf("PASS admitted production hook + exact P010 HD capsfilter: mask=%u level=%u fps=%u\n",profiles,level,fps);
+ printf("PASS admitted production hook + exact P010/v210 HD capsfilter: mask=%u level=%u fps=%u\n",profiles,level,fps);
 }
 static void actual_graph(void)
 {
@@ -80,8 +80,8 @@ static void actual_graph(void)
  g_assert_cmpuint(r.active_caps.profiles,!=,0);
  g_assert_true(r.active_caps.hevc_level_id==0 || r.active_caps.hevc_level_id==120 || r.active_caps.hevc_level_id==123);
  r.pipe=make_pipeline(&r,"http://127.0.0.1:9/offline-offer");g_assert_nonnull(r.pipe);
- unsigned fps=(r.active_caps.profiles&(PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10)) && r.active_caps.hevc_level_id==120 ? 30 : 60;
- char *bounds=g_strdup_printf("video/x-raw,format=P010_10LE,width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]",fps);
+ unsigned fps=(r.active_caps.profiles&(PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10|PV_PROFILE_HEVC_MAIN422_10)) && r.active_caps.hevc_level_id==120 ? 30 : 60;
+ char *bounds=g_strdup_printf(PIXELVIEW_RECEIVE_RAW_CAPS ",width=(int)[1,1920],height=(int)[1,1080],framerate=(fraction)[0/1,%u/1]",fps);
  GstCaps *envelope=gst_caps_from_string(bounds);g_free(bounds);
  GstIterator *it=gst_bin_iterate_elements(GST_BIN(r.pipe));GValue value=G_VALUE_INIT;bool bounded=false;
  while(gst_iterator_next(it,&value)==GST_ITERATOR_OK) {
@@ -125,7 +125,8 @@ static void actual_graph(void)
   }
  }
  unsigned expected_hevc=!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN)+!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN10);
- expected_hevc += expected_hevc != 0 && pv_main422_25p_enabled(); /* Explicit Main422 policy, not another probe bit. */
+ /* Main422 is its own probe bit (or the dormant explicit native policy). */
+ expected_hevc += (r.active_caps.profiles&PV_PROFILE_HEVC_MAIN422_10) || (expected_hevc != 0 && pv_main422_25p_enabled());
  unsigned expected_vp9=!!(r.active_caps.profiles&PV_PROFILE_VP9_0)+!!(r.active_caps.profiles&PV_PROFILE_VP9_2);
  g_assert_cmpuint(h265,==,expected_hevc);g_assert_cmpuint(vp9,==,expected_vp9);g_assert_cmpint(r.jitter_latency,==,50);
  /* No credentials; still avoid printing host candidates. */
@@ -134,9 +135,9 @@ static void actual_graph(void)
  g_mutex_clear(&r.lock);g_rec_mutex_clear(&r.delivery);
  printf("PASS production raw graph offer: actual probe mask=%u level=%u exact profile gates + envelope, H264mode1 Opus stereo unique BUNDLE PTs jitter50\n",r.active_caps.profiles,r.active_caps.hevc_level_id);
 }
-static void main422_offer(void)
+static void main422_offer(bool probed)
 {
- struct receiver r={.active_latency_override=true,.active_latency=50,.active_caps={PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,123}};
+ struct receiver r={.active_latency_override=true,.active_latency=50,.active_caps={PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10|(probed?PV_PROFILE_HEVC_MAIN422_10:0),123}};
  g_mutex_init(&r.lock);g_rec_mutex_init(&r.delivery);
  struct receive_attempt *a=attempt_new(&r);
  GstElement *rtc=gst_element_factory_make("webrtcbin",NULL);
@@ -150,14 +151,17 @@ static void main422_offer(void)
  GstWebRTCSessionDescription *offer=NULL;
  g_assert_true(gst_structure_get(gst_promise_get_reply(promise),"offer",GST_TYPE_WEBRTC_SESSION_DESCRIPTION,&offer,NULL));
  char *sdp=gst_sdp_message_as_text(offer->sdp);
- /* Main422 follows the single policy switch; ordinary probe bits stay truthful. */
- const char *main422="level-id=120;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000";
- if(pv_main422_25p_enabled()) g_assert_nonnull(strstr(sdp,main422)); else g_assert_null(strstr(sdp,"profile-id=4"));
+ /* Main422 is offered at the probed level only when its own probe bit is set
+  * (or at level 4.0 under the dormant native switch); ordinary bits stay truthful. */
+ const char *main422=probed?"level-id=123;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000":
+  "level-id=120;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000";
+ const bool offered=probed || pv_main422_25p_enabled();
+ if(offered) g_assert_nonnull(strstr(sdp,main422)); else g_assert_null(strstr(sdp,"profile-id=4"));
  g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=1"));
  g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=2"));
  puts(sdp);
- printf("PASS normal-build Main422 policy (%s): profile4 %s via production hook; ordinary Main/Main10 unchanged\n",
-  pv_main422_25p_enabled()?"enabled":"disabled",pv_main422_25p_enabled()?"offered":"absent");
+ printf("PASS normal-build Main422 offer (probe bit %s): profile4 %s via production hook; ordinary Main/Main10 unchanged\n",
+  probed?"set":"clear",offered?"offered":"absent");
  g_free(sdp);gst_webrtc_session_description_free(offer);gst_promise_unref(promise);
  gst_element_set_state(rtc,GST_STATE_NULL);r.attempt=a;stop_pipeline(&r);
  gst_object_unref(trans);gst_object_unref(rtc);gst_caps_unref(input);
@@ -205,14 +209,16 @@ int main(int argc,char **argv)
 {
  setbuf(stdout,NULL);gst_init(&argc,&argv);
  latency_contract();
- if(argc>1 && !strcmp(argv[1],"--main422-only")) { main422_offer(); return 0; }
- main422_offer();
+ if(argc>1 && !strcmp(argv[1],"--main422-only")) { main422_offer(false);main422_offer(true); return 0; }
+ main422_offer(false);main422_offer(true);
  negative_hook(false,false);negative_hook(true,false);negative_hook(false,true);
  admitted_envelope(PV_PROFILE_VP9_0,0,60);
  admitted_envelope(PV_PROFILE_H264,0,60);
  admitted_envelope(PV_PROFILE_VP9_2,0,60);
  admitted_envelope(PV_PROFILE_VP9_0|PV_PROFILE_VP9_2,0,60);
  admitted_envelope(PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,123,60);
+ admitted_envelope(PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10|PV_PROFILE_HEVC_MAIN422_10,123,60);
+ admitted_envelope(PV_PROFILE_HEVC_MAIN422_10,123,60);
  admitted_envelope(PV_PROFILE_HEVC_MAIN|PV_PROFILE_HEVC_MAIN10,120,30);
  admitted_envelope(PV_PROFILE_H264|PV_PROFILE_HEVC_MAIN|PV_PROFILE_VP9_0,120,30);
  if(argc<2 || strcmp(argv[1],"--deterministic-only")) actual_graph();

@@ -16,7 +16,7 @@ SDK = REPO / '.deps/gstreamer-upstream-1.28.3/sdk'
 def verify_fixtures():
     metadata = json.loads((ROOT / 'tests/capability-fixtures.json').read_text())
     header = (ROOT / 'capability-fixtures.h').read_text()
-    assert len(metadata['fixtures']) == 5
+    assert len(metadata['fixtures']) == 6
     for row in metadata['fixtures']:
         stream = row['ffprobe']['streams'][0]
         assert (stream['width'], stream['height'], stream['nb_read_frames']) == (1920, 1080, '3'), row['name']
@@ -82,8 +82,8 @@ def main():
                               text=True, capture_output=True, timeout=15)
     assert observed.returncode == 0, observed
     sessions = observed.stderr.splitlines()
-    assert len(sessions) == 5 and all(line == 'HW_SESSION create=0 query=0 hardware=true' for line in sessions), observed
-    print('hardware-observed', observed.stdout.strip(), 'hardware_sessions=5')
+    assert len(sessions) == 6 and all(line == 'HW_SESSION create=0 query=0 hardware=true' for line in sessions), observed
+    print('hardware-observed', observed.stdout.strip(), 'hardware_sessions=6')
 
 
 if __name__ == '__main__':

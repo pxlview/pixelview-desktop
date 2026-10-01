@@ -59,7 +59,7 @@ bool pixelview_video_info(GstCaps *caps, enum pixelview_color color, GstVideoInf
  if (color!=PIXELVIEW_COLOR_SDR) {
   GstVideoColorimetry c;
   if (!caps_colorimetry(caps,&c) || hdr_mismatch(&c,color) || !gst_video_info_from_caps(info,caps) ||
-      GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_P010_10LE) return false;
+      (GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_P010_10LE && GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_v210)) return false;
   /* The label, not GstVideoInfo's resolution-based defaults, describes the frame. */
   hdr_label(&info->colorimetry,color);
   return true;
@@ -75,9 +75,10 @@ bool pixelview_video_info(GstCaps *caps, enum pixelview_color color, GstVideoInf
 bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, struct obs_source_frame2 *f)
 {
  memset(f,0,sizeof(*f));
- unsigned planes; bool rgb=false, planar=false; unsigned bytes=2;
+ unsigned planes; bool rgb=false, planar=false, v210=false; unsigned bytes=2;
  switch(GST_VIDEO_FRAME_FORMAT(m)) {
  case GST_VIDEO_FORMAT_P010_10LE: f->format=VIDEO_FORMAT_P010; planes=2; break;
+ case GST_VIDEO_FORMAT_v210: f->format=VIDEO_FORMAT_V210; planes=1; v210=true; break;
  case GST_VIDEO_FORMAT_NV12: f->format=VIDEO_FORMAT_NV12; planes=2; bytes=1; break;
  case GST_VIDEO_FORMAT_BGRA: f->format=VIDEO_FORMAT_BGRA; planes=1; bytes=4; rgb=true; break;
  case GST_VIDEO_FORMAT_I422_10LE: f->format=VIDEO_FORMAT_I210; planes=3; planar=true; break;
@@ -87,7 +88,7 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
  const bool hdr=color!=PIXELVIEW_COLOR_SDR;
  if (hdr) {
   GstVideoColorimetry label; hdr_label(&label,color);
-  if (f->format!=VIDEO_FORMAT_P010 || !gst_video_colorimetry_is_equal(c,&label)) return false;
+  if ((f->format!=VIDEO_FORMAT_P010 && f->format!=VIDEO_FORMAT_V210) || !gst_video_colorimetry_is_equal(c,&label)) return false;
  } else if (c->primaries!=GST_VIDEO_COLOR_PRIMARIES_BT709 ||
      c->matrix!=(rgb?GST_VIDEO_COLOR_MATRIX_RGB:GST_VIDEO_COLOR_MATRIX_BT709) ||
      c->transfer!=(rgb?GST_VIDEO_TRANSFER_SRGB:GST_VIDEO_TRANSFER_BT709) ||
@@ -99,7 +100,8 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
  f->trc=hdr?(color==PIXELVIEW_COLOR_PQ?VIDEO_TRC_PQ:VIDEO_TRC_HLG):rgb?VIDEO_TRC_SRGB:VIDEO_TRC_DEFAULT;
  for(unsigned p=0;p<planes;p++) {
   int stride=GST_VIDEO_FRAME_PLANE_STRIDE(m,p);
-  size_t row=p?(((size_t)f->width+1)/2)*bytes*(planar?1:2):(size_t)f->width*bytes;
+  /* v210 packs six pixels into four 32-bit words; libobs uploads ((w+5)/6)*4 texels per row. */
+  size_t row=v210?(((size_t)f->width+5)/6)*16:p?(((size_t)f->width+1)/2)*bytes*(planar?1:2):(size_t)f->width*bytes;
   size_t rows=p&&!planar?(f->height+1)/2:f->height;
   if(stride<=0 || (size_t)stride<row) return false;
   uintptr_t start=(uintptr_t)GST_VIDEO_FRAME_PLANE_DATA(m,p);

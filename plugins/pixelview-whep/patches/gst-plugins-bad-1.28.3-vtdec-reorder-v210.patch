@@ -1,0 +1,149 @@
+--- a/sys/applemedia/helpers.m
++++ b/sys/applemedia/helpers.m
+@@ -60,6 +60,8 @@
+       return GST_VIDEO_FORMAT_UYVY;
+     case kCVPixelFormatType_422YpCbCr8_yuvs:
+       return GST_VIDEO_FORMAT_YUY2;
++    case kCVPixelFormatType_422YpCbCr10:
++      return GST_VIDEO_FORMAT_v210;
+       /* Alpha YUV */
+     case kCVPixelFormatType_4444AYpCbCr16:
+       return GST_VIDEO_FORMAT_AYUV64;
+@@ -92,6 +94,8 @@
+       return kCVPixelFormatType_422YpCbCr8;
+     case GST_VIDEO_FORMAT_YUY2:
+       return kCVPixelFormatType_422YpCbCr8_yuvs;
++    case GST_VIDEO_FORMAT_v210:
++      return kCVPixelFormatType_422YpCbCr10;
+       /* Alpha YUV */
+     case GST_VIDEO_FORMAT_AYUV64:
+ /* This is fine for now because Apple only ships LE devices */
+--- a/sys/applemedia/vtdec.c
++++ b/sys/applemedia/vtdec.c
+@@ -58,6 +58,7 @@
+ #include <gst/base/gstbytewriter.h>
+ #include <gst/video/video.h>
+ #include <gst/video/gstvideodecoder.h>
++#include <gst/codecparsers/gsth265parser.h>
+ #include <gst/gl/gstglcontext.h>
+ 
+ #include "vtutil.h"
+@@ -233,7 +234,7 @@
+ 
+ static SupplementalSupport gst_vtdec_codec_support = NoneSupported;
+ 
+-#define VIDEO_SRC_CAPS_NATIVE_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE }"
++#define VIDEO_SRC_CAPS_NATIVE_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE, v210 }"
+ 
+ /* TODO: Add support for more formats to videotexturecache-vulkan/gl.
+  * VideoToolbox will output most formats with HW-backed buffers,
+@@ -545,10 +546,21 @@
+  * https://wiki.multimedia.cx/index.php/Apple_ProRes#Frame_header
+  */
+ static GstVideoFormat
+-get_preferred_video_format (GstStructure * s, gboolean prores)
++get_preferred_video_format (GstStructure * s, gboolean prores,
++    gboolean chroma_422)
+ {
+   const GValue *list = gst_structure_get_value (s, "format");
+   guint i, size = gst_value_list_get_size (list);
++
++  /* A 4:2:2 stream keeps its chroma when downstream accepts v210; the 4:2:0
++   * formats below would make VideoToolbox subsample it vertically. */
++  for (i = 0; chroma_422 && i < size; i++) {
++    const GValue *value = gst_value_list_get_value (list, i);
++    if (gst_video_format_from_string (g_value_get_string (value)) ==
++        GST_VIDEO_FORMAT_v210)
++      return GST_VIDEO_FORMAT_v210;
++  }
++
+   for (i = 0; i < size; i++) {
+     const GValue *value = gst_value_list_get_value (list, i);
+     const char *fmt = g_value_get_string (value);
+@@ -674,7 +686,11 @@
+       GstStructure *is = gst_caps_get_structure (vtdec->input_state->caps, 0);
+       const char *name = gst_structure_get_name (is);
+       format = get_preferred_video_format (s,
+-          g_strcmp0 (name, "video/x-prores") == 0);
++          g_strcmp0 (name, "video/x-prores") == 0,
++          g_strcmp0 (gst_structure_get_string (is, "chroma-format"),
++              "4:2:2") == 0
++          || g_strcmp0 (gst_structure_get_string (is, "profile"),
++              "main-422-10") == 0);
+     }
+ 
+     if (format == GST_VIDEO_FORMAT_UNKNOWN) {
+@@ -2036,10 +2052,73 @@
+   return ret;
+ }
+ 
++/* The reorder queue only has to hold the stream's own reordering depth:
++ * sps_max_num_reorder_pics bounds how many frames can precede any frame in
++ * output order. Holding the level-agnostic DPB size instead delays every
++ * frame by up to 16 frames (640 ms at 25 fps) even when the stream has no
++ * B-frames, and that delay is not reported when the framerate is unknown. */
+ static gboolean
++get_hevc_reorder_depth (GstVtdec * vtdec, GstBuffer * codec_data, gint * depth)
++{
++  GstH265Parser *parser;
++  GstH265DecoderConfigRecord *config = NULL;
++  GstMapInfo map;
++  gboolean found = FALSE;
++  guint i, j;
++
++  if (!codec_data || !gst_buffer_map (codec_data, &map, GST_MAP_READ))
++    return FALSE;
++
++  parser = gst_h265_parser_new ();
++  if (gst_h265_parser_parse_decoder_config_record (parser, map.data, map.size,
++          &config) != GST_H265_PARSER_OK) {
++    GST_WARNING_OBJECT (vtdec, "Failed to parse HEVC codec-data");
++    goto out;
++  }
++
++  *depth = 0;
++  for (i = 0; i < config->nalu_array->len; i++) {
++    GstH265DecoderConfigRecordNalUnitArray *array =
++        &g_array_index (config->nalu_array,
++        GstH265DecoderConfigRecordNalUnitArray, i);
++
++    for (j = 0; j < array->nalu->len; j++) {
++      GstH265NalUnit *nalu = &g_array_index (array->nalu, GstH265NalUnit, j);
++      GstH265SPS sps;
++
++      if (nalu->type != GST_H265_NAL_SPS)
++        continue;
++
++      if (gst_h265_parser_parse_sps (parser, nalu, &sps, FALSE) !=
++          GST_H265_PARSER_OK) {
++        GST_WARNING_OBJECT (vtdec, "Failed to parse HEVC SPS");
++        found = FALSE;
++        goto out;
++      }
++      *depth = MAX (*depth,
++          sps.max_num_reorder_pics[sps.max_sub_layers_minus1]);
++      found = TRUE;
++    }
++  }
++
++out:
++  if (config)
++    gst_h265_decoder_config_record_free (config);
++  gst_h265_parser_free (parser);
++  gst_buffer_unmap (codec_data, &map);
++  return found;
++}
++
++static gboolean
+ compute_hevc_decode_picture_buffer_size (GstVtdec * vtdec,
+     GstBuffer * codec_data, int *length)
+ {
++  if (get_hevc_reorder_depth (vtdec, codec_data, length)) {
++    *length = MIN (*length, 16);
++    GST_INFO_OBJECT (vtdec, "HEVC reorder depth from SPS: %d", *length);
++    return TRUE;
++  }
++
+   /* This value should be level dependent (table A.8)
+    * but let's assume the maximum possible one for simplicity. */
+   const gint max_luma_ps = 35651584;

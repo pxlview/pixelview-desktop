@@ -59,7 +59,7 @@ int main() {
  assert(combo.current == 0 && combo.count() == 3);
  assert(combo.itemText(0) == "Main" && combo.tips[0].isEmpty());
  assert(combo.itemText(1) == "Main 10 (recommended)" && combo.tips[1].find("Recommended") == 0);
- assert(combo.itemText(2) == "Main 422 10 (needs server transcode)" && combo.tips[2].find("iOS app") != std::string::npos);
+ assert(combo.itemText(2) == "Main 422 10 (transcoded for browsers)" && combo.tips[2].find("iOS app") != std::string::npos && combo.tips[2].find("Pixelview Desktop") != std::string::npos);
  combo.mutations = 0;
  for (int i=0; i<3; ++i) refresh(&combo,&props,"main",true);
  assert(combo.mutations == 0);

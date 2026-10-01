@@ -22,6 +22,9 @@ static const struct probe_fixture fixtures[] = {
  FIXTURE(PV_PROFILE_HEVC_MAIN10, "video/x-h265", "h265parse", "main-10", "P010_10LE", main10),
  FIXTURE(PV_PROFILE_VP9_0, "video/x-vp9", "vp9parse", "0", "NV12", vp9_0),
  FIXTURE(PV_PROFILE_VP9_2, "video/x-vp9", "vp9parse", "2", "P010_10LE", vp9_2),
+ /* v210 exists only in the patched vtdec: an unpatched decoder fails this
+  * fixture, so 4:2:2 is never offered where it would be subsampled to P010. */
+ FIXTURE(PV_PROFILE_HEVC_MAIN422_10, "video/x-h265", "h265parse", "main-422-10", "v210", main422),
 };
 #undef FIXTURE
 static GMutex cache_mutex;
@@ -62,7 +65,7 @@ static gboolean validate_sample(GstSample *sample, GstElement *decoder, const st
   gst_structure_get_int(s, "width", &width) && width == 1920 &&
   gst_structure_get_int(s, "height", &height) && height == 1080 &&
   gst_structure_get_fraction(s, "framerate", &fps_n, &fps_d) && fps_n == 60 && fps_d == 1;
- if (fixture->bit & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10))
+ if (fixture->bit & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10))
   valid = valid && !g_strcmp0(gst_structure_get_string(s, "level"), "4.1") &&
           !g_strcmp0(gst_structure_get_string(s, "tier"), "main");
  if (fixture->bit == PV_PROFILE_H264)
@@ -82,7 +85,8 @@ static gboolean validate_sample(GstSample *sample, GstElement *decoder, const st
   * deliberately is not a reference-decoder/fidelity comparison. */
  const guint8 *base = GST_VIDEO_FRAME_PLANE_DATA(&frame, 0);
  int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
- unsigned bytes = !strcmp(fixture->format, "NV12") ? 1920 : 3840;
+ /* Bytes per 1920-pixel row: v210 packs six pixels into sixteen bytes. */
+ unsigned bytes = !strcmp(fixture->format, "NV12") ? 1920 : !strcmp(fixture->format, "v210") ? 5120 : 3840;
  gboolean varied = FALSE;
  for (unsigned y = 0; y < 1080 && !varied; y++)
   for (unsigned x = 0; x < bytes; x++)
@@ -199,7 +203,7 @@ static gpointer probe_worker(gpointer unused)
   g_mutex_lock(&cache_mutex);
   if (!sealed && g_get_monotonic_time() < deadline && supported) {
    pending.profiles |= fixtures[i].bit;
-   if (fixtures[i].bit & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10)) pending.hevc_level_id = 123;
+   if (fixtures[i].bit & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10)) pending.hevc_level_id = 123;
   }
   g_mutex_unlock(&cache_mutex);
  }

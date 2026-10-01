@@ -16,8 +16,9 @@ typedef gboolean (*pixelview_capability_cancel_fn)(void *data);
  * Returns FALSE with zero output if uninitialized or this waiter is cancelled.
  * TRUE returns an immutable process-cache snapshot (possibly zero on failure).
  * No fallback should be offered for absent bits. Only H264 constrained baseline
- * with RTP mode1, HEVC Main/Main10 4:2:0 and VP9 0/2 4:2:0 are exercised.
- * A pass means mapped native NV12/P010_10LE output from vtdec_hw, not chroma
+ * with RTP mode1, HEVC Main/Main10 4:2:0, HEVC Main 4:2:2 10 and VP9 0/2 4:2:0
+ * are exercised. A pass means mapped native NV12/P010_10LE (v210 for 4:2:2)
+ * output from vtdec_hw, not chroma
  * fidelity, HDR accuracy, OBS/output integration, throughput or level-6 support.
  * HEVC level 123 is a conservative negotiation ceiling from the actual fixture,
  * NOT a claim to have stress-tested every legal main-tier level-4.1 bitstream.

@@ -27,7 +27,7 @@ int main(int argc, char **argv)
  gboolean timeout = !strcmp(argv[1], "timeout");
  gboolean partial = !strcmp(argv[1], "malformed-main10");
  pixelview_capability_probe_test_configure(!strcmp(argv[1], "absent") ? "pixelview_missing_decoder" : "vtdec_hw",
-                                          partial ? PV_PROFILE_HEVC_MAIN10 : !strcmp(argv[1], "malformed") ? 31 :
+                                          partial ? PV_PROFILE_HEVC_MAIN10 : !strcmp(argv[1], "malformed") ? 63 :
                                           !strcmp(argv[1], "wrong-rate") ? 256 : !strcmp(argv[1], "wrong-timing") ? 512 : 0,
                                           timeout ? PIXELVIEW_CAPABILITY_PROBE_BUDGET_MS + 200 : cancel ? 200 : 0);
  gint64 start = g_get_monotonic_time();
@@ -50,7 +50,8 @@ int main(int argc, char **argv)
  }
  if (real || cancel || partial) {
   unsigned expected = PV_PROFILE_H264 | PV_PROFILE_HEVC_MAIN |
-                      PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_VP9_0 | PV_PROFILE_VP9_2;
+                      PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_VP9_0 | PV_PROFILE_VP9_2 |
+                      PV_PROFILE_HEVC_MAIN422_10;
   if (partial) expected &= ~PV_PROFILE_HEVC_MAIN10;
   g_assert_cmpuint(result.profiles, ==, expected);
   g_assert_cmpuint(result.hevc_level_id, ==, 123);
