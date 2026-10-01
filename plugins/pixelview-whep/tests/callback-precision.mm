@@ -66,5 +66,6 @@ int main(int argc,char **argv) { @autoreleasepool {
  assert(policy.set(false)); obs_video_info restored={}; assert(obs_get_video_info(&restored) && restored.output_format==VIDEO_FORMAT_NV12 && restored.colorspace==VIDEO_CS_709);
  obs_shutdown();
  if (getenv("PIXELVIEW_EXPECT_REJECT")) return delivered==0?0:8;
- return delivered>0 && r>0 && (!strcmp(argv[3],"P010")?n==877:n<=256 && n>1)?0:7;
+ // An SDR NV12 output renders into a float canvas too: all 877 codes survive on either canvas.
+ return delivered>0 && r>0 && n==877?0:7;
 }}

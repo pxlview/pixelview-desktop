@@ -25,6 +25,7 @@ struct receiver {
  /* Serializes cancellation with startup and actual OBS delivery. Never hold
   * lock across GStreamer state changes (webrtc-ready may run synchronously). */
  GRecMutex delivery;
+ uint8_t *widened; size_t widened_capacity; /* delivery; eight-bit frames widened to P010 */
  uint64_t generation, active_generation;
  const char *failure; /* lock; canonical allowlisted reason for the current generation, or NULL */
  GCond wake;
@@ -226,6 +227,11 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  }
  frame.timestamp = timestamp(sample, r->pipe, sink);
  g_rec_mutex_lock(&r->delivery);
+ /* An eight-bit stream is decoded as NV12 and reaches OBS as exact ten-bit P010. */
+ if (!pixelview_video_widen_nv12(&frame, &r->widened, &r->widened_capacity)) {
+  g_rec_mutex_unlock(&r->delivery);
+  gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_ERROR;
+ }
  g_mutex_lock(&r->lock);
  bool deliver = !r->quit && !r->changed && r->accept_samples && r->generation == r->active_generation;
  if (deliver) {
@@ -680,7 +686,7 @@ static void destroy(void *opaque)
  r->failure=NULL; r->accept_samples = false; g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
  g_rec_mutex_unlock(&r->delivery);
  g_thread_join(r->thread); wipe(&r->endpoint);
- g_cond_clear(&r->wake); g_rec_mutex_clear(&r->delivery); g_mutex_clear(&r->lock); g_free(r);
+ g_cond_clear(&r->wake); g_rec_mutex_clear(&r->delivery); g_mutex_clear(&r->lock); g_free(r->widened); g_free(r);
 }
 static const char *source_name(void *unused) { (void)unused; return "Pixelview WHEP Receiver"; }
 bool obs_module_load(void)

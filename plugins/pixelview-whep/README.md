@@ -27,7 +27,7 @@ Control procs are thread-safe and asynchronous. Source destruction joins the med
 ## Media path
 
 - `whepclientsrc`: probed H264, HEVC Main/Main10/Main 4:2:2 10, VP9 profiles0/2 and Opus. The parsed CAPS selector (`codec-route.c`) is a stock capsfilter that pins the codec and HEVC profile for the attempt; it admits `main`, `main-10` and, when its probe bit is set, `main-422-10`. Any other parsed HEVC profile (and `main-422-10` without the probe bit) is refused before its first AU with `GST_STREAM_ERROR_WRONG_TYPE` and the `pixelview-unsupported-profile` details structure.
-- Video: decodebin3 → `{P010_10LE, v210}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec picks v210 only for a 4:2:2 stream; everything else is P010. Eight-bit encoded sources are upconverted, not original ten-bit information.
+- Video: decodebin3 → `{P010_10LE, v210, NV12}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec delivers each stream in its own sampling and depth: v210 for 4:2:2, P010 for ten-bit 4:2:0, NV12 for eight-bit.
 - Audio: static bounded queue → audioconvert/audioresample → interleaved stereo F32/48 kHz → bounded clocked queue → synchronized appsink → `obs_source_output_audio`. There is no tee, probe or second PCM path: the DeckLink output consumes the stock OBS mix.
 - Both branches use pipeline running-time PTS plus a common base clock; synchronized sinks preserve A/V timing. This is a CPU raw-frame path, not zero-copy.
 - The source enables libobs async unbuffered mode because the synchronized appsinks already pace delivery on the pipeline clock. This avoids a second OBS-side video rebuffer; hardware smoothness remains to be checked.
@@ -71,8 +71,12 @@ Upstream vtdec has no 4:2:2 raw output: a Main 4:2:2 10 stream asked for P010
 is decoded in hardware and then subsampled to 4:2:0. The patch maps v210 to
 `kCVPixelFormatType_422YpCbCr10` and prefers it when the input caps say
 `chroma-format=4:2:2` (or `profile=main-422-10`) and downstream lists v210;
-every other stream negotiates exactly as before. The receiver's raw policy is
-`{P010_10LE, v210}`, so 4:2:0 streams still arrive as P010.
+When downstream lists both NV12 and P010 the patch also picks by the stream's
+bit depth (`bit-depth-luma` from the parser): NV12 for eight-bit, P010 for
+ten-bit or unknown. Upstream takes the first of the two in its own template
+order (NV12, truncating ten-bit streams), and VideoToolbox widens eight-bit
+video to P010 with a full-range gain (white 235 becomes 943, neutral chroma
+514). The receiver's raw policy is `{P010_10LE, v210, NV12}`.
 
 `build-applemedia.py` verifies the official gst-plugins-bad1.28.3 tarball
 SHA256, extracts it fresh, applies the patch and builds only the applemedia

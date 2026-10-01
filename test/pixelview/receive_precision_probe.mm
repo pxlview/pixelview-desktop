@@ -60,5 +60,6 @@ int main(int argc,char **argv) { @autoreleasepool {
  printf("RESULT input=%s canvas=%s transfer=SDR709 unique_red=%u input_legal_codes=877 readbacks=%u\n",argv[4],argv[3],n,r);
  obs_set_output_source(0,nullptr);obs_source_release(s);
  obs_enter_graphics();gs_stagesurface_destroy(stage);obs_leave_graphics();obs_shutdown();
- return r>0 && (vi.output_format==VIDEO_FORMAT_P010?n>256:n<=256 && n>1)?0:7;
+ // Pixelview: an SDR NV12 output renders into a float canvas too, so both keep ten bits.
+ return r>0 && n>256?0:7;
 }}

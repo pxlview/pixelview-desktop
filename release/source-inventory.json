@@ -18,7 +18,7 @@
   "runtime_bindings": [
     {
       "path": "plugins/pixelview-whep/runtime-lock.json",
-      "sha256": "c199546894d5908ceec8dfef638647056ce806f96d67500985f188a22bac47af",
+      "sha256": "0e704dc93f14b5b7996f9e036ee9eea213814035a2decfcd74fc17ce8bf7946b",
       "size": 9218
     },
     {
@@ -104,8 +104,8 @@
       "patches": [
         {
           "path": "plugins/pixelview-whep/patches/gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch",
-          "sha256": "d222b1ec0107bad76a64b20ed12df775fd2d6b7e4e78e65ac91f11449fc16291",
-          "size": 5352
+          "sha256": "75642779505ce4617e75ee4c47c6cfcd47b5cc53552b462eee01323769fdfd7c",
+          "size": 6400
         }
       ],
       "recipes": [

@@ -58,8 +58,9 @@ release tarball, SHA256
 LGPL-2.1-or-later files are `sys/applemedia/vtdec.c` and
 `sys/applemedia/helpers.m`; original copyright/license headers remain. The
 changes size the HEVC output reorder queue from the stream's SPS instead of a
-worst case, and add v210 (`kCVPixelFormatType_422YpCbCr10`) as a decoder output
-format chosen for 4:2:2 streams. `licenses/applemedia/COPYING` is the tarball's
+worst case, add v210 (`kCVPixelFormatType_422YpCbCr10`) as a decoder output
+format chosen for 4:2:2 streams, and choose between NV12 and P010 by the
+stream's bit depth. `licenses/applemedia/COPYING` is the tarball's
 LGPL text. `build-applemedia.py` records source, patch, tool and binary
 provenance, and the packager includes the patch, provenance and LGPL text in
 `licenses/applemedia`; the release source inventory carries the exact tarball.

@@ -122,3 +122,34 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
  if(!hdr && !rgb) for(int i=0;i<3;i++) { f->color_range_min[i]=0.f; f->color_range_max[i]=1.f; }
  return true;
 }
+/* Y'CbCr code c at eight bits is exactly c * 4 at ten (16 -> 64, 235 -> 940,
+ * 128 -> 512): P010 stores it as c << 8. */
+bool pixelview_video_widen_nv12(struct obs_source_frame2 *f, uint8_t **storage, size_t *capacity)
+{
+ if (f->format!=VIDEO_FORMAT_NV12) return true;
+ if (!f->width || !f->height || !f->data[0] || !f->data[1] || f->linesize[0]<f->width ||
+     f->linesize[1]<((f->width+1)/2)*2) return false;
+ const size_t row=(((size_t)f->width+1)/2)*4; /* bytes: an even number of 16-bit samples */
+ const size_t chroma_rows=((size_t)f->height+1)/2, need=row*((size_t)f->height+chroma_rows);
+ if (*capacity<need) {
+  uint8_t *grown=g_try_realloc(*storage,need);
+  if (!grown) return false;
+  *storage=grown; *capacity=need;
+ }
+ uint16_t *out=(uint16_t *)*storage;
+ for (int plane=0;plane<2;plane++) {
+  const size_t rows=plane?chroma_rows:f->height, samples=plane?((size_t)f->width+1)/2*2:f->width;
+  for (size_t y=0;y<rows;y++) {
+   const uint8_t *in=f->data[plane]+y*f->linesize[plane];
+   uint16_t *line=out+(plane?(size_t)f->height:0)*(row/2)+y*(row/2);
+   for (size_t x=0;x<samples;x++) line[x]=(uint16_t)(in[x]<<8);
+   for (size_t x=samples;x<row/2;x++) line[x]=line[samples-1];
+  }
+ }
+ f->data[0]=*storage; f->data[1]=*storage+row*f->height;
+ f->linesize[0]=f->linesize[1]=(uint32_t)row;
+ f->format=VIDEO_FORMAT_P010;
+ /* The same matrix at ten-bit scale; the caller's range window is kept. */
+ float min[3],max[3];
+ return video_format_get_parameters_for_format(VIDEO_CS_709,f->range,f->format,f->color_matrix,min,max);
+}

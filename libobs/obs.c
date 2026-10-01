@@ -64,8 +64,15 @@ static inline void calc_gpu_conversion_sizes(struct obs_core_video_mix *video)
 		break;
 	case VIDEO_FORMAT_NV12:
 		video->conversion_needed = true;
-		video->conversion_techs[0] = "NV12_Y";
-		video->conversion_techs[1] = "NV12_UV";
+		/* Pixelview: an SDR NV12 output is converted from a linear float canvas
+		 * (see obs_init_textures). */
+		if (info->colorspace == VIDEO_CS_2100_PQ || info->colorspace == VIDEO_CS_2100_HLG) {
+			video->conversion_techs[0] = "NV12_Y";
+			video->conversion_techs[1] = "NV12_UV";
+		} else {
+			video->conversion_techs[0] = "NV12_SRGB_Y";
+			video->conversion_techs[1] = "NV12_SRGB_UV";
+		}
 		video->conversion_width_i = 1.f / (float)info->width;
 		break;
 	case VIDEO_FORMAT_I444:
@@ -355,6 +362,13 @@ static bool obs_init_textures(struct obs_core_video_mix *video)
 
 	bool success = true;
 
+	/* Pixelview: an SDR NV12 output (HEVC Main, H.264) also renders into a linear
+	 * float canvas. The eight-bit profile is then rounded once from the same
+	 * ten-bit picture the other profiles encode, without the eight-bit RGB
+	 * canvas clipping sub-black, super-white and out-of-gamut Y'CbCr, and the
+	 * DeckLink output keeps ten bits whatever the stream profile is. */
+	const bool float_nv12 = info->format == VIDEO_FORMAT_NV12 && info->colorspace != VIDEO_CS_2100_PQ &&
+				info->colorspace != VIDEO_CS_2100_HLG;
 	enum gs_color_format format = GS_BGRA;
 	switch (info->format) {
 	case VIDEO_FORMAT_I010:
@@ -367,6 +381,8 @@ static bool obs_init_textures(struct obs_core_video_mix *video)
 		format = GS_RGBA16F;
 		break;
 	default:
+		if (float_nv12)
+			format = GS_RGBA16F;
 		break;
 	}
 
@@ -416,7 +432,7 @@ static bool obs_init_textures(struct obs_core_video_mix *video)
 			space = GS_CS_SRGB_16F;
 			break;
 		default:
-			space = GS_CS_SRGB;
+			space = float_nv12 ? GS_CS_SRGB_16F : GS_CS_SRGB;
 			break;
 		}
 		break;

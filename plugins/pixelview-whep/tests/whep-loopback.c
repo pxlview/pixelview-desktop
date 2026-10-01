@@ -13,7 +13,7 @@ static GMutex audit_lock;
 static unsigned videos, codes;
 static bool seen[1024];
 static enum video_trc expected_trc=VIDEO_TRC_DEFAULT;
-static bool expect_422;
+static bool expect_422, expect_8; /* eight-bit streams reach OBS as P010 holding exactly code * 4 */
 static unsigned chroma_rows; /* adjacent row pairs whose chroma differs: impossible after 4:2:0 */
 static double audio_energy;
 static void audit_video(obs_source_t *s,const struct obs_source_frame2 *f)
@@ -40,7 +40,17 @@ static void audit_video(obs_source_t *s,const struct obs_source_frame2 *f)
    continue;
   }
   const uint16_t *p=(const uint16_t *)(f->data[0]+y*f->linesize[0]);
-  for(unsigned x=0;x<f->width;x++) {unsigned c=p[x]>>6;if(!seen[c]){seen[c]=true;codes++;}}
+  for(unsigned x=0;x<f->width;x++) {
+   unsigned c=p[x]>>6;if(!seen[c]){seen[c]=true;codes++;}
+   /* VideoToolbox's own widening (code * 1023 / 255) would leave odd codes. */
+   if(expect_8) g_assert_cmpuint(p[x]&0xff,==,0);
+  }
+  if(expect_8 && y<(f->height+1)/2) {
+   const uint16_t *c=(const uint16_t *)(f->data[1]+y*f->linesize[1]);
+   /* Neutral fixture chroma (128 +-1 after the lossy encode) stays a multiple of
+    * four around 512; VideoToolbox's own widening would make 128 into 514. */
+   for(unsigned x=0;x<f->width;x++) g_assert_true(!(c[x]&0xff) && c[x]>=(126u<<8) && c[x]<=(130u<<8));
+  }
  }
  g_mutex_unlock(&audit_lock);
  obs_source_output_video2(s,f);
@@ -120,7 +130,7 @@ int main(int argc,char **argv)
  g_assert_null(endpoint_token("not a url"));
  const char *color=argc>3?argv[3]:NULL,*refusal=argc>4?argv[4]:NULL;
  expected_trc=color&&!strcmp(color,"pq")?VIDEO_TRC_PQ:color&&!strcmp(color,"hlg")?VIDEO_TRC_HLG:VIDEO_TRC_DEFAULT;setbuf(stdout,NULL);
- expect_422=!strcmp(argv[2],"422"); /* HEVC Main 4:2:2 10 must reach OBS as v210 with per-row chroma */gst_init(NULL,NULL);g_mutex_init(&audit_lock);
+ expect_422=!strcmp(argv[2],"422"); expect_8=!strcmp(argv[2],"8"); /* HEVC Main 4:2:2 10 must reach OBS as v210 with per-row chroma */gst_init(NULL,NULL);g_mutex_init(&audit_lock);
  g_assert_true(obs_startup("en-US",NULL,NULL));struct obs_audio_info ai={.samples_per_sec=48000,.speakers=SPEAKERS_STEREO};g_assert_true(obs_reset_audio(&ai));g_assert_true(obs_module_load());
  obs_source_t *source=obs_source_create_private("pixelview_whep_source","isolated-loopback",NULL);g_assert_nonnull(source);
  proc_handler_t *ph=obs_source_get_proc_handler(source);calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint",argv[1]);calldata_set_int(&cd,"latency",50);if(color)calldata_set_string(&cd,"color",color);g_assert_true(proc_handler_call(ph,"connect",&cd));

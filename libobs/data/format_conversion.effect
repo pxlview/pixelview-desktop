@@ -340,50 +340,80 @@ float2 PS_UV_Wide(FragTexWide frag_in) : TARGET
 	return float2(u, v);
 }
 
-float2 PS_P010_PQ_UV_709_2020_WideWide(FragTexWideWide frag_in) : TARGET
+
+
+/* Pixelview: 4:2:0 chroma from a canvas that carries 4:2:2 video. Horizontally
+ * it is co-sited with the even luma sample and taken from that pixel alone;
+ * vertically SDR sits midway between the two rows (their mean) and BT.2100 is
+ * top-left sited ([1 2 1]/4 around the even row). The mean is taken on the
+ * encoded Y'CbCr values. Upstream filtered [1 2 1]/4 horizontally as well and
+ * averaged in linear light, which softened chroma that was already half
+ * resolution (up to ~130 of 1023 codes on colour-bar edges). */
+float2 pv_chroma_srgb(int x, int y)
 {
-	float3 rgb_topleft = image.Sample(def_sampler, frag_in.uuvv.xz).rgb;
-	float3 rgb_topright = image.Sample(def_sampler, frag_in.uuvv.yz).rgb;
-	float3 rgb_bottomleft = image.Sample(def_sampler, frag_in.uuvv.xw).rgb;
-	float3 rgb_bottomright = image.Sample(def_sampler, frag_in.uuvv.yw).rgb;
-	float3 rgb = (rgb_topleft + rgb_topright + rgb_bottomleft + rgb_bottomright) * (0.25 * sdr_white_nits_over_maximum);
-	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
-	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
-	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
-	float2 uv = float2(u, v);
+	float3 rgb = srgb_linear_to_nonlinear(image.Load(int3(x, y, 0)).rgb);
+	return float2(dot(color_vec1.xyz, rgb) + color_vec1.w, dot(color_vec2.xyz, rgb) + color_vec2.w);
+}
+
+float2 pv_chroma_pq(int x, int y)
+{
+	float3 rgb = image.Load(int3(x, y, 0)).rgb * sdr_white_nits_over_maximum;
+	rgb = linear_to_st2084(rec709_to_rec2020(rgb));
+	return float2(dot(color_vec1.xyz, rgb) + color_vec1.w, dot(color_vec2.xyz, rgb) + color_vec2.w);
+}
+
+float2 pv_chroma_hlg(int x, int y)
+{
+	float3 rgb = image.Load(int3(x, y, 0)).rgb * sdr_white_nits_over_maximum;
+	rgb = linear_to_hlg(rec709_to_rec2020(rgb), hdr_lw);
+	return float2(dot(color_vec1.xyz, rgb) + color_vec1.w, dot(color_vec2.xyz, rgb) + color_vec2.w);
+}
+
+float2 PS_P010_PQ_UV_709_2020_Cosited(FragPos frag_in) : TARGET
+{
+	int x = int(frag_in.pos.x) * 2;
+	int y = int(frag_in.pos.y) * 2;
+	int above = (y > 0) ? (y - 1) : y;
+	float2 uv = pv_chroma_pq(x, above) * 0.25 + pv_chroma_pq(x, y) * 0.5 + pv_chroma_pq(x, y + 1) * 0.25;
 	uv = floor(saturate(uv) * 1023. + 0.5) * (64. / 65535.);
 	return uv;
 }
 
-float2 PS_P010_HLG_UV_709_2020_WideWide(FragTexWideWide frag_in) : TARGET
+float2 PS_P010_HLG_UV_709_2020_Cosited(FragPos frag_in) : TARGET
 {
-	float3 rgb_topleft = image.Sample(def_sampler, frag_in.uuvv.xz).rgb;
-	float3 rgb_topright = image.Sample(def_sampler, frag_in.uuvv.yz).rgb;
-	float3 rgb_bottomleft = image.Sample(def_sampler, frag_in.uuvv.xw).rgb;
-	float3 rgb_bottomright = image.Sample(def_sampler, frag_in.uuvv.yw).rgb;
-	float3 rgb = (rgb_topleft + rgb_topright + rgb_bottomleft + rgb_bottomright) * (0.25 * sdr_white_nits_over_maximum);
-	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_hlg(rgb, hdr_lw);
-	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
-	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
-	float2 uv = float2(u, v);
+	int x = int(frag_in.pos.x) * 2;
+	int y = int(frag_in.pos.y) * 2;
+	int above = (y > 0) ? (y - 1) : y;
+	float2 uv = pv_chroma_hlg(x, above) * 0.25 + pv_chroma_hlg(x, y) * 0.5 + pv_chroma_hlg(x, y + 1) * 0.25;
 	uv = floor(saturate(uv) * 1023. + 0.5) * (64. / 65535.);
 	return uv;
 }
 
-float2 PS_P010_SRGB_UV_Wide(FragTexWide frag_in) : TARGET
+float2 PS_P010_SRGB_UV_Cosited(FragPos frag_in) : TARGET
 {
-	float3 rgb_left = image.Sample(def_sampler, frag_in.uuv.xz).rgb;
-	float3 rgb_right = image.Sample(def_sampler, frag_in.uuv.yz).rgb;
-	float3 rgb = (rgb_left + rgb_right) * 0.5;
-	rgb = srgb_linear_to_nonlinear(rgb);
-	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
-	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
-	float2 uv = float2(u, v);
+	int x = int(frag_in.pos.x) * 2;
+	int y = int(frag_in.pos.y) * 2;
+	float2 uv = (pv_chroma_srgb(x, y) + pv_chroma_srgb(x, y + 1)) * 0.5;
 	uv = floor(saturate(uv) * 1023. + 0.5) * (64. / 65535.);
 	return uv;
 }
+
+/* Pixelview: NV12 from the linear float canvas an SDR NV12 output now uses (see
+ * obs_init_textures), so an eight-bit profile is rounded once from the same
+ * ten-bit picture instead of passing through an eight-bit RGB canvas. */
+float PS_NV12_SRGB_Y(FragPos frag_in) : TARGET
+{
+	float3 rgb = srgb_linear_to_nonlinear(image.Load(int3(frag_in.pos.xy, 0)).rgb);
+	return dot(color_vec0.xyz, rgb) + color_vec0.w;
+}
+
+float2 PS_NV12_SRGB_UV_Cosited(FragPos frag_in) : TARGET
+{
+	int x = int(frag_in.pos.x) * 2;
+	int y = int(frag_in.pos.y) * 2;
+	return (pv_chroma_srgb(x, y) + pv_chroma_srgb(x, y + 1)) * 0.5;
+}
+
 
 /* Pixelview: 4:2:2 chroma is co-sited with the even luma sample (as on SDI),
  * so it is taken from that pixel alone. Upstream averaged [1 2 1]/4 in linear
@@ -1172,6 +1202,24 @@ technique NV12_Y
 	}
 }
 
+technique NV12_SRGB_Y
+{
+	pass
+	{
+		vertex_shader = VSPos(id);
+		pixel_shader  = PS_NV12_SRGB_Y(frag_in);
+	}
+}
+
+technique NV12_SRGB_UV
+{
+	pass
+	{
+		vertex_shader = VSPos(id);
+		pixel_shader  = PS_NV12_SRGB_UV_Cosited(frag_in);
+	}
+}
+
 technique NV12_UV
 {
 	pass
@@ -1293,8 +1341,8 @@ technique P010_PQ_UV
 {
 	pass
 	{
-		vertex_shader = VSTexPos_TopLeft(id);
-		pixel_shader  = PS_P010_PQ_UV_709_2020_WideWide(frag_in);
+		vertex_shader = VSPos(id);
+		pixel_shader  = PS_P010_PQ_UV_709_2020_Cosited(frag_in);
 	}
 }
 
@@ -1302,8 +1350,8 @@ technique P010_HLG_UV
 {
 	pass
 	{
-		vertex_shader = VSTexPos_TopLeft(id);
-		pixel_shader  = PS_P010_HLG_UV_709_2020_WideWide(frag_in);
+		vertex_shader = VSPos(id);
+		pixel_shader  = PS_P010_HLG_UV_709_2020_Cosited(frag_in);
 	}
 }
 
@@ -1311,8 +1359,8 @@ technique P010_SRGB_UV
 {
 	pass
 	{
-		vertex_shader = VSTexPos_Left(id);
-		pixel_shader  = PS_P010_SRGB_UV_Wide(frag_in);
+		vertex_shader = VSPos(id);
+		pixel_shader  = PS_P010_SRGB_UV_Cosited(frag_in);
 	}
 }
 

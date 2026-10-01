@@ -83,6 +83,33 @@ static void v210_cases(void)
   gst_video_frame_unmap(&m); gst_buffer_unref(b); gst_caps_unref(caps);
  }
 }
+/* Eight-bit streams: NV12 from the decoder becomes P010 holding exactly code * 4. */
+static void widen_cases(void)
+{
+ for(unsigned odd=0;odd<2;odd++) {
+  const unsigned width=odd?65:64,height=odd?33:32;
+  GstVideoInfo i; gst_video_info_set_format(&i,GST_VIDEO_FORMAT_NV12,width,height);
+  gst_video_colorimetry_from_string(&i.colorimetry,"bt709");
+  GstBuffer *b=gst_buffer_new_allocate(NULL,i.size,NULL); GstVideoFrame m={0};
+  assert(gst_video_frame_map(&m,&i,b,GST_MAP_WRITE));
+  for(unsigned y=0;y<height;y++) for(unsigned x=0;x<width;x++) ((uint8_t*)GST_VIDEO_FRAME_PLANE_DATA(&m,0))[y*GST_VIDEO_FRAME_PLANE_STRIDE(&m,0)+x]=(uint8_t)(16+(x*3+y)%220);
+  for(unsigned y=0;y<(height+1)/2;y++) for(unsigned x=0;x<(width+1)/2*2;x++) ((uint8_t*)GST_VIDEO_FRAME_PLANE_DATA(&m,1))[y*GST_VIDEO_FRAME_PLANE_STRIDE(&m,1)+x]=(uint8_t)(x&1?240-(x+y)%200:16+(x+y)%200);
+  struct obs_source_frame2 f; assert(pixelview_video_frame(&m,PIXELVIEW_COLOR_SDR,&f) && f.format==VIDEO_FORMAT_NV12);
+  uint8_t *storage=NULL; size_t capacity=0;
+  assert(pixelview_video_widen_nv12(&f,&storage,&capacity) && storage && f.format==VIDEO_FORMAT_P010);
+  assert(f.data[0]==storage && f.linesize[0]>=width*2 && f.linesize[1]>=(width+1)/2*4);
+  for(unsigned y=0;y<height;y++) for(unsigned x=0;x<width;x++)
+   assert(((const uint16_t*)(f.data[0]+y*f.linesize[0]))[x]>>6==4u*(16+(x*3+y)%220) && !(((const uint16_t*)(f.data[0]+y*f.linesize[0]))[x]&63));
+  for(unsigned y=0;y<(height+1)/2;y++) for(unsigned x=0;x<(width+1)/2*2;x++)
+   assert(((const uint16_t*)(f.data[1]+y*f.linesize[1]))[x]>>6==4u*(x&1?240-(x+y)%200:16+(x+y)%200));
+  float matrix[16],min[3],max[3];
+  assert(video_format_get_parameters_for_format(VIDEO_CS_709,VIDEO_RANGE_PARTIAL,VIDEO_FORMAT_P010,matrix,min,max));
+  assert(!memcmp(matrix,f.color_matrix,sizeof(matrix)) && f.color_range_min[0]==0.f && f.color_range_max[0]==1.f);
+  /* A second, smaller frame reuses the storage; other formats pass through untouched. */
+  uint8_t *kept=storage; assert(pixelview_video_widen_nv12(&f,&storage,&capacity) && storage==kept);
+  g_free(storage); gst_video_frame_unmap(&m); gst_buffer_unref(b);
+ }
+}
 int main(void)
 {
  gst_init(NULL,NULL);
@@ -131,7 +158,9 @@ int main(void)
  assert(!pixelview_video_info(caps,PIXELVIEW_COLOR_SDR,&parsed));gst_caps_unref(caps);
  hdr_cases();
  v210_cases();
+ widen_cases();
  puts("PASS P010/NV12/BGRA/I210, odd padded planes, SDR709 limited YUV/full RGB; rejects PQ/gamut/unknown range/invalid strides/bounds");
  puts("PASS v210 (HEVC 4:2:2): SDR/PQ/HLG single packed plane, odd widths, short stride refused");
+ puts("PASS eight-bit NV12 widened to P010 as exactly code * 4, odd sizes, storage reuse");
  puts("PASS HDR PQ/HLG: BT.2100 caps and VP9-style unsignalled transfer labelled; SDR/full/other-transfer/non-P010 refused with typed reasons");
 }

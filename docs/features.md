@@ -193,12 +193,19 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
   range only). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
-- 10-bit 4:2:2 is kept exact into the Main 4:2:2 10 encoder: the canvas's P216 output takes chroma
-  co-sited from the even pixel (a Pixelview change to `libobs/data/format_conversion.effect`;
-  upstream's `[1 2 1]/4` average softened chroma edges by up to ~130 of 1023 codes), and the
-  VideoToolbox encoder rounds the 16-bit canvas words to the nearest 10-bit code instead of letting
-  VideoToolbox truncate them (which cost one code on some samples). This holds for a 1080-line
-  source filling the canvas 1:1; any scaling resamples.
+- Every profile encodes the same 10-bit 4:2:2 capture; only the stream format differs. The canvas
+  is a linear float texture for all SDR outputs (a Pixelview change in `obs_init_textures`: upstream
+  rendered NV12 through an 8-bit RGB canvas, which clipped sub-black, super-white and out-of-gamut
+  Y'CbCr and rounded twice), and chroma is taken co-sited from the even pixel in
+  `libobs/data/format_conversion.effect` (upstream's `[1 2 1]/4` average in linear light softened
+  chroma edges by up to ~130 of 1023 codes):
+  - Main 4:2:2 10 (P216): luma and chroma exact; the VideoToolbox encoder plugin rounds the 16-bit
+    canvas words to the nearest 10-bit code instead of letting VideoToolbox truncate them (which
+    cost one code on some samples).
+  - Main10 (P010): luma exact; chroma is the mean of each row pair in SDR, and `[1 2 1]/4` around
+    the even row for the top-left sited BT.2100 modes, with no horizontal filtering.
+  - Main and H.264 (NV12): the 10-bit value rounded once to 8 bits, chroma as for Main10.
+  This holds for a 1080-line source filling the canvas 1:1; any scaling resamples.
 
 ### Audio
 
@@ -295,8 +302,8 @@ An earlier backend handoff proposing receiver registration over the control sock
   bundle. No host GStreamer is used.
 - On each connection the plugin probes the VideoToolbox decoders and offers only verified profiles:
   H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10 and Main 4:2:2 10
-  (see below), VP9 profiles 0 and 2, plus stereo Opus. The raw policy is P010 (v210 for a 4:2:2
-  stream) at up to 1920x1080 (30 or 60 fps depending on the negotiated HEVC level) in the
+  (see below), VP9 profiles 0 and 2, plus stereo Opus. Each stream is decoded in its
+  own sampling and depth (v210 for 4:2:2, P010 for 10-bit 4:2:0, NV12 for 8-bit) at up to 1920x1080 (30 or 60 fps depending on the negotiated HEVC level) in the
   operator's colour mode, passed as `connect(..., color)`:
   - SDR (default): limited-range BT.709 only. BT.2020 or PQ/HLG input stops with
     `hdr-source-needs-hdr-receive`.
@@ -310,7 +317,7 @@ An earlier backend handoff proposing receiver registration over the control sock
   The typed reason is reported in `get_status.failure` and the Receiving panel names the fix. The
   engine's WebRTC colour-space RTP header extension (what Chrome uses) is not read by the GStreamer
   receiver; the Desktop relies on the bitstream plus the operator setting.
-- Video: decodebin3 -> P010/v210 policy -> clocked appsink -> `obs_source_output_video2`. Audio: bounded
+- Video: decodebin3 -> P010/v210/NV12 policy -> clocked appsink -> `obs_source_output_video2`. Audio: bounded
   queues -> F32 stereo 48 kHz -> clocked appsink -> `obs_source_output_audio`. Both share the
   pipeline clock, and the source runs libobs async-unbuffered so frames are not rebuffered twice.
   OBS timestamps are the sink render time (base + running time + the sink's configured pipeline
@@ -326,7 +333,8 @@ An earlier backend handoff proposing receiver registration over the control sock
   25 fps) regardless of B-frames and cannot declare it without a caps framerate, so HEVC video
   used to arrive ~600 ms behind audio and ~600 ms later than necessary. H.264 (baseline, no
   reordering) and VP9 were not affected. The same patch adds v210 as a decoder output, chosen only
-  for 4:2:2 streams (upstream has no 4:2:2 raw format and would subsample them to P010).
+  for 4:2:2 streams (upstream has no 4:2:2 raw format and would subsample them to P010), and picks
+  NV12 or P010 by the stream's bit depth.
 - The log records the configured sink latency with each stage's cumulative latency once per
   change (`[pixelview-whep] sink latency`), and the worst video/audio lateness against render time
   plus withheld stale audio for any 5 s window over 200 ms late or with withheld audio
@@ -337,7 +345,10 @@ An earlier backend handoff proposing receiver registration over the control sock
   stale audio withheld, no receive-driven audio buffering, sync judged correct by ear. Before the
   change the same setup measured video ~600 ms late and 896-960 ms of added audio buffering.
   End-to-end glass-to-glass latency was not measured, and DeckLink output was not re-tested.
-  Eight-bit sources are upconverted to P010 without gaining precision.
+- An 8-bit stream (HEVC Main, H.264, VP9 profile 0) is decoded as NV12 and widened by the plugin
+  to P010 holding exactly code x 4 (16 -> 64, 235 -> 940, 128 -> 512). Decoding it straight to
+  P010 let VideoToolbox apply a full-range gain (code x 1023 / 255: white at 943, neutral chroma
+  at 514, measured), and handing NV12 to libobs would pass it through an 8-bit RGB texture.
 - The patched signaller rejects POST redirects and pins the session `Location` to the accepted
   response origin. The endpoint's `?token=` is also set as the signaller `auth-token`, so session
   PATCH/DELETE carry `Authorization: Bearer <token>` (the engine's `Location` has no token; engine
@@ -393,7 +404,7 @@ connection). It is a jitter-buffer target, not measured end-to-end latency.
 
 While receiving, an in-memory canvas transaction switches the main texture to P010 / limited with
 Rec.709, or Rec.2100 PQ/HLG when **HDR** is ticked, so ten-bit 4:2:0 precision survives to the GPU
-texture (877 distinct levels measured versus 256 on NV12, SDR). The sender's format, colorspace,
+texture (877 distinct levels measured; an SDR NV12 canvas now renders into a float texture as well). The sender's format, colorspace,
 range, graphics module and SDR-white/HDR-peak levels are restored when leaving receive mode; the
 switch is refused while any output is active, and a failed rollback blocks further mode changes
 until restart. Preview and fullscreen remain eight-bit boundaries (OBS tone-maps HDR for them).
@@ -431,8 +442,8 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   from the even pixel and the inverse of the transfer and matrix the v210/P010 source conversions
   use. A 10-bit program that fills a same-size 10-bit canvas 1:1 therefore reaches the card with
   the code values it was decoded or captured with, including sub-black and super-white in SDR; an
-  output mode of another size is scaled in linear light first, and an 8-bit canvas (HEVC Main or
-  H.264 in Sending mode) limits the output to 8-bit precision. Preroll and underrun frames are
+  output mode of another size is scaled in linear light first. The sender's profile does not limit
+  the output: every SDR canvas is a linear float texture. Preroll and underrun frames are
   v210 black. Only the keyer (UI hidden) still uses 8-bit BGRA.
 - With an HDR canvas and a device reporting HDR metadata support (and Force SDR off), the v210
   frames carry Rec.2020 HDR metadata: a PQ canvas leaves as PQ (EOTF 2), an HLG canvas as HLG
@@ -617,6 +628,17 @@ gate) fail in the current environment regardless of changes.
   10-bit, the output UI's render path in the running app, v210 with HDR metadata on a card, a
   monitor's picture), a Pixelview Desktop sender to a Pixelview Desktop receiver, and whether
   **Fit** places every capture mode exactly 1:1.
+- All profiles, offline (2026-10-02, same Mac, libobs from the signed build): `run_video_fidelity_probe.py`
+  with a v210 capture source in SDR gave, at the encoder input, Main 4:2:2 10 (P216) exact; Main10
+  (P010) luma exact and chroma exact wherever both rows of a pair agree (within one code of their
+  mean where they do not), before the change 131 codes off on bar edges; Main (NV12) within one
+  8-bit step of the 10-bit value on every pattern including codes 4-1019, before the change up to 6
+  steps off on saturated gradients and 54 on sub-black/super-white. The DeckLink v210 render was
+  exact on all three canvases. A P010 (4:2:0 receive) source reached the DeckLink render exact in
+  luma and in chroma wherever the rows of a pair agree. PQ and HLG as before (ordinary colours
+  exact). Receive: x265 Main decoded by the patched `vtdec_hw` came out NV12, Main10 P010, Main
+  4:2:2 10 v210; all 18 loopback cases pass with the 8-bit ones (H.264, HEVC Main, VP9 0) audited
+  as P010 with every sample a multiple of four. Not verified: as above (no SDI hardware).
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
@@ -686,9 +708,9 @@ gate) fail in the current environment regardless of changes.
   beyond Main/Main10/Main 4:2:2 10 and VP9 profiles 1/3 are refused. HDR is not detected
   automatically, and the HDR metadata on the DeckLink output is derived from the nits setting, not
   from the sender's own mastering metadata. Fullscreen and preview are 8-bit.
-- 10-bit 4:2:2 is exact end to end only at 1920x1080 with the picture filling the canvas 1:1 and a
-  1080-line output mode; scaling, an 8-bit sender profile or a 4:2:0 profile (Main10) resample or
-  subsample by design. HDR is not bit-exact for very saturated colours (float canvas precision).
+- Sample-exact conversion needs 1920x1080 with the picture filling the canvas 1:1 and a 1080-line
+  output mode; scaling resamples. Main10 and Main streams are 4:2:0 (and Main 8-bit) by definition,
+  so on the receiver the DeckLink output's 4:2:2 chroma is interpolated vertically from them. HDR is not bit-exact for very saturated colours (float canvas precision).
   The lossy HEVC encode in between is of course not bit-exact either.
 - The sender enforces limited range only for Main 4:2:2 10 (P216); Main/Main10 honour a saved Full
   setting.

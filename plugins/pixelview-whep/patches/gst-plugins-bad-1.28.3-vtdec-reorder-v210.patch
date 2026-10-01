@@ -37,43 +37,66 @@
  
  /* TODO: Add support for more formats to videotexturecache-vulkan/gl.
   * VideoToolbox will output most formats with HW-backed buffers,
-@@ -545,10 +546,21 @@
+@@ -544,11 +545,40 @@
+  * TODO: read src_pix_fmt to get the preferred output format
   * https://wiki.multimedia.cx/index.php/Apple_ProRes#Frame_header
   */
++static gboolean
++format_list_has (const GValue * list, GstVideoFormat format)
++{
++  guint i, size = gst_value_list_get_size (list);
++
++  for (i = 0; i < size; i++) {
++    const GValue *value = gst_value_list_get_value (list, i);
++    if (gst_video_format_from_string (g_value_get_string (value)) == format)
++      return TRUE;
++  }
++  return FALSE;
++}
++
  static GstVideoFormat
 -get_preferred_video_format (GstStructure * s, gboolean prores)
 +get_preferred_video_format (GstStructure * s, gboolean prores,
-+    gboolean chroma_422)
++    gboolean chroma_422, guint bit_depth)
  {
    const GValue *list = gst_structure_get_value (s, "format");
    guint i, size = gst_value_list_get_size (list);
 +
 +  /* A 4:2:2 stream keeps its chroma when downstream accepts v210; the 4:2:0
 +   * formats below would make VideoToolbox subsample it vertically. */
-+  for (i = 0; chroma_422 && i < size; i++) {
-+    const GValue *value = gst_value_list_get_value (list, i);
-+    if (gst_video_format_from_string (g_value_get_string (value)) ==
-+        GST_VIDEO_FORMAT_v210)
-+      return GST_VIDEO_FORMAT_v210;
-+  }
++  if (chroma_422 && format_list_has (list, GST_VIDEO_FORMAT_v210))
++    return GST_VIDEO_FORMAT_v210;
++
++  /* When downstream accepts both, a 4:2:0 stream is delivered at its own bit
++   * depth whatever the list order. VideoToolbox widens eight-bit video to
++   * P010 with a full-range gain (code * 1023 / 255: white 235 becomes 943, not
++   * 940, and neutral chroma 514), and NV12 would truncate a ten-bit stream.
++   * An unknown depth keeps P010 so that no bits are lost. */
++  if (!prores && format_list_has (list, GST_VIDEO_FORMAT_NV12)
++      && format_list_has (list, GST_VIDEO_FORMAT_P010_10LE))
++    return bit_depth == 8 ? GST_VIDEO_FORMAT_NV12 : GST_VIDEO_FORMAT_P010_10LE;
 +
    for (i = 0; i < size; i++) {
      const GValue *value = gst_value_list_get_value (list, i);
      const char *fmt = g_value_get_string (value);
-@@ -674,7 +686,11 @@
+@@ -673,8 +703,15 @@
+     if (gst_structure_has_field_typed (s, "format", GST_TYPE_LIST)) {
        GstStructure *is = gst_caps_get_structure (vtdec->input_state->caps, 0);
        const char *name = gst_structure_get_name (is);
++      guint bit_depth = 0;
++
++      gst_structure_get_uint (is, "bit-depth-luma", &bit_depth);
        format = get_preferred_video_format (s,
 -          g_strcmp0 (name, "video/x-prores") == 0);
 +          g_strcmp0 (name, "video/x-prores") == 0,
 +          g_strcmp0 (gst_structure_get_string (is, "chroma-format"),
 +              "4:2:2") == 0
 +          || g_strcmp0 (gst_structure_get_string (is, "profile"),
-+              "main-422-10") == 0);
++              "main-422-10") == 0, bit_depth);
      }
  
      if (format == GST_VIDEO_FORMAT_UNKNOWN) {
-@@ -2036,10 +2052,73 @@
+@@ -2036,10 +2073,73 @@
    return ret;
  }
  
