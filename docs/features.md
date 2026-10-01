@@ -628,7 +628,7 @@ gate) fail in the current environment regardless of changes.
   10-bit, the output UI's render path in the running app, v210 with HDR metadata on a card, a
   monitor's picture), a Pixelview Desktop sender to a Pixelview Desktop receiver, and whether
   **Fit** places every capture mode exactly 1:1.
-- All profiles, offline (2026-10-02, same Mac, libobs from the signed build): `run_video_fidelity_probe.py`
+- All profiles, offline (2026-10-01, same Mac, libobs from the signed build): `run_video_fidelity_probe.py`
   with a v210 capture source in SDR gave, at the encoder input, Main 4:2:2 10 (P216) exact; Main10
   (P010) luma exact and chroma exact wherever both rows of a pair agree (within one code of their
   mean where they do not), before the change 131 codes off on bar edges; Main (NV12) within one
