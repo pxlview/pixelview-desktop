@@ -19,7 +19,7 @@ class ReceiveUI(unittest.TestCase):
     def test_offline_native_receive_lifecycle(self):
         self._run_native_receive_ui(offline=True)
 
-    def test_native422_preview_telemetry(self):
+    def test_offline_frame_telemetry(self):
         self._run_native_receive_ui(offline=True, layout_only=True)
 
     def test_unavailable_credential_preserved_until_explicit_replacement(self):

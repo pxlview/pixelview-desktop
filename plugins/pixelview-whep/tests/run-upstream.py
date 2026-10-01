@@ -39,8 +39,7 @@ def main():
     includes = ['-I'+str(pack.GST/p) for p in ['include/gstreamer-1.0', 'include/glib-2.0', 'lib/glib-2.0/include']]
     libs = ['-L'+str(stage/'lib'), '-Wl,-rpath,'+str(stage/'lib')]+['-l'+x for x in
             ['gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0']]
-    import native422_build
-    helpers = [str(ROOT/p) for p in ('video-format.c','profile-offer.c','capability-probe.c')] + native422_build.flags(ROOT)
+    helpers = [str(ROOT/p) for p in ('video-format.c','profile-offer.c','capability-probe.c','codec-route.c')]
     binary = contents/'MacOS/pixelview-whep'
     subprocess.run(base+includes+helpers+['-bundle', str(ROOT/'pixelview-whep.c'), '-o', str(binary)]+libs, check=True)
     pack.embed(stage, contents, binary, '-')

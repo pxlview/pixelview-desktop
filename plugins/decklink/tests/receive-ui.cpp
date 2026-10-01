@@ -37,7 +37,7 @@ static int frames = 0;
 static bool sourceReady = false;
 static const char *name(void *)
 {
-	return "offline native output UI";
+	return "offline output UI";
 }
 static void *create_source(obs_data_t *, obs_source_t *s)
 {
@@ -52,10 +52,10 @@ static void *create_output(obs_data_t *, obs_output_t *o)
 		obs_output_get_proc_handler(o), "void receive_status(out bool healthy)",
 		[](void *, calldata_t *cd) { calldata_set_bool(cd, "healthy", healthy); }, nullptr);
 	proc_handler_add(
-		obs_output_get_proc_handler(o), "void bind_receive(ptr source, bool native, out bool bound)",
+		obs_output_get_proc_handler(o), "void bind_receive(ptr source, out bool bound)",
 		[](void *, calldata_t *cd) {
 			++rebinds;
-			calldata_set_bool(cd, "bound", rebind_ok && !calldata_bool(cd, "native"));
+			calldata_set_bool(cd, "bound", rebind_ok);
 		}, nullptr);
 	return o;
 }
@@ -144,8 +144,8 @@ int main(int argc, char **argv)
 	assert(starts == 5 && main_output_running);
 	receive_output_watchdog();
 	assert(stops == 4);
-	// A running rendered output survives a receive stop and reconnect: it is
-	// only rebound (no card drain, no AutoStart re-arm). A native one drains.
+	// A running output survives a receive stop and reconnect: it is only
+	// rebound (no card drain, no AutoStart re-arm). A refused rebind drains.
 	rebind_ok = true;
 	calldata_set_ptr(&cd, "source", nullptr);
 	bind_receive_source(nullptr, &cd);
@@ -153,11 +153,9 @@ int main(int argc, char **argv)
 	calldata_set_ptr(&cd, "source", source);
 	bind_receive_source(nullptr, &cd);
 	assert(stops == 4 && rebinds == 2 && main_output_running && receive_source && !receive_auto_pending);
-	receive_output_native = true;
-	bind_receive_source(nullptr, &cd);
-	assert(stops == 5 && rebinds == 2 && !main_output_running && receive_auto_pending);
-	receive_output_native = false;
 	rebind_ok = false;
+	bind_receive_source(nullptr, &cd);
+	assert(stops == 5 && rebinds == 3 && !main_output_running && receive_auto_pending);
 	receive_output_watchdog();
 	assert(starts == 6 && main_output_running);
 	context.output = fixtureOutput;

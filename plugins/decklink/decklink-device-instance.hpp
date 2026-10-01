@@ -8,7 +8,7 @@
 #include "OBSVideoFrame.h"
 #include <atomic>
 #include <vector>
-#include "decklink-receive.hpp"
+#include <mutex>
 
 class AudioRepacker;
 class DecklinkBase;
@@ -172,7 +172,6 @@ protected:
 	BMDTimeScale frameTimescale = 0;
 	BMDTimeScale totalFramesScheduled;
 	ComPtr<RenderDelegate<DeckLinkDeviceInstance>> renderDelegate;
-	ComPtr<DeckLinkReceive> receive;
 
 	void FinalizeStream();
 	bool StartOutputInternal(DeckLinkDeviceMode *mode);
@@ -205,14 +204,6 @@ public:
 	bool StopCapture(void);
 
 	bool StartOutput(DeckLinkDeviceMode *mode_);
-	bool StartNativeOutput(DeckLinkDeviceMode *mode_, obs_source_t *source);
-	void NativeStats(calldata_t *cd)
-	{
-		if (receive) {
-			receive->Stats(cd);
-		}
-	}
-	bool NativeOutputHealthy() { return !device->Removed() && receive && receive->Healthy(); }
 	bool StopOutput(void);
 
 	HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(IDeckLinkVideoInputFrame *videoFrame,

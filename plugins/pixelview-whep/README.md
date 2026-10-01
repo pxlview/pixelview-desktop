@@ -2,15 +2,6 @@
 
 Source ID: **`pixelview_whep_source`**. Native GStreamer WHEP receive input, not a browser source, pipeline editor, encoder, filter, or general-purpose GStreamer plugin. Based on the proven raw appsink/OBS integration pattern from Florian Zwoch's GPL-2.0-or-later obs-gstreamer; source attribution retained.
 
-## Native422 diagnostic checkpoint
-
-`get_status` additionally returns `native422_diagnostic`: empty until a known
-native422 finite refusal, then bounded canonical reason/uint64 data for the
-current generation. The first snapshot survives error teardown; connect and
-disconnect clear it. Arbitrary Gst errors/debug/URLs are never copied into this
-field or the production terminal warning. The **native** Main422 path is **disabled** in normal builds (`main422-25p.h`): Main 4:2:2 10 is received on the ordinary route as v210 when the capability probe decoded it (otherwise it is neither offered nor admitted, and a parsed `main-422-10` stream is refused with a typed error); the earlier user-authorized strict1080p25 native path returns only when that single switch is TRUE (not certified). The current verification status is in
-[`docs/features.md`](../../docs/features.md).
-
 ## Frontend API
 
 Create the source with empty settings. Obtain `obs_source_get_proc_handler(source)` and use `proc_handler_call` with calldata:
@@ -19,13 +10,13 @@ Create the source with empty settings. Obtain `obs_source_get_proc_handler(sourc
 |---|---|
 | `connect` | `endpoint` string; optional `latency` int (omitted: native upstream default; explicit 0–2000 ms) |
 | `disconnect` | no arguments |
-| `get_status` | outputs `state` string, `frames` int, `audio_frames` int, `latency` int, `jitter_latency` int, `native422_frames` int, `failure` string |
+| `get_status` | outputs `state` string, `frames` int, `audio_frames` int, `latency` int, `jitter_latency` int, `failure` string, `ready` bool |
 
 `failure` is empty or one of two canonical reasons for the current generation: `unsupported-hevc-main-422-10` (the sender is streaming HEVC 4:2:2 10-bit and this Mac's probe did not decode it) or `unsupported-hevc-profile` (another non-Main/Main10 HEVC profile). Both mean the receiver stopped before decoding and the operator must switch the sender to HEVC Main or Main10; Desktop renders that guidance. Connect and disconnect clear it. The profile string from the wire is never copied into telemetry or logs.
 
 States: `idle`, `connecting`, `playing` (decoded video observed), `error`, `ended`. `frames` counts video buffers; `audio_frames` counts decoded PCM sample frames. Counters reset on connect. `latency` reports the explicit requested milliseconds, or **-1 when unset**; `jitter_latency` is **-1 until internal webrtcbin exists**, then the actual property readback. The `webrtcbin-ready` callback only sets the property when connect explicitly supplied an override. Omission leaves the native GStreamer default untouched; zero remains a valid explicit override.
 
-Desktop defaults the receive jitter buffer to **100 ms** and passes it explicitly on every connection. A small **Buffer: 100 ms** link in the Receiving panel opens a 0–2000 ms setting; changes are persisted and apply to the next connection. The dialog recommends keeping 100 ms normally and increasing it if glitches occur. Other callers may still omit `connect.latency` to retain the native upstream default. This is a jitter-buffer target, not measured end-to-end latency. The pipeline, audio, native422 routing, DeckLink preroll, finite-rate/freshness/acquisition limits and all other buffers are unchanged.
+Desktop defaults the receive jitter buffer to **100 ms** and passes it explicitly on every connection. A small **Buffer: 100 ms** link in the Receiving panel opens a 0–2000 ms setting; changes are persisted and apply to the next connection. The dialog recommends keeping 100 ms normally and increasing it if glitches occur. Other callers may still omit `connect.latency` to retain the native upstream default. This is a jitter-buffer target, not measured end-to-end latency. The pipeline, audio, DeckLink preroll and all other buffers are unchanged.
 
 No saved-source migration is needed: Desktop creates private `Pixelview Receive` with null settings in private `Pixelview Receive Canvas`, neither loaded from scene JSON. The selected buffer is ordinary non-secret user configuration and is supplied through connection calldata; the plugin does not consume saved source settings.
 
@@ -35,14 +26,13 @@ Control procs are thread-safe and asynchronous. Source destruction joins the med
 
 ## Media path
 
-- `whepclientsrc`: probed H264, HEVC Main/Main10/Main 4:2:2 10, VP9 profiles0/2 and Opus. The parsed CAPS selector leaves ordinary compressed video on a stock capsfilter, including `main-422-10` when its probe bit is set. In normal builds any other parsed HEVC profile (and `main-422-10` without the probe bit) is refused before its first AU with `GST_STREAM_ERROR_WRONG_TYPE` and the `pixelview-unsupported-profile` details structure; only with native admission explicitly enabled does Main42210 create the native tap/raw-preview queue.
-- Ordinary video: decodebin3 → `{P010_10LE, v210}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec picks v210 only for a 4:2:2 stream; everything else is P010. Eight-bit encoded sources are upconverted, not original ten-bit information. Only optional native422 preview uses latest-sample worker delivery; teardown joins it before a new ordinary generation.
-- Audio: static bounded queue → audioconvert/audioresample → interleaved stereo F32/48 kHz → bounded clocked queue → synchronized appsink → `obs_source_output_audio`. There is no tee or duplicated early-audio queue/sink. A supported pre-queue buffer probe supplies native timestamped PCM before OBS clock waiting; it exists during codec preselection (audio can arrive first), then removes itself on the next audio buffer after ordinary parsed CAPS selection. Selection immediately disables private native copies and clears any preselection native feed. Rendered output consumes the stock OBS mix, not a second source PCM feed.
+- `whepclientsrc`: probed H264, HEVC Main/Main10/Main 4:2:2 10, VP9 profiles0/2 and Opus. The parsed CAPS selector (`codec-route.c`) is a stock capsfilter that pins the codec and HEVC profile for the attempt; it admits `main`, `main-10` and, when its probe bit is set, `main-422-10`. Any other parsed HEVC profile (and `main-422-10` without the probe bit) is refused before its first AU with `GST_STREAM_ERROR_WRONG_TYPE` and the `pixelview-unsupported-profile` details structure.
+- Video: decodebin3 → `{P010_10LE, v210}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec picks v210 only for a 4:2:2 stream; everything else is P010. Eight-bit encoded sources are upconverted, not original ten-bit information.
+- Audio: static bounded queue → audioconvert/audioresample → interleaved stereo F32/48 kHz → bounded clocked queue → synchronized appsink → `obs_source_output_audio`. There is no tee, probe or second PCM path: the DeckLink output consumes the stock OBS mix.
 - Both branches use pipeline running-time PTS plus a common base clock; synchronized sinks preserve A/V timing. This is a CPU raw-frame path, not zero-copy.
 - The source enables libobs async unbuffered mode because the synchronized appsinks already pace delivery on the pipeline clock. This avoids a second OBS-side video rebuffer; hardware smoothness remains to be checked.
 - Media failures write credential-safe diagnostics to the normal OBS log: timeout or EOS, or the GStreamer error source/domain/code. Raw GStreamer messages and debug strings remain suppressed because they can contain credential-bearing URLs.
-- **Native Main422 path: limited709 SDR only.** It is disabled in normal builds, which receive 4:2:2 on the ordinary route instead (single switch in `main422-25p.h`, previously enabled for the user-authorized strict1080p25 hardware test, not certified). When enabled, the production `request-encoded-filter` tap can decode admitted Main42210 to public native x422 and exactly packed v210, exposing a version2 route-bound (native early PCM; legacy rendered route no longer produces PCM) source-bound `native422_feed(ptr request, out int version)` pull API with owned bounded video/source-only audio queues and explicit attach/reset/detach (see `source-feed.h`). No consumer callback runs under decoder/lifecycle locks. The native DeckLink owner implements source-bound v210 and timestamped A/V scheduling; ordinary receive uses the stock rendered output and OBS mixed audio. Physical SDI fidelity/cadence and sustained A/V acceptance remain unverified; see `../../docs/features.md`. Consumers own destination buffers and retain the exact OBS source for each synchronous proc call; reset requires flushing card A/V and fresh route admission.
-- H264/HEVC/VP9 decoding uses Apple's OS-provided VideoToolbox; Opus is bundled libopus. No proprietary codec binary or gst-libav/x264/x265/FDK plugin is shipped by this runtime packager. FFmpeg/x265 in native422 tests are independent test tooling only.
+- H264/HEVC/VP9 decoding uses Apple's OS-provided VideoToolbox; Opus is bundled libopus. No proprietary codec binary or gst-libav/x264/x265/FDK plugin is shipped by this runtime packager. FFmpeg/x264/x265/libvpx in the loopback tests are independent test tooling only.
 
 ## Build and bundle
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // UI-thread-only selection and watchdog. A weak exact source is pinned by the
-// native output for an attempt. No names, scenes or saved settings identify it.
+// DeckLink output for an attempt. No names, scenes or saved settings identify it.
 #include <util/platform.h>
 static obs_weak_source_t *receive_source = nullptr;
 static bool receive_mode = false;
@@ -14,21 +14,17 @@ static const unsigned RECEIVE_RESUME_LIMIT = 3;
 static bool receive_output_seen_running = false;
 static uint64_t receive_output_started_ns = 0;
 static unsigned receive_resume_failures = 0;
-// Set by output_start: a native output owns the source's private media, a
-// rendered one only plays the program canvas.
-static bool receive_output_native = false;
-// A running rendered output keeps playing across receive stops and reconnects
-// and only changes its health source. Stopping the card while frames are still
+// The output plays the program canvas, so a running one keeps playing across
+// receive stops and reconnects and only changes its health source. Stopping the card while frames are still
 // outstanding after a media stall can deadlock inside the DeckLink SDK.
 static bool rebind_running_output(obs_source_t *source)
 {
-	if (!main_output_running || receive_output_native) {
+	if (!main_output_running) {
 		return false;
 	}
 	calldata_t cd;
 	calldata_init(&cd);
 	calldata_set_ptr(&cd, "source", source);
-	calldata_set_bool(&cd, "native", false);
 	const bool bound = proc_handler_call(obs_output_get_proc_handler(context.output), "bind_receive", &cd) &&
 			   calldata_bool(&cd, "bound");
 	calldata_free(&cd);

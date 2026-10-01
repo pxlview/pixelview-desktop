@@ -102,6 +102,30 @@ static void cancelled_media_is_not_delivered(void)
  g_rec_mutex_clear(&r.delivery); g_mutex_clear(&r.lock); g_cond_clear(&r.wake);
  puts("PASS cancellation gates actual video and audio delivery");
 }
+/* "ready" means fresh ordinary video on the current, accepted generation. */
+static void readiness(void)
+{
+ struct receiver r = {.generation=1, .active_generation=1, .accept_samples=true, .frames=42, .state="playing"};
+ g_mutex_init(&r.lock); r.last_video = os_gettime_ns();
+ calldata_t cd; calldata_init(&cd);
+ status_proc(&r, &cd); assert(calldata_bool(&cd, "ready"));
+ const char *states[] = {"error", "ended", "idle", "connecting"};
+ for (unsigned i=0; i<4; i++) { r.state = states[i]; status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready")); }
+ r.state = "playing"; r.last_video = os_gettime_ns() - 500000001;
+ status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready"));
+ r.last_video = os_gettime_ns(); r.generation++;
+ status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready"));
+ r.active_generation = r.generation; r.frames = 0;
+ status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready"));
+ r.frames = 1; r.accept_samples = false;
+ status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready"));
+ r.accept_samples = true; r.changed = true;
+ status_proc(&r, &cd); assert(!calldata_bool(&cd, "ready"));
+ r.changed = false;
+ status_proc(&r, &cd); assert(calldata_bool(&cd, "ready"));
+ calldata_free(&cd); g_mutex_clear(&r.lock);
+ puts("PASS readiness requires fresh video on the current accepted generation");
+}
 int main(void)
 {
  gst_init(NULL, NULL);
@@ -109,6 +133,7 @@ int main(void)
  cancellation_during_build(false);
  cancellation_during_build(true);
  cancelled_media_is_not_delivered();
+ readiness();
  assert(obs_startup("en-US", NULL, NULL));
  struct obs_audio_info ai = {.samples_per_sec=48000, .speakers=SPEAKERS_STEREO};
  assert(obs_reset_audio(&ai));

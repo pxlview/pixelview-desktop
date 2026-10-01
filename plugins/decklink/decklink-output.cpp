@@ -26,12 +26,11 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 	decklinkOutput->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklinkOutput->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
 	proc_handler_add(
-		obs_output_get_proc_handler(output), "void bind_receive(ptr source, bool native, out bool bound)",
+		obs_output_get_proc_handler(output), "void bind_receive(ptr source, out bool bound)",
 		[](void *p, calldata_t *cd) {
 			auto *o = static_cast<DeckLinkOutput *>(p);
 			calldata_set_bool(cd, "bound",
-					  o->BindReceive(static_cast<obs_source_t *>(calldata_ptr(cd, "source")),
-							 calldata_bool(cd, "native")));
+					  o->BindReceive(static_cast<obs_source_t *>(calldata_ptr(cd, "source"))));
 		},
 		decklinkOutput);
 	// Pixelview: the receive canvas follows the selected output mode's exact rate.
@@ -50,14 +49,12 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 		},
 		decklinkOutput);
 	proc_handler_add(
-		obs_output_get_proc_handler(output),
-		"void receive_status(out bool healthy, out string reason, out int completed, out int repeats, out int dropped, out int late, out int audio_empty_polls, out int partial_writes)",
+		obs_output_get_proc_handler(output), "void receive_status(out bool healthy, out string reason)",
 		[](void *p, calldata_t *cd) {
 			auto *o = static_cast<DeckLinkOutput *>(p);
 			const char *reason = nullptr;
 			calldata_set_bool(cd, "healthy", o->ReceiveHealthy(&reason));
 			calldata_set_string(cd, "reason", reason ? reason : "");
-			o->ReceiveStats(cd);
 		},
 		decklinkOutput);
 
@@ -103,34 +100,6 @@ static bool decklink_output_start(void *data)
 		return false;
 	}
 	struct obs_audio_info aoi;
-	if (decklink->IsNativeReceive()) {
-		ComPtr<DeckLinkDevice> device;
-		if (decklink->deviceHash.empty()) {
-			return false;
-		}
-		device.Set(deviceEnum->FindByHash(decklink->deviceHash.c_str()));
-		if (!device) {
-			return false;
-		}
-		DeckLinkDeviceMode *mode = device->FindOutputMode(decklink->modeID);
-		if (!mode) {
-			return false;
-		}
-		if (!decklink->PrepareReceive(mode)) {
-			decklink->Deactivate();
-			return false;
-		}
-		decklink->start_timestamp = 0;
-		decklink->SetSize(mode->GetWidth(), mode->GetHeight());
-		device->SetKeyerMode(0);
-		if (!decklink->Activate(device, decklink->modeID) ||
-		    !obs_output_begin_data_capture(decklink->GetOutput(), 0)) {
-			decklink->Deactivate();
-			return false;
-		}
-		return true;
-	}
-
 	if (!obs_get_audio_info(&aoi)) {
 		blog(LOG_WARNING, "No active audio");
 		obs_output_set_last_error(decklink->GetOutput(), "No active audio is available for the DeckLink output.");
@@ -260,9 +229,6 @@ static bool prepare_audio(DeckLinkOutput *decklink, const struct audio_data *fra
 static void decklink_output_raw_audio(void *data, struct audio_data *frames)
 {
 	auto *decklink = (DeckLinkOutput *)data;
-	if (decklink->IsNativeReceive()) {
-		return;
-	}
 	struct audio_data in;
 
 	if (!decklink->start_timestamp) {

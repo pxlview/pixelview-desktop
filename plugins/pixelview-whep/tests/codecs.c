@@ -16,9 +16,6 @@ static void check_codec(obs_source_t *source, const char *codec, bool audio)
  audio ? "identity" : g_getenv("PIXELVIEW_TEST_P010") ? PIXELVIEW_RECEIVE_RAW_CAPS : "video/x-raw,format=NV12");
  GError *error=NULL;
  struct receiver r={.source=source,.accept_samples=true}; g_mutex_init(&r.lock); g_rec_mutex_init(&r.delivery);
- source_controls_init(&r);
- struct pv_feed_request feed={.size=sizeof(feed), .version=PV_FEED_VERSION, .command=PV_FEED_ATTACH, .route=PV_FEED_RENDERED};
- if (audio) { pv_feed_request(&r.feed, 0, &feed); assert(feed.status==PV_FEED_OK); }
  r.pipe=gst_parse_launch(spec,&error); assert(r.pipe && !error);
  GstElement *input=gst_bin_get_by_name(GST_BIN(r.pipe),"input");
  GstElement *output=gst_bin_get_by_name(GST_BIN(r.pipe),"output");
@@ -44,19 +41,6 @@ static void check_codec(obs_source_t *source, const char *codec, bool audio)
  gst_element_set_state(r.pipe,GST_STATE_NULL);
  printf("PASS bundled %s encode/decode -> native OBS raw path: video=%llu audio=%llu\n",codec,(unsigned long long)r.frames,(unsigned long long)r.audio_frames);
  assert(audio?r.audio_frames>0:r.frames>0);
- if (audio) {
-  int16_t pcm[PV_FEED_MAX_AUDIO_FRAMES*2]; unsigned packets=0; uint64_t energy=0, last=0;
-  feed.command=PV_FEED_AUDIO; feed.data=pcm; feed.capacity=sizeof(pcm);
-  for (;;) {
-   pv_feed_request(&r.feed, 0, &feed); if (feed.status==PV_FEED_EMPTY) break;
-   assert(feed.status==PV_FEED_OK && feed.timestamp_ns>=last && feed.bytes==feed.audio_frames*4u);
-   last=feed.timestamp_ns; ++packets;
-   for (unsigned i=0; i<feed.audio_frames*2u; ++i) energy+=(int64_t)pcm[i]*pcm[i];
-  }
-  assert(!packets && !energy); feed.command=PV_FEED_DETACH; pv_feed_request(&r.feed, 0, &feed);
-  printf("PASS Opus OBS delivery without obsolete rendered private PCM feed\n");
- }
- source_controls_disconnect(&r);
  gst_message_unref(msg);gst_object_unref(bus);gst_object_unref(input);gst_object_unref(output);gst_object_unref(r.pipe);g_mutex_clear(&r.lock); g_rec_mutex_clear(&r.delivery);
 }
 int main(void)

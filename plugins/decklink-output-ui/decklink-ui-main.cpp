@@ -167,15 +167,12 @@ void output_start()
 						    "installation."));
 			return;
 		}
-		receive_output_native = false;
 		if (receive_mode) {
 			calldata_t cd;
 			calldata_init(&cd);
 			bool ready = proc_handler_call(obs_source_get_proc_handler(selected), "get_status", &cd) &&
 				     calldata_bool(&cd, "ready");
-			const bool native = calldata_int(&cd, "native422_frames") > 0;
 			calldata_set_ptr(&cd, "source", selected);
-			calldata_set_bool(&cd, "native", native);
 			bool bound = ready &&
 				     proc_handler_call(obs_output_get_proc_handler(output), "bind_receive", &cd) &&
 				     calldata_bool(&cd, "bound");
@@ -191,19 +188,6 @@ void output_start()
 			if (!follow_mode_frame_rate(output, rateError)) {
 				start_failed(rateError);
 				obs_output_release(output);
-				return;
-			}
-			if (native) {
-				receive_output_native = true;
-				context.output = output;
-				main_output_running = obs_output_start(output);
-				if (!shutting_down) {
-					doUI->OutputStateChanged(main_output_running);
-				}
-				if (!main_output_running) {
-					start_failed(output_error(output));
-					output_stop();
-				}
 				return;
 			}
 		}
@@ -245,8 +229,7 @@ void output_start()
 
 			obs_add_main_rendered_callback(decklink_ui_render, &context);
 
-			// Ordinary reception uses the same rendered program and OBS mix as
-			// sending. Only native422 owns private v210/source-PCM endpoints.
+			// Reception uses the same rendered program and OBS mix as sending.
 			obs_output_set_media(context.output, context.video_queue, obs_get_audio());
 			bool started = obs_output_start(context.output);
 

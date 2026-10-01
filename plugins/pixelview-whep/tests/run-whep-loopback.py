@@ -16,8 +16,7 @@ FW=REPO/'build_macos/libobs/RelWithDebInfo';DEPS=sorted((REPO/'.deps').glob('obs
 cmd=['clang','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-mmacosx-version-min=14.0']
 cmd+=['-I'+str(p) for p in [REPO/'libobs',REPO/'build_macos/config',DEPS/'include',SDK/'include',SDK/'include/gstreamer-1.0',SDK/'include/glib-2.0',SDK/'lib/glib-2.0/include']]
 cmd+=['-F'+str(FW),'-framework','libobs','-Wl,-rpath,'+str(FW),'-Wl,-rpath,'+str(DEPS/'lib'),'-L'+str(RUNTIME/'lib'),'-Wl,-rpath,'+str(RUNTIME/'lib')]
-import native422_build
-cmd+=[str(ROOT/p) for p in ['tests/whep-loopback.c','video-format.c','profile-offer.c','capability-probe.c']] + native422_build.flags(ROOT)
+cmd+=[str(ROOT/p) for p in ['tests/whep-loopback.c','video-format.c','profile-offer.c','capability-probe.c','codec-route.c']]
 cmd+=['-l'+x for x in ['nice.10','gstwebrtc-1.0.0','gstsdp-1.0.0','gstapp-1.0.0','gstvideo-1.0.0','gstaudio-1.0.0','gstbase-1.0.0','gstreamer-1.0.0','gobject-2.0.0','glib-2.0.0']]
 subprocess.run(cmd+['-o',str(WORK/'receiver')],check=True)
 spec=importlib.util.spec_from_file_location('selection',ROOT/'tests/engine-profile-selection.py');selection=importlib.util.module_from_spec(spec);spec.loader.exec_module(selection)

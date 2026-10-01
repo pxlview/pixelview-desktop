@@ -316,12 +316,12 @@ int main(int argc,char **argv) {
    }
    // Synthetic native source reports the production get_status schema.
    static const char *mediaState="playing", *mediaFailure="";
-   static int64_t frames=0,nativeFrames=0;
+   static int64_t frames=0;
    obs_source_info media={}; media.id="pixelview_whep_source"; media.type=OBS_SOURCE_TYPE_INPUT;
    media.get_name=[](void*){return "Offline media telemetry";};
    media.create=[](obs_data_t*,obs_source_t *source)->void* {
-    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out int native422_frames, out string failure)",
-     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_int(data,"native422_frames",nativeFrames); calldata_set_string(data,"failure",mediaFailure);},nullptr);
+    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out string failure)",
+     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_string(data,"failure",mediaFailure);},nullptr);
     return source;
    };
    media.destroy=[](void*){}; obs_register_source(&media);
@@ -354,9 +354,8 @@ int main(int argc,char **argv) {
    frames=1; poll(); assert(green());
    mediaState="connecting"; poll(); assert(!green());
    mediaState="playing"; frames=30; poll(); assert(green());
-   nativeFrames=31; frames=0; poll(); assert(green());
-   poll(); assert(!green()); // Native stall cannot be concealed by a stale preview.
-   nativeFrames=32; poll(); assert(green());
+   poll(); assert(!green()); // A stalled counter is not fresh video.
+   frames=31; poll(); assert(green());
    // A sender on HEVC 4:2:2 10-bit stops the attempt with Main/Main10 guidance.
    mediaState="error"; mediaFailure="unsupported-hevc-main-422-10"; poll();
    assert(!green() && !layout.pixelviewReceiveIntent && layout.pixelviewReceiveStatus->text().contains("HEVC 4:2:2 10-bit"));

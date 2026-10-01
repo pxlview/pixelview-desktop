@@ -86,7 +86,7 @@ bash cmake/macos/pixelview-release.sh --validate-config
 ### 3.2 Plugin offline suites
 
 ```sh
-python3 plugins/decklink/tests/run-receive.py          # ~3 min; needs build_macos_native422 frameworks
+python3 plugins/decklink/tests/run-receive.py          # rendered owner with SDK fakes; needs the build_macos app
 python3 plugins/pixelview-whep/tests/test_packaging.py
 python3 plugins/pixelview-whep/tests/run-native.py
 python3 plugins/pixelview-whep/tests/run-codecs.py
@@ -95,7 +95,7 @@ python3 plugins/pixelview-whep/scripts/build-rswebrtc.py --test --unpatched   # 
 python3 plugins/pixelview-whep/scripts/build-rswebrtc.py --test              # expected success
 ```
 
-Route/filter changes: `plugins/pixelview-whep/tests/run-ordinary-route.py` (fast) and `run-native-422.py` (~2 min, `-Werror`). The DeckLink feed fixture decodes a Main 4:2:2 clip, so `run-receive.py` fails while `plugins/pixelview-whep/main422-25p.h` returns FALSE; use a scratch copy of the runner adding `-DPIXELVIEW_MAIN422_25P_H -include <header returning TRUE>`.
+Route/offer changes: `plugins/pixelview-whep/tests/run-ordinary-route.py`, `run-audio-route.py`, `run-profile-offer.py` and `run-production-offer.py` (fast, `-Werror`); `run-whep-loopback.py` (~4 min) receives every admitted profile, including HEVC Main 4:2:2 10 as v210, through a local engine-policy WHEP server.
 
 ### 3.3 Live control-plane smoke tool (no media)
 

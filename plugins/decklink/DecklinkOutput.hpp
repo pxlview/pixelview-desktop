@@ -1,7 +1,6 @@
 #pragma once
 
 #include "DecklinkBase.h"
-#include "decklink-private-media.hpp"
 
 #include <media-io/video-scaler.h>
 
@@ -11,27 +10,16 @@ protected:
 	int width;
 	int height;
 	obs_source_t *receiveSource = nullptr;
-	bool nativeReceive = false;
 	uint64_t receiveFrames = 0, receiveLastFrame = 0;
-	DeckLinkPrivateMedia privateMedia;
 
 	static void DevicesChanged(void *param, DeckLinkDevice *device, bool added);
 
 public:
 	std::string deviceHash;
-	bool BindReceive(obs_source_t *source, bool native);
-	bool PrepareReceive(DeckLinkDeviceMode *mode);
+	// Selects (or clears) the receive source whose status the watchdog follows.
+	bool BindReceive(obs_source_t *source);
 	// A false result names the cause in *reason (static storage, UI-thread use).
 	bool ReceiveHealthy(const char **reason = nullptr);
-	void ReceiveStats(calldata_t *cd)
-	{
-		std::lock_guard<std::recursive_mutex> lock(deviceMutex);
-		if (instance) {
-			instance->NativeStats(cd);
-		}
-	}
-	bool IsNativeReceive() const { return nativeReceive; }
-	bool IsReceive() const { return receiveSource != nullptr; }
 	long long modeID;
 	uint64_t start_timestamp;
 	uint32_t audio_samplerate;

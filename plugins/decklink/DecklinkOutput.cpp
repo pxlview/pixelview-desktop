@@ -62,7 +62,7 @@ bool DeckLinkOutput::Activate(DeckLinkDevice *device, long long modeId)
 		return false;
 	}
 
-	if (!(nativeReceive ? instance->StartNativeOutput(mode, receiveSource) : instance->StartOutput(mode))) {
+	if (!instance->StartOutput(mode)) {
 		instance = nullptr;
 		return false;
 	}
@@ -82,8 +82,6 @@ void DeckLinkOutput::Deactivate(void)
 		os_atomic_dec_long(&activateRefs);
 	}
 	instance = nullptr;
-	// libobs may still be ending capture here. Restore borrowed media on the
-	// next inactive bind/start; only privateMedia owns its idle endpoints.
 }
 
 obs_output_t *DeckLinkOutput::GetOutput(void) const
@@ -94,16 +92,15 @@ obs_output_t *DeckLinkOutput::GetOutput(void) const
 void DeckLinkOutput::UpdateVideoFrame(video_data *frame)
 {
 	std::lock_guard<std::recursive_mutex> lock(deviceMutex);
-	if (!instance || nativeReceive) {
-		return;
+	if (instance) {
+		instance->UpdateVideoFrame(frame);
 	}
-	instance->UpdateVideoFrame(frame);
 }
 
 void DeckLinkOutput::WriteAudio(audio_data *frames)
 {
 	std::lock_guard<std::recursive_mutex> lock(deviceMutex);
-	if (instance && !nativeReceive) {
+	if (instance) {
 		instance->WriteAudio(frames);
 	}
 }

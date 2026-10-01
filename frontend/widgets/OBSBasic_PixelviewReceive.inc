@@ -408,8 +408,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		if (proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "get_status", &data)) {
 			// Only fixed local labels: never render plugin errors or credential-bearing URLs.
 			const char *state = calldata_string(&data, "state");
-			const int64_t nativeFrames = calldata_int(&data, "native422_frames");
-			const int64_t frames = nativeFrames ? nativeFrames : calldata_int(&data, "frames");
+			const int64_t frames = calldata_int(&data, "frames");
 			const bool fresh = frames > pixelviewReceiveFrames;
 			pixelviewReceiveFrames = frames;
 			if (state && (strcmp(state, "error") == 0 || strcmp(state, "ended") == 0)) {

@@ -127,9 +127,6 @@ DeckLinkDeviceInstance::DeckLinkDeviceInstance(DecklinkBase *decklink_, DeckLink
 
 DeckLinkDeviceInstance::~DeckLinkDeviceInstance()
 {
-	if (receive) {
-		StopOutput();
-	}
 	device->ReleaseOwner(this);
 	device->Release();
 	if (convertFrame) {
@@ -715,55 +712,8 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 	return true;
 }
 
-bool DeckLinkDeviceInstance::StartNativeOutput(DeckLinkDeviceMode *mode_, obs_source_t *source)
-{
-	if (mode || receive || !mode_ || !source) {
-		return false;
-	}
-	ComPtr<IDeckLinkOutput> sdk;
-	if (!device->TryAcquire(this)) {
-		return false;
-	}
-	if (!device->GetOutput(&sdk)) {
-		device->ReleaseOwner(this);
-		return false;
-	}
-	*receive.Assign() = new (std::nothrow) DeckLinkReceive;
-	if (!receive) { device->ReleaseOwner(this); return false; }
-	ComPtr<IDeckLinkKeyer> keyer;
-	device->GetKeyer(&keyer);
-	bool started = false;
-	try {
-		started = receive->Start(sdk, mode_, source, device->GetMinimumPrerollFrames(), keyer);
-	} catch (const std::bad_alloc &) {
-		LOG(LOG_ERROR, "Receive output allocation failed");
-	}
-	if (!started) {
-		if (!receive->Stop()) {
-			device->MarkRemoved();
-		}
-		receive.Clear();
-		device->ReleaseOwner(this);
-		return false;
-	}
-	mode = mode_;
-	pixelFormat = bmdFormat10BitYUV;
-	return true;
-}
-
 bool DeckLinkDeviceInstance::StopOutput()
 {
-	if (receive) {
-		const bool stopped = receive->Stop();
-		if (!stopped) {
-			device->MarkRemoved();
-			LOG(LOG_ERROR, "Receive output cleanup failed; device quarantined until rediscovery");
-		}
-		receive.Clear();
-		mode = nullptr;
-		device->ReleaseOwner(this);
-		return stopped;
-	}
 	if (mode == nullptr || output == nullptr) {
 		return false;
 	}

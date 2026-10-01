@@ -1,31 +1,31 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-#include "../native-422-filter.h"
+#include "../codec-route.h"
 #include <gst/app/gstappsink.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-static unsigned released;
-static gboolean deliver(void *p,GstSample *s,const struct pv_native422_frame *f)
-{ (void)p;(void)s;(void)f;assert(!"ordinary media entered native decode");return FALSE; }
-static void release(void *p) { (void)p;released++; }
+/* The route bin holds exactly its stock capsfilter: no tap, queue or decoder. */
+static void assert_stock_route(GstElement *filter)
+{
+ assert(GST_BIN_NUMCHILDREN(filter)==1);
+ GstElement *route=gst_bin_get_by_name(GST_BIN(filter),"codec-route");assert(route);
+ assert(!g_strcmp0(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(gst_element_get_factory(route))),"capsfilter"));
+ gst_object_unref(route);
+}
 static void test_profile(const char *profile)
 {
- GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_native422_filter_new(deliver,NULL,release);
+ GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
  GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));
  assert(gst_element_set_state(pipe,GST_STATE_PLAYING)!=GST_STATE_CHANGE_FAILURE);
  /* A probed Main 4:2:2 10 decoder admits that profile on the SAME stock route. */
- if(!strcmp(profile,"main-422-10")) pv_native422_filter_admit_main422(filter,TRUE);
+ if(!strcmp(profile,"main-422-10")) pv_codec_route_admit_main422(filter,TRUE);
  GstPad *input=gst_element_get_static_pad(filter,"sink");
  assert(gst_pad_send_event(input,gst_event_new_stream_start(profile)));
  GstCaps *caps=gst_caps_new_simple("video/x-h265","stream-format",G_TYPE_STRING,"hvc1","alignment",G_TYPE_STRING,"au","profile",G_TYPE_STRING,profile,NULL);
  assert(gst_pad_send_event(input,gst_event_new_caps(caps)));gst_caps_unref(caps);
- /* The actual production extension point must not allocate a native tap/queue
-  * for ordinary profiles. Only stock capsfilter and CAPS inspection remain. */
- GstElement *queue=gst_bin_get_by_name(GST_BIN(filter),"preview");
- assert(!queue && "ordinary route still allocates native422 queue");
- GstElement *tap=gst_bin_get_by_name(GST_BIN(filter),"native-transform");
- assert(!tap && "ordinary route still allocates native422 tap");
+ /* The production extension point is only a stock capsfilter and CAPS inspection. */
+ assert_stock_route(filter);
  /* The selector pinned exactly this profile for the rest of the attempt. */
  GstElement *route=gst_bin_get_by_name(GST_BIN(filter),"codec-route");GstCaps *pinned=NULL;g_object_get(route,"caps",&pinned,NULL);
  assert(!g_strcmp0(gst_structure_get_string(gst_caps_get_structure(pinned,0),"profile"),profile));
@@ -44,7 +44,7 @@ static void test_profile(const char *profile)
 }
 static void missing_profile_failure(void)
 {
- GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_native422_filter_new(deliver,NULL,release);
+ GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
  GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));gst_element_set_state(pipe,GST_STATE_PLAYING);
  GstPad *input=gst_element_get_static_pad(filter,"sink");gst_pad_send_event(input,gst_event_new_stream_start("unknown-profile"));
@@ -55,35 +55,15 @@ static void missing_profile_failure(void)
  assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
-static void native_dependency_failure(void)
-{
- GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_native422_filter_new(deliver,NULL,release);
- GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
- gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));
- gst_element_set_state(pipe,GST_STATE_PLAYING);
- GstPluginFeature *queue=GST_PLUGIN_FEATURE(gst_element_factory_find("queue"));assert(queue);
- gst_registry_remove_feature(gst_registry_get(),queue);gst_object_unref(queue);
- pv_native422_filter_admit_native(filter,TRUE);
- GstPad *input=gst_element_get_static_pad(filter,"sink");
- gst_pad_send_event(input,gst_event_new_stream_start("native-missing-queue"));
- GstCaps *caps=gst_caps_from_string("video/x-h265,profile=main-422-10,stream-format=hvc1,alignment=au,width=16,height=16,framerate=25/1");
- gst_pad_send_event(input,gst_event_new_caps(caps));gst_caps_unref(caps);
- GstSegment segment;gst_segment_init(&segment,GST_FORMAT_TIME);gst_pad_send_event(input,gst_event_new_segment(&segment));
- assert(gst_pad_chain(input,gst_buffer_new_allocate(NULL,1,NULL))==GST_FLOW_NOT_NEGOTIATED);
- GstBus *bus=gst_element_get_bus(pipe);GstMessage *error=gst_bus_timed_pop_filtered(bus,GST_SECOND,GST_MESSAGE_ERROR);assert(error);
- gst_message_unref(error);gst_object_unref(bus);
- assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
- gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
-}
 /* Without a probed 4:2:2 decoder, a sender on HEVC 4:2:2 10-bit (or, always,
  * any other non-Main profile) is refused before its first AU with the typed reason the frontend maps to
- * "use HEVC Main or Main10". No native tap, queue or decoder is created. */
+ * "use HEVC Main or Main10". Admission covers main-422-10 only. */
 static void unsupported_profile_refusal(const char *profile,const char *reason,gboolean admit)
 {
- GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_native422_filter_new(deliver,NULL,release);
+ GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
  GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));gst_element_set_state(pipe,GST_STATE_PLAYING);
- if(admit) pv_native422_filter_admit_native(filter,admit);
+ if(admit) pv_codec_route_admit_main422(filter,admit);
  GstPad *input=gst_element_get_static_pad(filter,"sink");gst_pad_send_event(input,gst_event_new_stream_start(profile));
  char *text=g_strdup_printf("video/x-h265,stream-format=hvc1,alignment=au,profile=%s,width=1920,height=1080,framerate=25/1",profile);
  GstCaps *caps=gst_caps_from_string(text);g_free(text);
@@ -98,16 +78,15 @@ static void unsupported_profile_refusal(const char *profile,const char *reason,g
  assert(details && gst_structure_has_name(details,PV_UNSUPPORTED_PROFILE_DETAILS));
  assert(!g_strcmp0(gst_structure_get_string(details,"reason"),reason));
  g_clear_error(&err);g_free(debug);gst_message_unref(error);gst_object_unref(bus);
- assert(!gst_bin_get_by_name(GST_BIN(filter),"preview") && !gst_bin_get_by_name(GST_BIN(filter),"native-transform"));
+ assert_stock_route(filter);
  assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
 int main(void)
 {
- gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");missing_profile_failure();native_dependency_failure();
+ gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");missing_profile_failure();
  unsupported_profile_refusal("main-422-10",PV_UNSUPPORTED_HEVC_MAIN_422_10,FALSE);
  unsupported_profile_refusal("main-422-12",PV_UNSUPPORTED_HEVC_PROFILE,FALSE);
  unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_PROFILE,TRUE); /* admission covers main-422-10 only */
- assert(released==8);
- puts("Main/Main10 and probed Main 4:2:2 10: no native tap/queue, all 96 compressed AUs unchanged; missing native dependency fails closed; unprobed 4:2:2 and 4:4:4 refused with typed Main/Main10 guidance");
+ puts("Main/Main10 and probed Main 4:2:2 10: stock capsfilter route, all 96 compressed AUs unchanged, profile pinned; missing profile fails closed; unprobed 4:2:2 and other profiles refused with typed Main/Main10 guidance");
 }

@@ -125,8 +125,8 @@ static void actual_graph(void)
   }
  }
  unsigned expected_hevc=!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN)+!!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN10);
- /* Main422 is its own probe bit (or the dormant explicit native policy). */
- expected_hevc += (r.active_caps.profiles&PV_PROFILE_HEVC_MAIN422_10) || (expected_hevc != 0 && pv_main422_25p_enabled());
+ /* Main422 is its own probe bit. */
+ expected_hevc += !!(r.active_caps.profiles&PV_PROFILE_HEVC_MAIN422_10);
  unsigned expected_vp9=!!(r.active_caps.profiles&PV_PROFILE_VP9_0)+!!(r.active_caps.profiles&PV_PROFILE_VP9_2);
  g_assert_cmpuint(h265,==,expected_hevc);g_assert_cmpuint(vp9,==,expected_vp9);g_assert_cmpint(r.jitter_latency,==,50);
  /* No credentials; still avoid printing host candidates. */
@@ -151,17 +151,15 @@ static void main422_offer(bool probed)
  GstWebRTCSessionDescription *offer=NULL;
  g_assert_true(gst_structure_get(gst_promise_get_reply(promise),"offer",GST_TYPE_WEBRTC_SESSION_DESCRIPTION,&offer,NULL));
  char *sdp=gst_sdp_message_as_text(offer->sdp);
- /* Main422 is offered at the probed level only when its own probe bit is set
-  * (or at level 4.0 under the dormant native switch); ordinary bits stay truthful. */
- const char *main422=probed?"level-id=123;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000":
-  "level-id=120;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000";
- const bool offered=probed || pv_main422_25p_enabled();
- if(offered) g_assert_nonnull(strstr(sdp,main422)); else g_assert_null(strstr(sdp,"profile-id=4"));
+ /* Main422 is offered at the probed level only when its own probe bit is set;
+  * ordinary bits stay truthful. */
+ const char *main422="level-id=123;profile-id=4;tier-flag=0;tx-mode=SRST;interop-constraints=1d0800000000";
+ if(probed) g_assert_nonnull(strstr(sdp,main422)); else g_assert_null(strstr(sdp,"profile-id=4"));
  g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=1"));
  g_assert_nonnull(strstr(sdp,"level-id=123;profile-id=2"));
  puts(sdp);
- printf("PASS normal-build Main422 offer (probe bit %s): profile4 %s via production hook; ordinary Main/Main10 unchanged\n",
-  probed?"set":"clear",offered?"offered":"absent");
+ printf("PASS Main422 offer (probe bit %s): profile4 %s via production hook; ordinary Main/Main10 unchanged\n",
+  probed?"set":"clear",probed?"offered":"absent");
  g_free(sdp);gst_webrtc_session_description_free(offer);gst_promise_unref(promise);
  gst_element_set_state(rtc,GST_STATE_NULL);r.attempt=a;stop_pipeline(&r);
  gst_object_unref(trans);gst_object_unref(rtc);gst_caps_unref(input);

@@ -372,10 +372,6 @@ An earlier backend handoff proposing receiver registration over the control sock
   `get_status.failure` reports `unsupported-hevc-main-422-10` or `unsupported-hevc-profile`, and the
   Receiving panel stops with "The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot
   decode. Please use the HEVC Main or Main10 profile on the sender."
-- The earlier native path (own VideoToolbox x422 -> v210 decoder feeding DeckLink directly, its A/V
-  scheduler and offline suites) remains in the tree but dormant behind
-  `plugins/pixelview-whep/main422-25p.h` (FALSE). It was never certified (an intermittent 701 ms
-  first-frame failure is unresolved) and nothing in a normal build reaches it.
 
 ### Jitter buffer
 
@@ -426,14 +422,14 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   `DrawAlphaDivideR10LHLG` technique in `libobs/data/default.effect`. Without HDR metadata support
   the HDR canvas is tone-mapped to 8-bit SDR. The start logs `[decklink] output video: ...` with the
   mode chosen.
-- `bind_receive(source, native=false)` keeps the source identity for the watchdog only, and a
-  running rendered output accepts a new (or no) source. The rendered output plays the program
-  canvas, so it keeps running across a stalled, ended, stopped or reconnecting receive (repeating
-  the last canvas frame) and is only rebound; it drains only when the stream turns native 4:2:2,
-  the card output stops, the device is removed or Receiving mode is left. Stopping the card with
+- `bind_receive(source)` keeps the source identity for the watchdog only, and a running output
+  accepts a new (or no) source. The output plays the program canvas, so it keeps running across a
+  stalled, ended, stopped or reconnecting receive (repeating the last canvas frame) and is only
+  rebound; it drains only when the card output stops, the device is removed or Receiving mode is
+  left. Stopping the card with
   frames still outstanding after a stall deadlocked the main thread inside the DeckLink SDK
   (`DisableVideoOutput` → `releaseAllOutstandingFrames`, macOS hang reports 2026-09-28 20:53 and
-  22:33). A native output still drains on source loss or a native scheduling failure.
+  22:33).
 - `receive_status` returns a `reason`; the UI watchdog (100 ms poll) logs
   `[decklink-output-ui] receive output stopped after N ms: <reason>`, resumes automatically when the
   source is ready again, bounded to three consecutive attempts that fail within ten seconds of
@@ -515,15 +511,14 @@ gate) fail in the current environment regardless of changes.
 - WHEP plugin (`plugins/pixelview-whep/tests`): `test_packaging.py`, `run-native.py`,
   `run-codecs.py`, `run-production-offer.py`, `run-profile-offer.py`, `run-capability-probe.py`,
   `run-decoder-profiles.py`, `run-video-precision.py`, `run-ordinary-route.py`,
-  `run-preview-dispatch.py`, `run-audio-route.py`, `run-whep-loopback.py` (synthetic loopback WHEP
+  `run-audio-route.py`, `run-whep-loopback.py` (synthetic loopback WHEP
   through a real engine build: all five 4:2:0 video alternatives plus HTTP 406 negative, HEVC
-  Main10 and VP9 profile 2 PQ/HLG, HEVC Main 4:2:2 10 in SDR/PQ/HLG, and the colour-mode refusals),
-  `run-main422-25p.py`
-  and the `run-native-422*.py` suites (native branch admitted explicitly per filter).
-- DeckLink (`plugins/decklink/tests`): `run-receive.py` (complete output owner under ASan/UBSan with
-  a refusing fake SDK: rendered path takes OBS mixed audio, 600 ms frame gap stays healthy, named
-  state/native reasons, native v210/PCM exactness), `test_decklink_output_ui.py` (compiled Qt watchdog
-  including resume budget).
+  Main10 and VP9 profile 2 PQ/HLG, HEVC Main 4:2:2 10 in SDR/PQ/HLG, and the colour-mode refusals).
+- DeckLink (`plugins/decklink/tests`): `run-receive.py` (complete output owner with a refusing fake
+  SDK, ASan/UBSan with `PV_DECKLINK_SANITIZE=1`: start rollback and restart, device exclusion, OBS
+  mixed audio with source gain/mute, 600 ms frame gap and stalled receive stay healthy, live rebind,
+  named reasons for an inactive card and a removed device), `test_decklink_output_ui.py` (compiled
+  Qt watchdog including resume budget).
 - Sender WHIP/DeckLink/VideoToolbox modules and the GStreamer runtime pass deep/strict code-signature
   verification in the canonical Developer ID local build.
 
@@ -635,9 +630,9 @@ gate) fail in the current environment regardless of changes.
   clicking the red close button (SIGTERM shares the path).
 - Long hardware soak, Internet loss/recovery, glass-to-glass latency, 4K/interlaced/HDR inputs, hot
   unplug, multiple capture devices, NVENC/QSV/AMF/VAAPI hardware, Windows/Linux runtime.
-- A live HEVC 4:2:2 10 sender against the refusal path (offline suites only); the native 4:2:2 path
-  behind the switch is uncertified. The operator's Main10 glitch report has not been reproduced or
-  root-caused; the stock-path simplification and the 100 ms buffer are mitigations.
+- A live HEVC 4:2:2 10 sender against the refusal path (offline suites only). The operator's Main10
+  glitch report has not been reproduced or root-caused; the stock-path simplification and the
+  100 ms buffer are mitigations.
 
 ## Known limitations and intentionally out of scope
 
@@ -688,10 +683,10 @@ gate) fail in the current environment regardless of changes.
   `Pixelview*Keychain*.hpp`, `PixelviewDeepLink*`, `PixelviewEncoding.hpp`, `PixelviewFPS.hpp`,
   `PixelviewCapturePolicy.hpp`, `PixelviewConfig.hpp`, `PixelviewAudio.hpp`, `PixelviewSparkle.*`.
 - `plugins/pixelview-whep` - WHEP source, capability probe, profile offer, video-format policy,
-  `main422-25p.h` switch, native 4:2:2 filter, `scripts/` (runtime staging, rswebrtc build, SBOM),
-  `patches/`, `tests/`.
-- `plugins/decklink` - `decklink-output-receive.inc`, `decklink-receive.hpp` (receive bind, health,
-  `receive_status`, native v210 scheduler); `plugins/decklink-output-ui/decklink-receive-ui.inc`
+  `codec-route.c` (codec/profile route selector), `scripts/` (runtime staging, rswebrtc build,
+  SBOM), `patches/`, `tests/`.
+- `plugins/decklink` - `decklink-output-receive.inc` (receive bind, health, `receive_status`);
+  `plugins/decklink-output-ui/decklink-receive-ui.inc`
   (watchdog, resume budget, AutoStart, Start refusal logging).
 - `plugins/mac-videotoolbox` - SDK compatibility header and spatial-AQ handling for the sender.
 - `test/pixelview` - Python drivers and the C++/Objective-C++ harness sources they compile.
