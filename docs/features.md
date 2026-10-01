@@ -639,6 +639,19 @@ gate) fail in the current environment regardless of changes.
   exact). Receive: x265 Main decoded by the patched `vtdec_hw` came out NV12, Main10 P010, Main
   4:2:2 10 v210; all 18 loopback cases pass with the 8-bit ones (H.264, HEVC Main, VP9 0) audited
   as P010 with every sample a multiple of four. Not verified: as above (no SDI hardware).
+- SDI hardware loop (2026-10-02, UltraStudio Monitor 3G cabled to UltraStudio Recorder 3G, 1080p25,
+  `plugins/decklink/tests/run-sdi-loop.py` against the signed build's `decklink` plugin and
+  libobs): a v210 pattern through the canvas, the `DrawV210` render and `decklink_output`
+  (`10-bit 4:2:2 YUV SDR`) was captured back by `decklink-input` at its default 10-bit format
+  identical on every sample of all five patterns, codes 4-1019 included; no dropped frames in
+  14 s. With a PQ and an HLG canvas the card accepted `... with HDR metadata` and ordinary colours
+  came back exact (HLG ramp within 2 codes; extreme colours as in the offline probe); the Recorder
+  did not report HDR metadata on the captured frames, so the signalling itself is unconfirmed. In
+  the capture direction, the pattern played to the card and captured into a P216, P010 and NV12
+  canvas reached the encoder input exactly as the offline probe measured (P216 exact, P010 luma
+  exact, NV12 within one 8-bit step). The harness replicates the output UI's render with the
+  shared `decklink-v210-render.hpp`; the app's own UI path, a monitor's picture and a Desktop
+  sender to Desktop receiver session were still not exercised.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
