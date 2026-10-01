@@ -346,7 +346,7 @@ int main(int argc, char **argv)
 	DeckLinkDevice device(&sdk);
 	Mode sdkMode;
 	DeckLinkDeviceMode mode(&sdkMode, 1);
-	// The rendered owner: black preroll, padded-row safety, late callbacks.
+	// The rendered owner: v210 black preroll, padded-row safety, late callbacks.
 	selected.SetSize(48, 2);
 	DeckLinkDeviceInstance rendered(&selected, &device);
 	assert(rendered.StartOutput(&mode));
@@ -355,7 +355,15 @@ int main(int argc, char **argv)
 		assert(v.s == 30000 && v.d == 1001);
 		void *b;
 		v.f->GetBytes(&b);
-		assert(((uint8_t *)b)[0] == 0);
+		// 10-bit 4:2:2 Y'CbCr: 48 pixels are 128 bytes per row, and black is
+		// Y'=64 with Cb=Cr=512 in every word, not zero bytes.
+		assert(v.f->GetRowBytes() == 128 && v.f->GetPixelFormat() == bmdFormat10BitYUV);
+		const uint32_t chroma = 512u | 64u << 10 | 512u << 20, luma = 64u | 512u << 10 | 64u << 20;
+		for (unsigned word = 0; word < 64; word++) {
+			uint32_t value;
+			memcpy(&value, (uint8_t *)b + word * 4, 4);
+			assert(value == (word % 2 ? luma : chroma));
+		}
 	}
 	// Both directions of one-device capture/output exclusion, without a driver.
 	DeckLinkDeviceInstance competitor(&selected, &device);
@@ -363,8 +371,8 @@ int main(int argc, char **argv)
 	assert(!device.TryAcquire(&competitor));
 	uint8_t padded[400];
 	memset(padded, 0xcd, sizeof(padded));
-	memset(padded, 0x31, 192);
-	memset(padded + 200, 0x72, 192);
+	memset(padded, 0x31, 128);
+	memset(padded + 200, 0x72, 128);
 	video_data pixels = {};
 	pixels.data[0] = padded;
 	pixels.linesize[0] = 200;
@@ -373,7 +381,8 @@ int main(int argc, char **argv)
 	assert(sdk.card.queued.back().t == 3003);
 	void *renderedBytes;
 	sdk.card.queued.back().f->GetBytes(&renderedBytes);
-	assert(((uint8_t *)renderedBytes)[0] == 0x31 && ((uint8_t *)renderedBytes)[192] == 0x72);
+	assert(((uint8_t *)renderedBytes)[0] == 0x31 && ((uint8_t *)renderedBytes)[127] == 0x31 &&
+	       ((uint8_t *)renderedBytes)[128] == 0x72 && ((uint8_t *)renderedBytes)[255] == 0x72);
 	auto *renderedCallback = sdk.card.cb;
 	renderedCallback->AddRef();
 	rendered.StopOutput();
@@ -421,9 +430,9 @@ int main(int argc, char **argv)
 	assert(realOutput);
 	auto *retained = static_cast<DeckLinkOutput *>(obs_obj_get_data(realOutput));
 	video_output_info borrowedInfo={}; borrowedInfo.name="borrowed UI rendered queue";
-	borrowedInfo.format=VIDEO_FORMAT_BGRA; borrowedInfo.width=48; borrowedInfo.height=2;
+	borrowedInfo.format=VIDEO_FORMAT_V210; borrowedInfo.width=48; borrowedInfo.height=2;
 	borrowedInfo.fps_num=30000; borrowedInfo.fps_den=1001; borrowedInfo.cache_size=16;
-	borrowedInfo.colorspace=VIDEO_CS_709; borrowedInfo.range=VIDEO_RANGE_FULL;
+	borrowedInfo.colorspace=VIDEO_CS_709; borrowedInfo.range=VIDEO_RANGE_PARTIAL;
 	video_t *borrowedVideo=nullptr;
 	assert(video_output_open(&borrowedVideo,&borrowedInfo)==VIDEO_OUTPUT_SUCCESS);
 	bind_rendered_media(realOutput,borrowedVideo);

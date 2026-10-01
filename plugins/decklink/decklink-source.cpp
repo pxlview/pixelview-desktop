@@ -96,7 +96,10 @@ static void decklink_hide(void *data)
 static void decklink_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, BUFFERING, false);
-	obs_data_set_default_int(settings, PIXEL_FORMAT, bmdFormat8BitYUV);
+	// Pixelview: capture what SDI carries. Upstream defaulted to 8-bit, which
+	// silently truncated a 10-bit signal before a 10-bit encode.
+	obs_data_set_default_int(settings, PIXEL_FORMAT, bmdFormat10BitYUV);
+	obs_data_set_default_bool(settings, ALLOW_10_BIT, true);
 	obs_data_set_default_int(settings, COLOR_SPACE, VIDEO_CS_DEFAULT);
 	obs_data_set_default_int(settings, COLOR_RANGE, VIDEO_RANGE_DEFAULT);
 	obs_data_set_default_int(settings, CHANNEL_FORMAT, SPEAKERS_STEREO);

@@ -74,7 +74,9 @@ static void v210_cases(void)
   if(!odd) assert(f.linesize[0]==5120);
   float matrix[16],min[3],max[3];
   assert(video_format_get_parameters_for_format(cases[n].space,VIDEO_RANGE_PARTIAL,VIDEO_FORMAT_V210,matrix,min,max));
-  assert(!memcmp(matrix,f.color_matrix,sizeof(matrix)) && !memcmp(min,f.color_range_min,sizeof(min)) && !memcmp(max,f.color_range_max,sizeof(max)));
+  assert(!memcmp(matrix,f.color_matrix,sizeof(matrix)));
+  /* SDR keeps sub-black/super-white (no 64-940 clamp); HDR keeps the limited-range clamp. */
+  for(unsigned i=0;i<3;i++) assert(n ? f.color_range_min[i]==min[i] && f.color_range_max[i]==max[i] : f.color_range_min[i]==0.f && f.color_range_max[i]==1.f);
   /* The same frame never satisfies another colour mode. */
   for(unsigned other=0;other<3;other++) if(other!=n) assert(!pixelview_video_frame(&m,cases[other].color,&f));
   m.info.stride[0]=(int)((width+5)/6)*16-1; assert(!pixelview_video_frame(&m,cases[n].color,&f));

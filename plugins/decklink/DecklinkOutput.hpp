@@ -20,13 +20,13 @@ public:
 	bool BindReceive(obs_source_t *source);
 	// A false result names the cause in *reason (static storage, UI-thread use).
 	bool ReceiveHealthy(const char **reason = nullptr);
-	long long modeID;
+	long long modeID = 0;
 	uint64_t start_timestamp;
 	uint32_t audio_samplerate;
 	size_t audio_planes;
 	size_t audio_size;
-	int keyerMode;
-	bool force_sdr;
+	int keyerMode = 0;
+	bool force_sdr = false;
 
 	DeckLinkOutput(obs_output_t *output, DeckLinkDeviceDiscovery *discovery);
 	virtual ~DeckLinkOutput(void);

@@ -168,6 +168,10 @@ protected:
 	FrameQueue frameQueueObsToDecklink;
 	FrameQueue frameQueueDecklinkToObs;
 	uint8_t *activeBlob = nullptr;
+	// Pixelview: the scheduled frames' layout (v210, or BGRA for the keyer).
+	bool outputV210 = false;
+	int outputRowBytes = 0;
+	static void FillBlack(uint8_t *bytes, size_t size, bool v210);
 	BMDTimeValue frameDuration = 0;
 	BMDTimeScale frameTimescale = 0;
 	BMDTimeScale totalFramesScheduled;

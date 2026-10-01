@@ -165,6 +165,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   Refresh button, no fabricated devices or mode tables). Selecting a device updates the single
   managed `Pixelview Capture` source; **Device settings...** opens the native DeckLink properties
   dialog (connection, mode, colorspace/range, channel layout, buffering).
+- The capture defaults to 10-bit YUV (v210), also for automatic mode detection (upstream defaulted
+  to 8-bit, which truncated a 10-bit SDI signal before a 10-bit encode); a pixel format saved
+  explicitly in Device settings is kept. SDR limited-range capture is not clamped to 64-940, so
+  sub-black and super-white (PLUGE, overshoots) survive into a 10-bit canvas.
 - Canvas and output are fixed at 1920x1080 on every video reset. **Fit** resets position, scale,
   bounds, crop and rotation to an inner-fit; polling, hotplug and restored sources never rewrite
   transforms. FPS offers 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 as exact rationals through the
@@ -189,6 +193,12 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
   range only). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
+- 10-bit 4:2:2 is kept exact into the Main 4:2:2 10 encoder: the canvas's P216 output takes chroma
+  co-sited from the even pixel (a Pixelview change to `libobs/data/format_conversion.effect`;
+  upstream's `[1 2 1]/4` average softened chroma edges by up to ~130 of 1023 codes), and the
+  VideoToolbox encoder rounds the 16-bit canvas words to the nearest 10-bit code instead of letting
+  VideoToolbox truncate them (which cost one code on some samples). This holds for a 1080-line
+  source filling the canvas 1:1; any scaling resamples.
 
 ### Audio
 
@@ -363,8 +373,8 @@ An earlier backend handoff proposing receiver registration over the control sock
   would subsample it), and the frames reach OBS as `VIDEO_FORMAT_V210` in SDR, PQ or HLG. Jitter
   buffer, A/V sync, reconnect, preview and the rendered DeckLink output are the ordinary ones.
 - The limits are the ordinary ones too: up to 1920x1080, 60 fps at level 4.1, limited range. The
-  canvas is RGB, so the card receives the picture through the rendered output (8-bit BGRA in SDR,
-  10-bit RGB in HDR), not as untouched v210.
+  canvas is linear RGB; the DeckLink output repacks it as v210 (see DeckLink program output), which
+  in SDR returns the decoder's code values exactly.
 - Where the probe does not decode 4:2:2 (no hardware 4:2:2 decoder, or the probe's known EOS race
   dropped the bit for this app run), profile 4 is not offered and the engine transcodes to VP9 as
   before. A `main-422-10` stream that arrives anyway, or any other non-Main/Main10 HEVC profile, is
@@ -412,16 +422,24 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
 - The Receiving panel's Output group holds the native DeckLink output settings (device, mode,
   AutoStart) with the keyer UI hidden. AutoStart applies to receiving only: it starts the output
   once received video arrives. Launching (Sending mode) never opens the output, so another
-  application such as DaVinci Resolve can keep using the card while this Mac only sends. Reception (including HEVC 4:2:2) uses the stock OBS rendered
-  program output: main texture -> BGRA staging -> `decklink_output`, with audio from the ordinary
-  OBS mix (source gain, mute and mixer routing apply; monitoring is separate). SDR output is 8-bit
-  BGRA, not ten-bit 4:2:2 SDI.
-- With an HDR canvas and a device reporting HDR metadata support (and Force SDR off), the output is
-  upstream's 10-bit RGB (`bmdFormat10BitRGBXLE`, limited range) with Rec.2020 HDR metadata. A PQ
-  canvas leaves as PQ (EOTF 2); an HLG canvas leaves as HLG (EOTF 3) through the Pixelview
-  `DrawAlphaDivideR10LHLG` technique in `libobs/data/default.effect`. Without HDR metadata support
-  the HDR canvas is tone-mapped to 8-bit SDR. The start logs `[decklink] output video: ...` with the
-  mode chosen.
+  application such as DaVinci Resolve can keep using the card while this Mac only sends. Reception (including HEVC 4:2:2) uses the rendered
+  program output: main texture -> v210 packing on the GPU -> `decklink_output`, with audio from the
+  ordinary OBS mix (source gain, mute and mixer routing apply; monitoring is separate).
+- The card is always given 10-bit 4:2:2 Y'CbCr (`bmdFormat10BitYUV`, v210, limited range), in SDR
+  and HDR, in Receiving and Sending mode. The `DrawV210*` techniques in
+  `libobs/data/default.effect` pack one 32-bit v210 word per RGBA8 texel, with chroma co-sited
+  from the even pixel and the inverse of the transfer and matrix the v210/P010 source conversions
+  use. A 10-bit program that fills a same-size 10-bit canvas 1:1 therefore reaches the card with
+  the code values it was decoded or captured with, including sub-black and super-white in SDR; an
+  output mode of another size is scaled in linear light first, and an 8-bit canvas (HEVC Main or
+  H.264 in Sending mode) limits the output to 8-bit precision. Preroll and underrun frames are
+  v210 black. Only the keyer (UI hidden) still uses 8-bit BGRA.
+- With an HDR canvas and a device reporting HDR metadata support (and Force SDR off), the v210
+  frames carry Rec.2020 HDR metadata: a PQ canvas leaves as PQ (EOTF 2), an HLG canvas as HLG
+  (EOTF 3). Without HDR metadata support the HDR canvas is tone-mapped to SDR v210. The start logs
+  `[decklink] output video: ...` with the mode chosen. HDR is exact for neutral and ordinarily
+  saturated colours; the linear float canvas costs precision in the near-zero channel of very
+  saturated ones (tens of codes there, on the order of 0.01 nit).
 - `bind_receive(source)` keeps the source identity for the watchdog only, and a running output
   accepts a new (or no) source. The output plays the program canvas, so it keeps running across a
   stalled, ended, stopped or reconnecting receive (repeating the last canvas frame) and is only
@@ -498,7 +516,8 @@ gate) fail in the current environment regardless of changes.
 - Receiver: `test_receiver.py` (`receiver_native.cpp`, `receiver_transport.mm`),
   `test_receiver_login_errors.py`, `receiver_expiry.cpp`, `test_receive_ui.py`,
   `test_mode_persistence.py`, `test_deep_links.py`, `test_canvas_fullscreen.py`,
-  `test_receive_preview_zoom.py`, `test_receive_precision_canvas.py`, `run_receive_precision_probe.py`
+  `test_receive_preview_zoom.py`, `test_receive_precision_canvas.py`, `run_receive_precision_probe.py`, `run_video_fidelity_probe.py`
+  (v210 through the real libobs canvas to the encoder input and to the DeckLink v210 render)
   (real libobs/OpenGL level count). `receiver_live.py` and `receiver_media_live.py` are opt-in live
   tools.
 - Capture, encoding, audio, UI: `test_capture_policy.cpp`, `test_capture_*.py`, `test_fps.py`,
@@ -580,6 +599,24 @@ gate) fail in the current environment regardless of changes.
   itself (preview/GPU conversion of v210; screen control was declined), DeckLink output of a 4:2:2
   receive, a Pixelview Desktop sender (VideoToolbox 4:2:2 rather than x265), HDR 4:2:2 live,
   production, runs longer than a minute and other Mac models.
+- 10-bit 4:2:2 chain, offline (2026-10-01, M1 Pro, no Blackmagic hardware attached):
+  `run_video_fidelity_probe.py` feeds a 1920x1080 v210 source through a real libobs scene. In SDR
+  on a P216 or P010 canvas, every sample of five patterns (luma ramp, chroma gradients, colour
+  bars, random legal noise, all codes 4-1019) came back identical both at the encoder input (P216
+  rounded to 10 bits) and in the DeckLink v210 render; before the co-sited chroma change the same
+  probe showed chroma errors up to 131 codes on bar edges and 35 on gradients, and sub-black and
+  super-white clipped. PQ and HLG were exact for the ramp, gradients and bars at 30% saturation
+  (HLG ramp within 2 codes); random noise and the full code sweep were not (documented float
+  canvas limit). `plugins/mac-videotoolbox/tests/run-422-rounding.py` on the hardware HEVC 4:2:2
+  encoder at 40 Mbit/s: clean 10-bit codes decoded exact on 128 flat patches, input 12/64 of a
+  code low lost one code on 11 of them, and the same input rounded as `encoder.c` now does decoded
+  exact. `plugins/decklink/tests/run-receive.py` (also sanitized) covers v210 preroll black, row
+  size and the pixel format handed to a fake SDK. After the signed build, a live local receive
+  (as above) again delivered only V210 frames, now unclamped (range 0-1), and the app launched and
+  quit cleanly with the new effects. Not verified: any real SDI input or output (capture at
+  10-bit, the output UI's render path in the running app, v210 with HDR metadata on a card, a
+  monitor's picture), a Pixelview Desktop sender to a Pixelview Desktop receiver, and whether
+  **Fit** places every capture mode exactly 1:1.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
@@ -647,9 +684,12 @@ gate) fail in the current environment regardless of changes.
 - Receiving accepts limited-range BT.709 SDR, or limited-range BT.2020 PQ/HLG when the operator
   ticks HDR and picks the matching transfer; full range, other colour, eight-bit HDR, HEVC profiles
   beyond Main/Main10/Main 4:2:2 10 and VP9 profiles 1/3 are refused. HDR is not detected
-  automatically, and HDR DeckLink output is 10-bit RGB with metadata derived from the nits setting,
-  not 4:2:2 or the sender's own mastering metadata. SDR DeckLink receive output is 8-bit BGRA, so a
-  received 4:2:2 10-bit SDR stream loses two bits at the card; fullscreen is 8-bit.
+  automatically, and the HDR metadata on the DeckLink output is derived from the nits setting, not
+  from the sender's own mastering metadata. Fullscreen and preview are 8-bit.
+- 10-bit 4:2:2 is exact end to end only at 1920x1080 with the picture filling the canvas 1:1 and a
+  1080-line output mode; scaling, an 8-bit sender profile or a 4:2:0 profile (Main10) resample or
+  subsample by design. HDR is not bit-exact for very saturated colours (float canvas precision).
+  The lossy HEVC encode in between is of course not bit-exact either.
 - The sender enforces limited range only for Main 4:2:2 10 (P216); Main/Main10 honour a saved Full
   setting.
 - Capability probing caches a reduced decoder mask for the process if the pinned applemedia decoder
@@ -688,7 +728,8 @@ gate) fail in the current environment regardless of changes.
 - `plugins/decklink` - `decklink-output-receive.inc` (receive bind, health, `receive_status`);
   `plugins/decklink-output-ui/decklink-receive-ui.inc`
   (watchdog, resume budget, AutoStart, Start refusal logging).
-- `plugins/mac-videotoolbox` - SDK compatibility header and spatial-AQ handling for the sender.
+- `plugins/mac-videotoolbox` - SDK compatibility header, spatial-AQ handling and the 10-bit rounding
+  of 4:2:2 canvas frames for the sender (`tests/run-422-rounding.py`, hardware encoder plus ffmpeg).
 - `test/pixelview` - Python drivers and the C++/Objective-C++ harness sources they compile.
 - `release/` - `pixelview-macos.sh` (1Password-wrapped prepare/publish), `macos.json` (team, Sparkle
   public key), `source-inventory.json`; `version.json` at the root is the product-version source.

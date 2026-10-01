@@ -393,6 +393,18 @@ void DeckLinkDeviceInstance::SetupVideoFormat(DeckLinkDeviceMode *mode_)
 
 	video_format_get_parameters_for_format(activeColorSpace, colorRange, format, currentFrame.color_matrix,
 					       currentFrame.color_range_min, currentFrame.color_range_max);
+	// Pixelview: SDI legally carries sub-black and super-white (PLUGE, overshoots).
+	// The SDR conversion keeps them through the float canvas, so do not clamp
+	// limited-range Y'CbCr to 64-940 on the way in. HDR keeps the clamp: the PQ
+	// and HLG curves are not defined below black.
+	if (colorRange != VIDEO_RANGE_FULL && activeColorSpace != VIDEO_CS_2100_PQ &&
+	    activeColorSpace != VIDEO_CS_2100_HLG &&
+	    (pixelFormat == bmdFormat10BitYUV || pixelFormat == bmdFormat8BitYUV)) {
+		for (int i = 0; i < 3; i++) {
+			currentFrame.color_range_min[i] = 0.0f;
+			currentFrame.color_range_max[i] = 1.0f;
+		}
+	}
 
 	delete convertFrame;
 
@@ -640,10 +652,15 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 	frameQueueDecklinkToObs.reset();
 	frameQueueObsToDecklink.reset();
 
-	const int rowSize = decklinkOutput->GetWidth() * 4;
+	// Pixelview: 10-bit 4:2:2 Y'CbCr (v210) unless the keyer needs BGRA alpha.
+	const bool v210 = decklinkOutput->keyerMode == 0; // the rule decklink_output_create applies
+	const int rowSize = v210 ? ((decklinkOutput->GetWidth() + 47) / 48) * 128 : decklinkOutput->GetWidth() * 4;
 	const int frameSize = rowSize * decklinkOutput->GetHeight();
+	outputV210 = v210;
+	outputRowBytes = rowSize;
 	for (std::vector<uint8_t> &blob : frameBlobs) {
 		blob.assign(frameSize, 0);
+		FillBlack(blob.data(), size_t(frameSize), v210);
 		frameQueueDecklinkToObs.push(blob.data());
 	}
 	activeBlob = nullptr;
@@ -652,14 +669,15 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 	const enum video_colorspace colorspace = obs_get_video_info(&ovi) ? ovi.colorspace : VIDEO_CS_DEFAULT;
 	const bool source_hdr = (colorspace == VIDEO_CS_2100_PQ) || (colorspace == VIDEO_CS_2100_HLG);
 	const bool enable_hdr =
-		source_hdr &&
+		source_hdr && v210 &&
 		(obs_output_get_video_conversion(decklinkOutput->GetOutput())->colorspace == VIDEO_CS_2100_PQ);
-	BMDPixelFormat pixelFormat = enable_hdr ? bmdFormat10BitRGBXLE : bmdFormat8BitBGRA;
+	BMDPixelFormat pixelFormat = v210 ? bmdFormat10BitYUV : bmdFormat8BitBGRA;
 	blog(LOG_INFO, "[decklink] output video: %s (canvas %s, %.0f nits)",
-	     enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "10-bit RGB HLG with HDR metadata"
-							: "10-bit RGB PQ with HDR metadata")
-	     : source_hdr ? "8-bit SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
-			  : "8-bit SDR",
+	     !v210        ? "8-bit BGRA for the keyer"
+	     : enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "10-bit 4:2:2 YUV HLG with HDR metadata"
+							     : "10-bit 4:2:2 YUV PQ with HDR metadata")
+	     : source_hdr ? "10-bit 4:2:2 YUV SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
+			  : "10-bit 4:2:2 YUV SDR",
 	     colorspace == VIDEO_CS_2100_PQ ? "Rec.2100 PQ" : colorspace == VIDEO_CS_2100_HLG ? "Rec.2100 HLG" : "SDR",
 	     obs_get_video_hdr_nominal_peak_level());
 	const int64_t minimumPrerollFrames = std::max(device->GetMinimumPrerollFrames(), INT64_C(3));
@@ -687,7 +705,7 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		    theFrame->GetBytes(&initialBytes) != S_OK || !initialBytes) {
 			return false;
 		}
-		memset(initialBytes, 0, size_t(rowSize) * decklinkOutput->GetHeight());
+		FillBlack(static_cast<uint8_t *>(initialBytes), size_t(frameSize), v210);
 		result = output_->ScheduleVideoFrame(theFrame, i * frameDuration, frameDuration, frameTimescale);
 		if (result != S_OK) {
 			blog(LOG_ERROR, "failed to schedule video frame for preroll 0x%X", result);
@@ -737,6 +755,20 @@ bool DeckLinkDeviceInstance::StopOutput()
 	return true;
 }
 
+// Zero bytes are black in BGRA but a dark green in v210, where black is Y'=64, Cb=Cr=512.
+void DeckLinkDeviceInstance::FillBlack(uint8_t *bytes, size_t size, bool v210)
+{
+	if (!v210) {
+		memset(bytes, 0, size);
+		return;
+	}
+	static const uint32_t words[4] = {512u | 64u << 10 | 512u << 20, 64u | 512u << 10 | 64u << 20,
+					  512u | 64u << 10 | 512u << 20, 64u | 512u << 10 | 64u << 20};
+	for (size_t offset = 0; offset + sizeof(words) <= size; offset += sizeof(words)) {
+		memcpy(bytes + offset, words, sizeof(words));
+	}
+}
+
 void DeckLinkDeviceInstance::UpdateVideoFrame(video_data *frame)
 {
 	auto decklinkOutput = dynamic_cast<DeckLinkOutput *>(decklink);
@@ -744,8 +776,8 @@ void DeckLinkDeviceInstance::UpdateVideoFrame(video_data *frame)
 		return;
 	}
 
-	const size_t rowBytes = size_t(decklinkOutput->GetWidth()) * 4;
-	if (!frame || !frame->data[0] || frame->linesize[0] < rowBytes) {
+	const size_t rowBytes = size_t(outputRowBytes);
+	if (!rowBytes || !frame || !frame->data[0] || frame->linesize[0] < rowBytes) {
 		return;
 	}
 	uint8_t *const blob = frameQueueDecklinkToObs.pop();
@@ -775,7 +807,7 @@ void DeckLinkDeviceInstance::ScheduleVideoFrame(IDeckLinkVideoFrame *frame)
 		if (blob) {
 			memcpy(bytes, blob, frameSize);
 		} else {
-			memset(bytes, 0, frameSize);
+			FillBlack(static_cast<uint8_t *>(bytes), size_t(frameSize), outputV210);
 		}
 
 		output->ScheduleVideoFrame(frame, totalFramesScheduled * frameDuration, frameDuration, frameTimescale);

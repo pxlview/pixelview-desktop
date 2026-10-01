@@ -1141,8 +1141,23 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
 		size_t plane_linesize = CVPixelBufferGetBytesPerRowOfPlane(pixbuf, i);
 		size_t plane_height = CVPixelBufferGetHeightOfPlane(pixbuf, i);
 
+		/* Pixelview: the 4:2:2 canvas output holds ten-bit codes in 16-bit words
+		 * (code << 6) plus up to about +-16 of float rounding noise from the linear
+		 * canvas. VideoToolbox truncates to ten bits, which turned that noise into
+		 * a -1 code error on roughly half the samples; round to the nearest code. */
+		const bool round10 = enc->vt_pix_fmt == kCVPixelFormatType_422YpCbCr16BiPlanarVideoRange;
 		for (size_t j = 0; j < plane_height; j++) {
-			memcpy(p, f, frame->linesize[i]);
+			if (round10) {
+				const uint16_t *in = (const uint16_t *)f;
+				uint16_t *out = (uint16_t *)p;
+				const size_t words = frame->linesize[i] / 2;
+				for (size_t k = 0; k < words; k++) {
+					const uint32_t ten = ((uint32_t)in[k] + 32) >> 6;
+					out[k] = (uint16_t)((ten > 1023 ? 1023 : ten) << 6);
+				}
+			} else {
+				memcpy(p, f, frame->linesize[i]);
+			}
 			p += plane_linesize;
 			f += frame->linesize[i];
 		}

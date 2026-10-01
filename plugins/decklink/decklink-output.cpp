@@ -66,11 +66,14 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 			return decklinkOutput;
 		}
 
+		// Pixelview: the program leaves as 10-bit 4:2:2 Y'CbCr (v210, limited range),
+		// in SDR as well as HDR. Only the keyer needs alpha and stays 8-bit BGRA.
+		const bool v210 = decklinkOutput->keyerMode == 0;
 		struct video_scale_info to = {};
-		to.format = VIDEO_FORMAT_BGRA;
+		to.format = v210 ? VIDEO_FORMAT_V210 : VIDEO_FORMAT_BGRA;
 		to.width = mode->GetWidth();
 		to.height = mode->GetHeight();
-		to.range = VIDEO_RANGE_FULL;
+		to.range = v210 ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
 		to.colorspace = (device->GetSupportsHDRMetadata() && !decklinkOutput->force_sdr) ? VIDEO_CS_2100_PQ
 												 : VIDEO_CS_709;
 

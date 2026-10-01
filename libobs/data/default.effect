@@ -3,8 +3,14 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
 uniform float multiplier;
-// Pixelview: HLG nominal peak (nits) for DrawAlphaDivideR10LHLG.
+// Pixelview: HLG nominal peak (nits) for DrawV210HLG.
 uniform float hdr_lw;
+// Pixelview DrawV210*: RGB' -> Y'CbCr rows (normalised to code/1023) and the
+// picture width in pixels.
+uniform float4 v210_vec_y;
+uniform float4 v210_vec_cb;
+uniform float4 v210_vec_cr;
+uniform float v210_width;
 
 sampler_state def_sampler {
 	Filter   = Linear;
@@ -61,20 +67,86 @@ float4 PSDrawAlphaDivideR10L(VertInOut vert_in) : TARGET
 	return float4(uint4(r, g, b, a)) / 255.;
 }
 
-// Pixelview: the R10L packing above with the HLG OETF (as the P010/I010 HLG
-// conversions: multiplier is SDR white / 10000, hdr_lw the nominal peak).
-float4 PSDrawAlphaDivideR10LHLG(VertInOut vert_in) : TARGET
+/* Pixelview: pack the program picture as v210 (10-bit 4:2:2 Y'CbCr, the SDI
+ * wire format) for the DeckLink output. The render target is RGBA8 with one
+ * texel per little-endian 32-bit v210 word, i.e. four words per six pixels:
+ *   Cb0 Y0 Cr0 | Y1 Cb1 Y2 | Cr1 Y3 Cb2 | Y4 Cr2 Y5
+ * Chroma is co-sited with the even luma sample and taken from that pixel alone,
+ * and the transfer functions are the inverses of the ones the v210/P010 source
+ * conversions use, so a 10-bit 4:2:2 picture that fills the canvas 1:1 leaves
+ * with the code values it arrived with. mode: 0 SDR, 1 HDR canvas tone-mapped
+ * to SDR, 2 PQ, 3 HLG. No alpha: the DeckLink keyer path stays BGRA. */
+float3 pv_v210_codes(int x, int y, int mode)
 {
-	float4 rgba = image.Sample(def_sampler, vert_in.uv);
-	rgba.rgb *= (rgba.a > 0.) ? (multiplier / rgba.a) : 0.;
-	rgba.rgb = rec709_to_rec2020(rgba.rgb);
-	rgba.rgb = linear_to_hlg(rgba.rgb, hdr_lw);
-	uint3 rgb1023 = uint3(mad(rgba.rgb, 876., 64.5));
-	uint b = (rgb1023.b & 0x3Fu) << 2;
-	uint g = ((rgb1023.b & 0x3C0u) >> 6) | ((rgb1023.g & 0xFu) << 4);
-	uint r = ((rgb1023.g & 0x3F0u) >> 4) | ((rgb1023.r & 0x3u) << 6);
-	uint a = ((rgb1023.r & 0x3FCu) >> 2);
+	float3 rgb = image.Load(int3(x, y, 0)).rgb;
+	if (mode == 1) {
+		rgb = rec709_to_rec2020(rgb);
+		rgb = reinhard(rgb);
+		rgb = rec2020_to_rec709(rgb);
+	}
+	if (mode <= 1) {
+		rgb = srgb_linear_to_nonlinear(rgb);
+	} else {
+		rgb = rec709_to_rec2020(rgb * multiplier);
+		rgb = (mode == 2) ? linear_to_st2084(rgb) : linear_to_hlg(rgb, hdr_lw);
+	}
+	float3 yuv = float3(dot(v210_vec_y.xyz, rgb) + v210_vec_y.w, dot(v210_vec_cb.xyz, rgb) + v210_vec_cb.w,
+			    dot(v210_vec_cr.xyz, rgb) + v210_vec_cr.w);
+	/* SDI reserves codes 0-3 and 1020-1023. */
+	return clamp(floor(yuv * 1023. + 0.5), 4., 1019.);
+}
+
+float4 pv_v210_word(float2 pos, int mode)
+{
+	int word = int(pos.x);
+	int y = int(pos.y);
+	int x = (word / 4) * 6;
+	int part = word - (word / 4) * 4;
+	float3 codes = float3(512., 64., 512.);
+	if (float(x) < v210_width) {
+		float3 p0, p1;
+		if (part == 0) {
+			p0 = pv_v210_codes(x, y, mode);
+			codes = float3(p0.y, p0.x, p0.z);
+		} else if (part == 1) {
+			p0 = pv_v210_codes(x + 1, y, mode);
+			p1 = pv_v210_codes(x + 2, y, mode);
+			codes = float3(p0.x, p1.y, p1.x);
+		} else if (part == 2) {
+			p0 = pv_v210_codes(x + 2, y, mode);
+			p1 = pv_v210_codes(x + 4, y, mode);
+			codes = float3(p0.z, pv_v210_codes(x + 3, y, mode).x, p1.y);
+		} else {
+			p0 = pv_v210_codes(x + 4, y, mode);
+			codes = float3(p0.x, p0.z, pv_v210_codes(x + 5, y, mode).x);
+		}
+	}
+	uint3 c = uint3(codes);
+	uint r = c.x & 0xFFu;
+	uint g = (c.x >> 8) | ((c.y & 0x3Fu) << 2);
+	uint b = (c.y >> 6) | ((c.z & 0xFu) << 4);
+	uint a = c.z >> 4;
 	return float4(uint4(r, g, b, a)) / 255.;
+}
+
+float4 PSDrawV210(VertInOut vert_in) : TARGET
+{
+	return pv_v210_word(vert_in.pos.xy, 0);
+}
+
+float4 PSDrawV210Tonemap(VertInOut vert_in) : TARGET
+{
+	return pv_v210_word(vert_in.pos.xy, 1);
+}
+
+float4 PSDrawV210PQ(VertInOut vert_in) : TARGET
+{
+	return pv_v210_word(vert_in.pos.xy, 2);
+}
+
+float4 PSDrawV210HLG(VertInOut vert_in) : TARGET
+{
+	return pv_v210_word(vert_in.pos.xy, 3);
 }
 
 float4 PSDrawNonlinearAlpha(VertInOut vert_in) : TARGET
@@ -198,12 +270,39 @@ technique DrawAlphaDivideR10L
 	}
 }
 
-technique DrawAlphaDivideR10LHLG
+technique DrawV210
 {
 	pass
 	{
 		vertex_shader = VSDefault(vert_in);
-		pixel_shader  = PSDrawAlphaDivideR10LHLG(vert_in);
+		pixel_shader  = PSDrawV210(vert_in);
+	}
+}
+
+technique DrawV210Tonemap
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawV210Tonemap(vert_in);
+	}
+}
+
+technique DrawV210PQ
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawV210PQ(vert_in);
+	}
+}
+
+technique DrawV210HLG
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawV210HLG(vert_in);
 	}
 }
 

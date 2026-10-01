@@ -11,6 +11,7 @@
 #include <media-io/video-frame.h>
 #include "DecklinkOutputUI.h"
 #include "../../../plugins/decklink/const.h"
+#include "decklink-v210-render.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("decklink-output-ui", "en-US")
@@ -29,6 +30,9 @@ struct decklink_ui_output {
 
 	video_t *video_queue;
 	gs_texrender_t *texrender;
+	// Pixelview v210 output: program scaled to the output mode when the sizes differ.
+	gs_texrender_t *scaled;
+	bool v210;
 	gs_stagesurf_t *stagesurfaces[STAGE_BUFFER_COUNT];
 	bool surf_written[STAGE_BUFFER_COUNT];
 	size_t stage_index;
@@ -131,6 +135,8 @@ void output_stop()
 	}
 	gs_texrender_destroy(context.texrender);
 	context.texrender = nullptr;
+	gs_texrender_destroy(context.scaled);
+	context.scaled = nullptr;
 	obs_leave_graphics();
 
 	video_output_close(context.video_queue);
@@ -201,10 +207,19 @@ void output_start()
 			const uint32_t width = conversion->width;
 			const uint32_t height = conversion->height;
 
+			// Pixelview: the card gets 10-bit 4:2:2 Y'CbCr (v210) packed on the GPU, one
+			// RGBA8 texel per 32-bit word. Only the keyer still takes 8-bit BGRA.
+			context.v210 = conversion->format == VIDEO_FORMAT_V210;
+			const uint32_t surface_width = context.v210 ? pixelview_v210::row_words(width) : width;
+			const enum gs_color_format surface_format = context.v210 ? GS_RGBA : GS_BGRA;
+
 			obs_enter_graphics();
-			context.texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
+			context.texrender = gs_texrender_create(surface_format, GS_ZS_NONE);
+			if (context.v210 && (context.ovi.base_width != width || context.ovi.base_height != height)) {
+				context.scaled = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+			}
 			for (gs_stagesurf_t *&surf : context.stagesurfaces) {
-				surf = gs_stagesurface_create(width, height, GS_BGRA);
+				surf = gs_stagesurface_create(surface_width, height, surface_format);
 			}
 			obs_leave_graphics();
 
@@ -215,14 +230,14 @@ void output_start()
 			context.stage_index = 0;
 
 			video_output_info vi = {0};
-			vi.format = VIDEO_FORMAT_BGRA;
+			vi.format = context.v210 ? VIDEO_FORMAT_V210 : VIDEO_FORMAT_BGRA;
 			vi.width = width;
 			vi.height = height;
 			vi.fps_den = context.ovi.fps_den;
 			vi.fps_num = context.ovi.fps_num;
 			vi.cache_size = 16;
 			vi.colorspace = VIDEO_CS_DEFAULT;
-			vi.range = VIDEO_RANGE_FULL;
+			vi.range = context.v210 ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
 			vi.name = "decklink_output";
 
 			video_output_open(&context.video_queue, &vi);
@@ -291,30 +306,53 @@ static void decklink_ui_render(void *param)
 	const struct video_scale_info *const conversion = obs_output_get_video_conversion(ctx->output);
 	const uint32_t scaled_width = conversion->width;
 	const uint32_t scaled_height = conversion->height;
+	const bool source_hdr = (ctx->ovi.colorspace == VIDEO_CS_2100_PQ) || (ctx->ovi.colorspace == VIDEO_CS_2100_HLG);
+	const bool target_hdr = source_hdr && (conversion->colorspace == VIDEO_CS_2100_PQ);
 
+	if (ctx->v210) {
+		if (ctx->scaled) {
+			// Output mode and canvas differ in size: scale in linear light first. A
+			// same-size program is read 1:1 so its samples stay exact.
+			gs_texrender_reset(ctx->scaled);
+			if (!gs_texrender_begin(ctx->scaled, scaled_width, scaled_height)) {
+				return;
+			}
+			const bool srgb = gs_framebuffer_srgb_enabled();
+			gs_enable_framebuffer_srgb(false);
+			gs_enable_blending(false);
+			gs_ortho(0.0f, (float)scaled_width, 0.0f, (float)scaled_height, -100.0f, 100.0f);
+			gs_effect_t *const scale = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+			gs_effect_set_texture_srgb(gs_effect_get_param_by_name(scale, "image"), tex);
+			while (gs_effect_loop(scale, "Draw")) {
+				gs_draw_sprite(tex, 0, scaled_width, scaled_height);
+			}
+			gs_enable_blending(true);
+			gs_enable_framebuffer_srgb(srgb);
+			gs_texrender_end(ctx->scaled);
+			tex = gs_texrender_get_texture(ctx->scaled);
+		}
+		if (!gs_texrender_begin(ctx->texrender, pixelview_v210::row_words(scaled_width), scaled_height)) {
+			return;
+		}
+		pixelview_v210::draw(tex, scaled_width, scaled_height,
+				     pixelview_v210::mode_for(ctx->ovi.colorspace, target_hdr));
+		gs_texrender_end(ctx->texrender);
+	} else {
 	if (!gs_texrender_begin(ctx->texrender, scaled_width, scaled_height)) {
 		return;
 	}
 
+	// Keyer only: 8-bit BGRA with alpha, HDR canvases tone-mapped.
 	const bool previous = gs_framebuffer_srgb_enabled();
-	const bool source_hdr = (ctx->ovi.colorspace == VIDEO_CS_2100_PQ) || (ctx->ovi.colorspace == VIDEO_CS_2100_HLG);
-	const bool target_hdr = source_hdr && (conversion->colorspace == VIDEO_CS_2100_PQ);
-	gs_enable_framebuffer_srgb(!target_hdr);
+	gs_enable_framebuffer_srgb(true);
 	gs_enable_blending(false);
 
 	gs_effect_t *const effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
 	gs_effect_set_texture_srgb(gs_effect_get_param_by_name(effect, "image"), tex);
-	// Pixelview: an HLG canvas leaves as HLG; the HDR metadata follows in the output.
-	const bool target_hlg = target_hdr && (ctx->ovi.colorspace == VIDEO_CS_2100_HLG);
-	const char *const tech_name = target_hlg   ? "DrawAlphaDivideR10LHLG"
-				      : target_hdr ? "DrawAlphaDivideR10L"
-						   : (source_hdr ? "DrawAlphaDivideTonemap" : "DrawAlphaDivide");
+	const char *const tech_name = source_hdr ? "DrawAlphaDivideTonemap" : "DrawAlphaDivide";
 	while (gs_effect_loop(effect, tech_name)) {
 		gs_effect_set_float(gs_effect_get_param_by_name(effect, "multiplier"),
 				    obs_get_video_sdr_white_level() / 10000.f);
-		if (target_hlg)
-			gs_effect_set_float(gs_effect_get_param_by_name(effect, "hdr_lw"),
-					    obs_get_video_hdr_nominal_peak_level());
 		gs_draw_sprite(tex, 0, 0, 0);
 	}
 
@@ -322,6 +360,7 @@ static void decklink_ui_render(void *param)
 	gs_enable_framebuffer_srgb(previous);
 
 	gs_texrender_end(ctx->texrender);
+	}
 
 	const size_t write_stage_index = ctx->stage_index;
 	gs_stage_texture(ctx->stagesurfaces[write_stage_index], gs_texrender_get_texture(ctx->texrender));

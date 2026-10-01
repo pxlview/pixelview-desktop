@@ -115,5 +115,10 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
   f->data[p]=(uint8_t*)start; f->linesize[p]=(uint32_t)stride;
  }
  const enum video_colorspace space=!hdr?VIDEO_CS_709:color==PIXELVIEW_COLOR_PQ?VIDEO_CS_2100_PQ:VIDEO_CS_2100_HLG;
- return video_format_get_parameters_for_format(space,f->range,f->format,f->color_matrix,f->color_range_min,f->color_range_max);
+ if(!video_format_get_parameters_for_format(space,f->range,f->format,f->color_matrix,f->color_range_min,f->color_range_max)) return false;
+ /* SDR Y'CbCr keeps sub-black and super-white (PLUGE, overshoots): the float
+  * canvas carries them to the SDI output, so do not clamp to 64-940 on the way
+  * in. HDR keeps the clamp; PQ and HLG are not defined below black. */
+ if(!hdr && !rgb) for(int i=0;i<3;i++) { f->color_range_min[i]=0.f; f->color_range_max[i]=1.f; }
+ return true;
 }
