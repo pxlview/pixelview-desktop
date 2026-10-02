@@ -685,7 +685,11 @@ gate) fail in the current environment regardless of changes.
   dropdown showed the saved value. Not verified: HDR and other frame rates end to end, a monitor's
   picture, production, the receiver's session fields typed by hand (a deep link filled them), and
   the output dialog's Start/Stop button, which did not respond to the accessibility press used for
-  the test (the receiver was restarted to change the output range).
+  the test (the receiver was restarted to change the output range). Repeated 2026-10-02 on the
+  signed build of commit ef1809a37 (the pushed state): the same twelve cases with the same
+  results, followed by a ten-minute Main 4:2:2 10 limited-range run at 12 Mbit/s with 22,881
+  frames out of the card, no lagged, skipped or dropped frames on either side, video lateness 5
+  ms, and both instances quitting cleanly.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
