@@ -126,6 +126,17 @@ static void ingest_and_batch()
 		 3);
 	// The stale line is pruned; the capture drop becomes a visible warning.
 	assert(s.pending.size() == 3);
+	// A multi-line message (an encoder's settings block) is one entry and is
+	// uploaded whole.
+	auto block = shipper();
+	const std::string settings = "[VideoToolbox advanced_video_stream: 'hevc']: settings:\n\tbitrate:               6000 (kbps)\n"
+				     "\tkeyint:                2 (s)\n\tprofile:               main10\n";
+	LogCapture::instance().capture(300, settings.c_str());
+	qint64 none = 0;
+	block.ingest(LogCapture::instance().take(none), none);
+	const auto sentBlock = batchJson(block)["entries"].toArray()[0].toObject();
+	assert(sentBlock["role"] == "send" && sentBlock["message"].toString() == QString::fromStdString(settings));
+	assert(sentBlock["message"].toString().contains("keyint:                2 (s)"));
 	// Lines off the allowlist are neither queued nor spooled.
 	s.ingest(lines({{4, clockMs, 300, "Switched to scene 'Client pitch'", "", ""},
 			{5, clockMs, 100, "[Media Source 'clip']: failed to open /Volumes/Client/master.mov", "", ""}}),

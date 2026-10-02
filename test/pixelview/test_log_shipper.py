@@ -26,6 +26,13 @@ class LogShipper(unittest.TestCase):
         guarded = body.split('if (!too_many_repeated_entries(logFile, msg, str)) {', 1)[1].split('}', 1)[0]
         self.assertIn('LogStringChunk(logFile, str, log_level);', guarded)
         self.assertIn('pixelview::LogCapture::instance().capture(log_level, str);', guarded)
+        # LogStringChunk replaces every newline in str with a terminator, so a
+        # capture after it would only see the first line of a multi-line
+        # message (an encoder's settings block).
+        chunk = main.split('static inline void LogStringChunk(', 1)[1].split('\n}\n', 1)[0]
+        self.assertIn('nextLine[0] = 0;', chunk)
+        self.assertLess(guarded.index('LogCapture::instance().capture(log_level, str);'),
+                        guarded.index('LogStringChunk(logFile, str, log_level);'))
 
     def test_upload_transport(self):
         inc = (ROOT/'frontend/widgets/OBSBasic_PixelviewLogs.inc').read_text()

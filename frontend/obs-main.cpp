@@ -234,9 +234,11 @@ static void do_log(int log_level, const char *msg, va_list args, void *param)
 		def_log_handler(log_level, msg, args2, nullptr);
 #endif
 		if (!too_many_repeated_entries(logFile, msg, str)) {
-			LogStringChunk(logFile, str, log_level);
-			// Pixelview modification, 2026-09-29: the same lines, for upload.
+			// Pixelview modification, 2026-09-29: the same message, for upload.
+			// Before LogStringChunk: it cuts str at every newline in place,
+			// which would leave only the first line of a settings block.
 			pixelview::LogCapture::instance().capture(log_level, str);
+			LogStringChunk(logFile, str, log_level);
 		}
 	}
 
