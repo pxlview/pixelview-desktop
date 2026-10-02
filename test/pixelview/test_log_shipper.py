@@ -33,9 +33,14 @@ class LogShipper(unittest.TestCase):
         self.assertIn('QStringLiteral("/desktop/logs")', inc)
         self.assertIn('"Authorization", "Bearer " + bearer.toUtf8()', inc)
         self.assertIn('"X-Pixelview-Viewer-Token"', inc)
+        self.assertIn('pixelviewLogs->cpu = PixelviewLogSysctl("machdep.cpu.brand_string");', inc)
+        self.assertIn('pixelviewLogs->hardwareModel = PixelviewLogSysctl("hw.model");', inc)
         self.assertIn('QNetworkRequest::ManualRedirectPolicy', inc)
         self.assertIn('setTransferTimeout(15000)', inc)
-        self.assertIn('pixelviewLogs->finished(http, retryAfter, count, credential)', inc)
+        self.assertIn('pixelviewLogs->finished(http, retryAfter, lastUid, credential)', inc)
+        # An answer to a request from before sharing was switched off and on is ignored.
+        self.assertIn('const qint64 flight = ++pixelviewLogs->flight;', inc)
+        self.assertIn('if (!pixelviewLogs || pixelviewLogs->flight != flight) return;', inc)
         # The viewer token only goes to the backend it was issued by.
         self.assertIn('if (QUrl(PixelviewReceiveOrigin()) == pixelviewOrigin) viewer = pixelviewLogViewerToken;', inc)
         # Switching off drops buffered and spooled lines.
@@ -57,8 +62,12 @@ class LogShipper(unittest.TestCase):
         self.assertIn('PixelviewLogsTick();', shutdown)
         receive = (ROOT/'frontend/widgets/OBSBasic_PixelviewReceive.inc').read_text()
         changed = receive.split('pixelviewReceiver->onChanged = [this] {', 1)[1].split('if (isClosing()', 1)[0]
-        self.assertIn('setReceiveContext(pixelviewReceiver->session(), pixelviewReceiver->viewer())', changed)
-        self.assertIn('pixelviewLogViewerToken = pixelviewReceiver->clientToken()', changed)
+        # The typed session ID is attached only after the backend accepted the login.
+        self.assertIn('const bool signedIn = !pixelviewReceiver->clientToken().isEmpty();', changed)
+        self.assertIn('setReceiveContext(signedIn ? pixelviewReceiver->session() : QString(),', changed)
+        self.assertIn('signedIn ? pixelviewReceiver->viewer() : QString());', changed)
+        self.assertEqual(changed.count('pixelviewReceiver->session()'), 1)
+        self.assertIn('if (signedIn) pixelviewLogViewerToken = pixelviewReceiver->clientToken()', changed)
         receiver = (ROOT/'frontend/utility/PixelviewReceiver.cpp').read_text()
         self.assertIn('viewerToken=token;', receiver)
         self.assertIn('viewerToken.clear();', receiver.split('void PixelviewReceiver::stop()', 1)[1].split('}', 1)[0])

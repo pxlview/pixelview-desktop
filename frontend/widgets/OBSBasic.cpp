@@ -1586,7 +1586,7 @@ void OBSBasic::InitPixelview()
 	pixelviewLogSharing->setCheckable(true);
 	pixelviewLogSharing->setChecked(pixelviewLogSharingOn);
 	pixelviewLogSharing->setToolTip(QStringLiteral(
-		"Sends this app's log (sending, receiving and pairing events) to Pixelview so support can investigate problems."));
+		"Sends stream diagnostics (encoder and stream settings, sending, receiving, DeckLink and pairing events, and which Mac this is) to Pixelview so support can investigate problems. Scene, source and file names are not sent."));
 	connect(pixelviewLogSharing, &QAction::toggled, this, &OBSBasic::SetPixelviewLogSharing);
 	appMenu->addMenu(ui->menuLogFiles);
 	if (ui->menuCrashLogs) {

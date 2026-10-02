@@ -3,7 +3,22 @@
 // Policy lives in utility/PixelviewLogShipper.hpp; this is the Qt transport.
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QSysInfo>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
+// Which Mac this is ("Apple M1 Pro", "MacBookPro18,1"); empty when unknown.
+static QString PixelviewLogSysctl(const char *name)
+{
+#ifdef __APPLE__
+	char value[128] = {};
+	size_t size = sizeof(value) - 1;
+	if (sysctlbyname(name, value, &size, nullptr, 0) == 0) return QString::fromUtf8(value).trimmed();
+#else
+	(void)name;
+#endif
+	return {};
+}
 
 void OBSBasic::InitPixelviewLogs()
 {
@@ -15,6 +30,8 @@ void OBSBasic::InitPixelviewLogs()
 	pixelviewLogs->version = QString::fromUtf8(PIXELVIEW_VERSION);
 	pixelviewLogs->build = QString::fromUtf8(PIXELVIEW_BUILD_NUMBER);
 	pixelviewLogs->osVersion = QSysInfo::productVersion();
+	pixelviewLogs->cpu = PixelviewLogSysctl("machdep.cpu.brand_string");
+	pixelviewLogs->hardwareModel = PixelviewLogSysctl("hw.model");
 	pixelviewLogs->home = QDir::homePath();
 	BPtr<char> spool(GetAppConfigPathPtr("obs-studio/pixelview-log-spool.ndjson"));
 	if (spool) pixelviewLogs->spoolPath = QString::fromUtf8(spool.Get());
@@ -91,17 +108,18 @@ void OBSBasic::PixelviewLogsTick()
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 	request.setTransferTimeout(15000);
 	pixelviewLogs->inFlight = true;
+	const qint64 flight = ++pixelviewLogs->flight;
 	auto *reply = pixelviewLogHttp->post(request, batch.body);
 	reply->setReadBufferSize(65536);
-	const int count = batch.count;
-	connect(reply, &QNetworkReply::finished, this, [this, reply, count, credential] {
+	const qint64 lastUid = batch.lastUid;
+	connect(reply, &QNetworkReply::finished, this, [this, reply, lastUid, flight, credential] {
 		reply->deleteLater();
-		if (!pixelviewLogs) return;
+		if (!pixelviewLogs || pixelviewLogs->flight != flight) return;
 		const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 		const int retryAfter = reply->rawHeader("Retry-After").toInt();
 		using Result = pixelview::LogShipper::Result;
 		const bool wasFailing = pixelviewLogs->failures > 0;
-		const auto result = pixelviewLogs->finished(http, retryAfter, count, credential);
+		const auto result = pixelviewLogs->finished(http, retryAfter, lastUid, credential);
 		// Only transitions are logged: every line here is itself uploaded.
 		if (result == Result::Sent && wasFailing)
 			blog(LOG_INFO, "Pixelview: log upload recovered");

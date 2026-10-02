@@ -484,32 +484,57 @@ configuration.
 
 ## Log upload
 
-- Every line the app writes to its log file (the same level and repeat filter, from the first line
-  of the launch) is also captured for upload to the backend's `POST /desktop/logs`, which forwards
-  it to the central Loki as `job="pixelview-desktop"` (backend `docs/desktop-log-ingestion.md`).
-  The Desktop never talks to Loki or Grafana directly.
+- Stream diagnostics from the app's log (the same level and repeat filter, from the first line of
+  the launch) are uploaded to the backend's `POST /desktop/logs`, which forwards them to the
+  central Loki as `job="pixelview-desktop"` (backend `docs/desktop-log-ingestion.md`). The Desktop
+  never talks to Loki or Grafana directly.
+- Only lines on an allowlist are uploaded (`LogShipper::role`): Pixelview's own lines (pairing,
+  control socket, remote control, receiving), the encoders with their settings blocks
+  (`[VideoToolbox …]`, `[CoreAudio …]`, `[… encoder: '…']`), the stream output (`[obs-webrtc]`,
+  streaming start/stop, `Output '…'` frame totals), the failure lines libobs logs bare (`Stream
+  output type … failed to start!  Last Error: …`, `Error encoding with encoder`, `creating encoder
+  … failed`, skipped frames due to encoding lag, `obs-output '…'`), `video settings reset` /
+  `audio settings reset`, DeckLink (`decklink:`, `Decklink API`, `[decklink] output video`, frame
+  create/schedule failures, `No active audio`, the missing-driver line), audio-buffering increases
+  and limits, the unclean-shutdown marker and the encode/send rows of the shutdown profiler.
+  Everything else stays in the local log file only and is neither queued nor spooled: scene and
+  source names, the audio monitoring device, the module list, hotkeys, media sources, libav's own
+  `[ffmpeg]` messages (they can name a media file) and the rest of the profiler. The match is by
+  line prefix, so a source the user renamed to start with an allowlisted prefix (for example
+  "Pixelview …") would have its own log lines uploaded; the app's managed sources are not
+  affected. Each batch also
+  names the app version and build, the macOS version and which Mac it is (`machdep.cpu.brand_string`
+  and `hw.model`, e.g. "Apple M1 Pro" / "MacBookPro18,1").
 - On by default and disclosed as **Help > Log Files > Share Logs with Pixelview Support**
   (`PixelviewDiagnostics/ShareLogs`). Switching it off stops capture and deletes buffered and
   spooled lines.
-- Lines are tagged `send` (`[obs-webrtc]`, streaming start/stop, remote control), `receive`
-  (`[pixelview-whep]`, `[pixelview-receive]`, `[decklink-output-ui]`) or `app`. Receive lines carry
+- Lines are tagged `send` (encoders, `[obs-webrtc]`, output, streaming start/stop, remote control),
+  `receive` (`[pixelview-whep]`, `[pixelview-receive]`, `[decklink-output-ui]`) or `app`. Receive lines carry
   the session and viewer they were captured under; receiver state changes are logged for this.
+  The session is attached only once the backend has accepted the receiver login, so a mistyped
+  session field (or a password typed into it) is never uploaded, and an ID the backend would not
+  accept (it allows 1–128 of `A-Za-z0-9_-`) is left out of the line instead of failing the batch.
 - Before anything leaves the Mac, device tokens, bearer values, `token=`/`password=`/`passphrase=`
-  style pairs and every URL query string are redacted and the home directory becomes `~`; the
-  backend redacts again.
+  style pairs and every URL query string are redacted, the home directory becomes `~` and the
+  source name in an audio-buffering or audio-lagging line is removed; the backend redacts again.
 - A paired Desktop uploads with its device token and adds the receiver's viewer token when it
   receives from the same backend, so the backend can attribute receive lines to that session; an
   unpaired receiver uploads with its viewer token alone. Without either credential lines stay
   queued. Identity is assigned by the backend from the credential, never from the batch.
-- Batches go out every 10 s (within 2 s of an error line, sooner while a backlog remains), at most
-  500 lines / 192 KiB and one launch per batch. 429/503 honour `Retry-After`; transport and 5xx
+- Batches go out every 10 s, at most 500 lines / 192 KiB and one launch per batch. An error line
+  (after 2 s) or a full batch goes out earlier, but never less than 5 s after the previous upload,
+  so a steady error source stays at 720 requests an hour against the backend's 1800. The answer
+  removes exactly the lines that were in the batch, also when older lines aged out or overflowed
+  while the request was in flight. 429/503 honour `Retry-After`; transport and 5xx
   failures back off from 10 s to 5 min; 401/403 pause until the credential changes; a backend
   without the endpoint (404/405) is retried hourly. Upload outcomes are logged on transitions only.
 - Unsent lines (up to 5000) are spooled to `obs-studio/pixelview-log-spool.ndjson` at most every
   5 s, promptly after an error line and at close, and are uploaded by the next launch. Lines older
   than 50 minutes are discarded on both sides: Loki rejects them on the shared streams, so an
   offline or long-closed Desktop loses the older part of its spool.
-- Not included: crash reports, full log files on demand, debug-level lines and metrics.
+- Not included: crash reports, full log files on demand, debug-level lines and metrics. The
+  profiler rows are written at quit, so they only arrive if the app is started again within 50
+  minutes.
 
 ## Shutdown and recovery
 
