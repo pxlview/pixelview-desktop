@@ -404,7 +404,19 @@ int main(int argc, char **argv)
 	sdk.card.failAt = 0;
 	assert(rendered.StartOutput(&mode));
 	rendered.StopOutput();
-	puts("rendered DeckLink owner: preroll, padded rows, exclusion, rollback, restart and late callback PASS");
+	// Full output range: preroll black is the lowest SDI code, not limited-range 64.
+	selected.full_range = true;
+	assert(rendered.StartOutput(&mode));
+	{
+		void *b;
+		sdk.card.queued.front().f->GetBytes(&b);
+		uint32_t first[2];
+		memcpy(first, b, sizeof(first));
+		assert(first[0] == (512u | 4u << 10 | 512u << 20) && first[1] == (4u | 512u << 10 | 4u << 20));
+	}
+	rendered.StopOutput();
+	selected.full_range = false;
+	puts("rendered DeckLink owner: preroll (limited and full black), padded rows, exclusion, rollback, restart and late callback PASS");
 	// The registered output with the UI's caller-owned rendered queue.
 	obs_audio_info ai = {48000, SPEAKERS_STEREO};
 	assert(obs_reset_audio(&ai));

@@ -21,6 +21,7 @@ extern "C" {
 }
 static bool capture_mode; static const uint8_t *direct; static unsigned direct_stride; static uint16_t Yi[PW * PH], Cbi[PW / 2 * PH], Cri[PW / 2 * PH];
 static std::vector<uint8_t> p0, p1; static long raws; static unsigned out_bytes = 2, chroma_rows = PH; static enum video_format canvas_format;
+static bool full_output; // RANGE=full: the output range switch
 static gs_texrender_t *tr; static gs_stagesurf_t *st; static video_t *queue; static pixelview_v210::Mode vmode; static long pushed;
 static void rendered(void *) {
 	if (capture_mode) { struct video_frame o; if (queue && video_output_lock_frame(queue, &o, 1, os_gettime_ns())) { for (unsigned y = 0; y < PH; y++) memcpy(o.data[0] + (size_t)y * o.linesize[0], direct + (size_t)y * direct_stride, o.linesize[0]); video_output_unlock_frame(queue); pushed++; } return; }
@@ -29,7 +30,7 @@ static void rendered(void *) {
 	if (!tr) { tr = gs_texrender_create(GS_RGBA, GS_ZS_NONE); st = gs_stagesurface_create(words, PH, GS_RGBA); }
 	gs_texrender_reset(tr);
 	if (!gs_texrender_begin(tr, words, PH)) return;
-	bool ok = pixelview_v210::draw(tex, PW, PH, vmode);
+	bool ok = pixelview_v210::draw(tex, PW, PH, vmode, full_output);
 	gs_texrender_end(tr); if (!ok) return;
 	gs_stage_texture(st, gs_texrender_get_texture(tr));
 	uint8_t *data; uint32_t stride; struct video_frame out;
@@ -91,14 +92,16 @@ int main(int argc, char **argv) { @autoreleasepool {
 	if (!hdr) for (int i = 0; i < 3; i++) { f.color_range_min[i] = 0.f; f.color_range_max[i] = 1.f; }
 	// output
 	obs_data_t *os = obs_data_create(); obs_properties_t *op = obs_get_output_properties("decklink_output");
+	if (getenv("RANGE") && !strcmp(getenv("RANGE"), "full")) obs_data_set_int(os, "output_range", 1);
 	puts("output devices/modes:");
 	if (!op || !choose(op, os, "device_hash", "Monitor", false) || !choose(op, os, "mode_id", argv[5], true)) { puts("no output device/mode"); return 7; }
 	obs_output_t *output = obs_output_create("decklink_output", "loop out", os, nullptr);
 	const struct video_scale_info *conv = output ? obs_output_get_video_conversion(output) : nullptr;
 	if (!conv) { puts("output has no conversion (device/mode unavailable)"); return 8; }
 	printf("output conversion: format=%d (V210=%d) %ux%u range=%d colorspace=%d\n", (int)conv->format, (int)VIDEO_FORMAT_V210, conv->width, conv->height, (int)conv->range, (int)conv->colorspace);
+	full_output = conv->range == VIDEO_RANGE_FULL;
 	vmode = pixelview_v210::mode_for(vi.colorspace, conv->colorspace == VIDEO_CS_2100_PQ);
-	video_output_info qi = {}; qi.name = "loop queue"; qi.format = VIDEO_FORMAT_V210; qi.width = PW; qi.height = PH; qi.fps_num = 25; qi.fps_den = 1; qi.cache_size = 16; qi.colorspace = VIDEO_CS_DEFAULT; qi.range = VIDEO_RANGE_PARTIAL;
+	video_output_info qi = {}; qi.name = "loop queue"; qi.format = VIDEO_FORMAT_V210; qi.width = PW; qi.height = PH; qi.fps_num = 25; qi.fps_den = 1; qi.cache_size = 16; qi.colorspace = VIDEO_CS_DEFAULT; qi.range = conv->range; /* as the output UI does: no scaler between queue and output */
 	if (video_output_open(&queue, &qi) != VIDEO_OUTPUT_SUCCESS) return 9;
 	obs_add_main_rendered_callback(rendered, nullptr);
 	obs_output_set_media(output, queue, obs_get_audio());

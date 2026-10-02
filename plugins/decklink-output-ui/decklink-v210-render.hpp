@@ -35,11 +35,15 @@ inline enum video_colorspace colorspace_for(Mode mode)
 
 // Call between gs_texrender_begin(target, row_words(width), height) and
 // gs_texrender_end. `source` is width x height, read 1:1 (no scaling).
-inline bool draw(gs_texture_t *source, uint32_t width, uint32_t height, Mode mode)
+// full_range chooses the levels of the Y'CbCr written (the canvas itself has
+// no range): limited is the exact inverse of the matrix the v210 source
+// conversion uses, full rescales black/white from 64/940 to 0/1023 (SDI keeps
+// codes 0-3 and 1020-1023 reserved, so the shader clips to 4-1019).
+inline bool draw(gs_texture_t *source, uint32_t width, uint32_t height, Mode mode, bool full_range = false)
 {
-	// The exact inverse of the limited-range matrix the v210 source conversion uses.
 	struct matrix4 matrix;
-	if (!video_format_get_parameters_for_format(colorspace_for(mode), VIDEO_RANGE_PARTIAL, VIDEO_FORMAT_V210,
+	if (!video_format_get_parameters_for_format(colorspace_for(mode),
+						    full_range ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL, VIDEO_FORMAT_V210,
 						    (float *)&matrix, nullptr, nullptr) ||
 	    !matrix4_inv(&matrix, &matrix))
 		return false;

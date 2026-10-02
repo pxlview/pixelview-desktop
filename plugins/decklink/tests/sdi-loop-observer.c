@@ -7,7 +7,8 @@
 static uint16_t Yi[PW * PH], Cbi[PW / 2 * PH], Cri[PW / 2 * PH];
 static void observed(obs_source_t *s, const struct obs_source_frame2 *f)
 {
-	static long n; static int filled;
+	static long n; static int filled, full = -1;
+	if (full < 0) full = getenv("RANGE") && !strcmp(getenv("RANGE"), "full");
 	if (f && s && !strcmp(obs_source_get_id(s), "decklink-input")) {
 		if (!filled) { pattern_fill(Yi, Cbi, Cri); filled = 1; }
 		n++;
@@ -24,12 +25,18 @@ static void observed(obs_source_t *s, const struct obs_source_frame2 *f)
 						for (unsigned x = 6; x < PW - 6; x++) {
 							uint32_t w[4]; memcpy(w, row + (x / 6) * 16, 16);
 							const unsigned j = x % 6, pair = j / 2, k = x / 2;
-							int d = (int)((w[word[j]] >> shift[j]) & 1023) - Yi[y * PW + x];
+							int yr = Yi[y * PW + x], cbr = Cbi[y * (PW / 2) + k], crr = Cri[y * (PW / 2) + k];
+							if (full) { /* BT.2100 full range, clipped to the SDI codes 4-1019 */
+								double v = (yr - 64) * 1023.0 / 876.0; yr = (int)(v < 4 ? 4 : v > 1019 ? 1019 : v + 0.5);
+								v = 512 + (cbr - 512) * 1023.0 / 896.0; cbr = (int)(v < 4 ? 4 : v > 1019 ? 1019 : v + 0.5);
+								v = 512 + (crr - 512) * 1023.0 / 896.0; crr = (int)(v < 4 ? 4 : v > 1019 ? 1019 : v + 0.5);
+							}
+							int d = (int)((w[word[j]] >> shift[j]) & 1023) - yr;
 							ny++; ey += d == 0; if (abs(d) > wy) wy = abs(d);
 							if (!(x & 1)) {
 								int cb = pair == 0 ? (w[0] & 1023) : pair == 1 ? ((w[1] >> 10) & 1023) : ((w[2] >> 20) & 1023);
 								int cr = pair == 0 ? ((w[0] >> 20) & 1023) : pair == 1 ? (w[2] & 1023) : ((w[3] >> 10) & 1023);
-								int a = cb - Cbi[y * (PW / 2) + k], b = cr - Cri[y * (PW / 2) + k];
+								int a = cb - cbr, b = cr - crr;
 								nc += 2; ec += (a == 0) + (b == 0); if (abs(a) > wc) wc = abs(a); if (abs(b) > wc) wc = abs(b);
 							}
 						}

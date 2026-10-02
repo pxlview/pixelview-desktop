@@ -25,6 +25,7 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 	decklinkOutput->modeID = obs_data_get_int(settings, MODE_ID);
 	decklinkOutput->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklinkOutput->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
+	decklinkOutput->full_range = obs_data_get_int(settings, OUTPUT_RANGE) == 1;
 	proc_handler_add(
 		obs_output_get_proc_handler(output), "void bind_receive(ptr source, out bool bound)",
 		[](void *p, calldata_t *cd) {
@@ -73,7 +74,8 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 		to.format = v210 ? VIDEO_FORMAT_V210 : VIDEO_FORMAT_BGRA;
 		to.width = mode->GetWidth();
 		to.height = mode->GetHeight();
-		to.range = v210 ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
+		// BGRA is full-range RGB by nature; for v210 the operator picks the SDI levels.
+		to.range = (v210 && !decklinkOutput->full_range) ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
 		to.colorspace = (device->GetSupportsHDRMetadata() && !decklinkOutput->force_sdr) ? VIDEO_CS_2100_PQ
 												 : VIDEO_CS_709;
 
@@ -94,6 +96,7 @@ static void decklink_output_update(void *data, obs_data_t *settings)
 	decklink->modeID = obs_data_get_int(settings, MODE_ID);
 	decklink->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklink->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
+	decklink->full_range = obs_data_get_int(settings, OUTPUT_RANGE) == 1;
 }
 
 static bool decklink_output_start(void *data)
@@ -330,6 +333,11 @@ static obs_properties_t *decklink_output_properties(void *unused)
 
 	obs_properties_add_bool(props, AUTO_START, TEXT_AUTO_START);
 	obs_properties_add_bool(props, FORCE_SDR, TEXT_FORCE_SDR);
+	// Pixelview: SDI carries no range flag in SDR, so this must match the monitor's setting.
+	obs_property_t *range = obs_properties_add_list(props, OUTPUT_RANGE, TEXT_OUTPUT_RANGE, OBS_COMBO_TYPE_LIST,
+							OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(range, TEXT_OUTPUT_RANGE_LIMITED, 0);
+	obs_property_list_add_int(range, TEXT_OUTPUT_RANGE_FULL, 1);
 
 	obs_properties_add_list(props, KEYER, TEXT_ENABLE_KEYER, OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 

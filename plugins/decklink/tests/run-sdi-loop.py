@@ -49,13 +49,17 @@ def main():
                     m = RESULT.search(line)
                     if m:
                         rows[m[1]] = (float(m[2]), int(m[3]), float(m[4]), int(m[5]))
-                        print(colour, env.get('CANVAS', 'output'), line[line.index('region='):], flush=True)
+                        print(colour, env.get('CANVAS', 'output ' + env.get('RANGE', 'limited')), line[line.index('region='):], flush=True)
             assert len(rows) == 5, 'no stable capture: is the output cabled to the input?\n' + text[-1500:]
             return rows
 
         observer = {'DYLD_INSERT_LIBRARIES': str(tmp / 'observer.dylib')}
         rows = run('sdr', observer, 'CAPTURED')
         assert all(r[1] == 0 and r[3] == 0 for r in rows.values()), rows
+        # The output range switch: limited canvas content leaves as full-range Y'CbCr,
+        # within one code of the BT.2100 full mapping (clipped to SDI's 4-1019).
+        rows = run('sdr', {**observer, 'RANGE': 'full'}, 'CAPTURED')
+        assert all(r[1] <= 1 and r[3] <= 1 for r in rows.values()), rows
         for colour in ('pq', 'hlg'):
             rows = run(colour, {**observer, 'SAT': '0.3'}, 'CAPTURED')
             assert rows['chroma gradients'][1] == 0 and rows['chroma gradients'][3] == 0, rows

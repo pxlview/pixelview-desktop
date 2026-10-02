@@ -27,6 +27,9 @@ public:
 	size_t audio_size;
 	int keyerMode = 0;
 	bool force_sdr = false;
+	// Pixelview: the stream and canvas are always limited range; this only chooses
+	// the levels of the Y'CbCr put on SDI, to match what the monitor expects.
+	bool full_range = false;
 
 	DeckLinkOutput(obs_output_t *output, DeckLinkDeviceDiscovery *discovery);
 	virtual ~DeckLinkOutput(void);

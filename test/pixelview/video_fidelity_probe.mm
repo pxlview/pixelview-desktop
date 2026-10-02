@@ -25,6 +25,7 @@ static std::atomic<int> p216_frames{0}, v210_frames{0};
 static gs_texrender_t *texrender;
 static gs_stagesurf_t *stage;
 static pixelview_v210::Mode mode;
+static bool full_output; // the DeckLink render writes full-range Y'CbCr
 
 static const char *name(void *)
 {
@@ -61,7 +62,7 @@ static void rendered(void *)
 	gs_texrender_reset(texrender);
 	if (!gs_texrender_begin(texrender, words, H))
 		return;
-	const bool drawn = pixelview_v210::draw(tex, W, H, mode);
+	const bool drawn = pixelview_v210::draw(tex, W, H, mode, full_output);
 	gs_texrender_end(texrender);
 	if (!drawn)
 		return;
@@ -89,12 +90,13 @@ struct Stat {
 	}
 };
 
-// argv: libobs data dir, graphics module, sdr|pq|hlg, canvas P216|P010|NV12, chroma saturation, source v210|P010
+// argv: libobs data dir, graphics module, sdr|pq|hlg, canvas P216|P010|NV12, chroma saturation, source v210|P010, [full]
 int main(int argc, char **argv)
 {
 	@autoreleasepool {
-		if (argc != 7)
+		if (argc != 7 && argc != 8)
 			return 2;
+		full_output = argc == 8 && !strcmp(argv[7], "full");
 		const bool source_p010 = !strcmp(argv[6], "P010");
 		const bool pq = !strcmp(argv[3], "pq"), hlg = !strcmp(argv[3], "hlg"), hdr = pq || hlg;
 		const double saturation = atof(argv[5]);
@@ -292,6 +294,14 @@ int main(int argc, char **argv)
 							      : pair == 1 ? (w[2] & 1023)
 									  : ((w[3] >> 10) & 1023);
 						}
+						if (pass == 1 && full_output) {
+							// Limited -> full as BT.2100 defines full range: Y' = 1023 E'Y,
+							// C = 1023 E'C + 512; SDI clips to 4..1019.
+							auto clip = [](double v) { return (int)(v < 4 ? 4 : v > 1019 ? 1019 : v + 0.5); };
+							y_ref = clip((y_ref - 64) * 1023.0 / 876.0);
+							cb_ref = clip(512 + (cb_ref - 512) * 1023.0 / 896.0);
+							cr_ref = clip(512 + (cr_ref - 512) * 1023.0 / 896.0);
+						}
 						luma.add(yo - y_ref);
 						if (!(x & 1)) {
 							chroma.add(cbo - cb_ref);
@@ -317,6 +327,8 @@ int main(int argc, char **argv)
 				int luma_limit = 0, chroma_limit = 0;
 				if (eight_bit && pass == 0)
 					luma_limit = chroma_limit = 1;
+				if (full_output && pass == 1)
+					luma_limit = chroma_limit = 1; // a rescale: rounding may land one code either way
 				if (hlg && region == 0)
 					luma_limit = 2; // HLG OOTF rounding near black
 				if (luma.worst > luma_limit || chroma.worst > chroma_limit)
@@ -331,7 +343,8 @@ int main(int argc, char **argv)
 		gs_texrender_destroy(texrender);
 		obs_leave_graphics();
 		obs_shutdown();
-		printf("%s colour=%s source=%s canvas=%s\n", passed ? "PASS" : "FAIL", argv[3], argv[6], argv[4]);
+		printf("%s colour=%s source=%s canvas=%s output=%s\n", passed ? "PASS" : "FAIL", argv[3], argv[6], argv[4],
+		       full_output ? "full" : "limited");
 		return passed ? 0 : 7;
 	}
 }

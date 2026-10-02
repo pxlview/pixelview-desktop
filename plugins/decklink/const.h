@@ -12,6 +12,7 @@
 #define DEACTIVATE_WNS "deactivate_when_not_showing"
 #define AUTO_START "auto_start"
 #define FORCE_SDR "force_sdr"
+#define OUTPUT_RANGE "output_range" /* Pixelview: 0 limited (default), 1 full */
 #define KEYER "keyer"
 #define SWAP "swap"
 #define ALLOW_10_BIT "allow_10_bit"
@@ -39,6 +40,9 @@
 #define TEXT_DWNS obs_module_text("DeactivateWhenNotShowing")
 #define TEXT_AUTO_START obs_module_text("AutoStart")
 #define TEXT_FORCE_SDR obs_module_text("ForceSDR")
+#define TEXT_OUTPUT_RANGE obs_module_text("OutputRange")
+#define TEXT_OUTPUT_RANGE_LIMITED obs_module_text("OutputRange.Limited")
+#define TEXT_OUTPUT_RANGE_FULL obs_module_text("OutputRange.Full")
 #define TEXT_ENABLE_KEYER obs_module_text("Keyer")
 #define TEXT_SWAP obs_module_text("SwapFC-LFE")
 #define TEXT_SWAP_TOOLTIP obs_module_text("SwapFC-LFE.Tooltip")

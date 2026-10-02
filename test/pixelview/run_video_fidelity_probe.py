@@ -28,7 +28,9 @@ GRAPHICS = BUILD / 'libobs-opengl/RelWithDebInfo/libobs-opengl.dylib'
 CASES = [('sdr', 'P216', '1', 'v210'), ('sdr', 'P010', '1', 'v210'), ('sdr', 'NV12', '1', 'v210'),
          ('sdr', 'P010', '1', 'P010'),
          ('pq', 'P216', '0.3', 'v210'), ('pq', 'P010', '0.3', 'v210'), ('hlg', 'P010', '0.3', 'v210'),
-         ('pq', 'P010', '0.3', 'P010')]
+         ('pq', 'P010', '0.3', 'P010'),
+         # The DeckLink output range switch: limited canvas content rescaled to full-range v210.
+         ('sdr', 'P010', '1', 'v210', 'full'), ('sdr', 'P010', '1', 'P010', 'full')]
 
 
 def main():
@@ -53,10 +55,10 @@ def main():
                        check=True, env=env)
         failed = []
         only = os.environ.get('PV_FIDELITY_CASE')
-        for colour, canvas, saturation, source in CASES:
-            if only and only != f'{colour}-{source}-{canvas}':
+        for colour, canvas, saturation, source, *output in CASES:
+            if only and only != '-'.join([colour, source, canvas] + output):
                 continue
-            result = subprocess.run([str(exe), str(ROOT / 'libobs/data'), str(GRAPHICS), colour, canvas, saturation, source],
+            result = subprocess.run([str(exe), str(ROOT / 'libobs/data'), str(GRAPHICS), colour, canvas, saturation, source] + output,
                                     env=env, text=True, capture_output=True, timeout=120)
             lines = [line for line in result.stdout.splitlines() if line.startswith(('RESULT', 'PASS', 'FAIL'))]
             print('\n'.join(lines), flush=True)

@@ -657,10 +657,11 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 	const int rowSize = v210 ? ((decklinkOutput->GetWidth() + 47) / 48) * 128 : decklinkOutput->GetWidth() * 4;
 	const int frameSize = rowSize * decklinkOutput->GetHeight();
 	outputV210 = v210;
+	outputFullRange = decklinkOutput->full_range;
 	outputRowBytes = rowSize;
 	for (std::vector<uint8_t> &blob : frameBlobs) {
 		blob.assign(frameSize, 0);
-		FillBlack(blob.data(), size_t(frameSize), v210);
+		FillBlack(blob.data(), size_t(frameSize), v210, outputFullRange);
 		frameQueueDecklinkToObs.push(blob.data());
 	}
 	activeBlob = nullptr;
@@ -672,12 +673,13 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		source_hdr && v210 &&
 		(obs_output_get_video_conversion(decklinkOutput->GetOutput())->colorspace == VIDEO_CS_2100_PQ);
 	BMDPixelFormat pixelFormat = v210 ? bmdFormat10BitYUV : bmdFormat8BitBGRA;
-	blog(LOG_INFO, "[decklink] output video: %s (canvas %s, %.0f nits)",
+	blog(LOG_INFO, "[decklink] output video: %s, %s range (canvas %s, %.0f nits)",
 	     !v210        ? "8-bit BGRA for the keyer"
 	     : enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "10-bit 4:2:2 YUV HLG with HDR metadata"
 							     : "10-bit 4:2:2 YUV PQ with HDR metadata")
 	     : source_hdr ? "10-bit 4:2:2 YUV SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
 			  : "10-bit 4:2:2 YUV SDR",
+	     !v210 || decklinkOutput->full_range ? "full" : "limited",
 	     colorspace == VIDEO_CS_2100_PQ ? "Rec.2100 PQ" : colorspace == VIDEO_CS_2100_HLG ? "Rec.2100 HLG" : "SDR",
 	     obs_get_video_hdr_nominal_peak_level());
 	const int64_t minimumPrerollFrames = std::max(device->GetMinimumPrerollFrames(), INT64_C(3));
@@ -705,7 +707,7 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		    theFrame->GetBytes(&initialBytes) != S_OK || !initialBytes) {
 			return false;
 		}
-		FillBlack(static_cast<uint8_t *>(initialBytes), size_t(frameSize), v210);
+		FillBlack(static_cast<uint8_t *>(initialBytes), size_t(frameSize), v210, outputFullRange);
 		result = output_->ScheduleVideoFrame(theFrame, i * frameDuration, frameDuration, frameTimescale);
 		if (result != S_OK) {
 			blog(LOG_ERROR, "failed to schedule video frame for preroll 0x%X", result);
@@ -755,15 +757,17 @@ bool DeckLinkDeviceInstance::StopOutput()
 	return true;
 }
 
-// Zero bytes are black in BGRA but a dark green in v210, where black is Y'=64, Cb=Cr=512.
-void DeckLinkDeviceInstance::FillBlack(uint8_t *bytes, size_t size, bool v210)
+// Zero bytes are black in BGRA but a dark green in v210, where black is Cb=Cr=512
+// with Y'=64 in limited range and the lowest SDI code, 4, in full range.
+void DeckLinkDeviceInstance::FillBlack(uint8_t *bytes, size_t size, bool v210, bool fullRange)
 {
 	if (!v210) {
 		memset(bytes, 0, size);
 		return;
 	}
-	static const uint32_t words[4] = {512u | 64u << 10 | 512u << 20, 64u | 512u << 10 | 64u << 20,
-					  512u | 64u << 10 | 512u << 20, 64u | 512u << 10 | 64u << 20};
+	const uint32_t y = fullRange ? 4u : 64u;
+	const uint32_t words[4] = {512u | y << 10 | 512u << 20, y | 512u << 10 | y << 20, 512u | y << 10 | 512u << 20,
+				   y | 512u << 10 | y << 20};
 	for (size_t offset = 0; offset + sizeof(words) <= size; offset += sizeof(words)) {
 		memcpy(bytes + offset, words, sizeof(words));
 	}
@@ -807,7 +811,7 @@ void DeckLinkDeviceInstance::ScheduleVideoFrame(IDeckLinkVideoFrame *frame)
 		if (blob) {
 			memcpy(bytes, blob, frameSize);
 		} else {
-			FillBlack(static_cast<uint8_t *>(bytes), size_t(frameSize), outputV210);
+			FillBlack(static_cast<uint8_t *>(bytes), size_t(frameSize), outputV210, outputFullRange);
 		}
 
 		output->ScheduleVideoFrame(frame, totalFramesScheduled * frameDuration, frameDuration, frameTimescale);

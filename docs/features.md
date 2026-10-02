@@ -445,6 +445,13 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   output mode of another size is scaled in linear light first. The sender's profile does not limit
   the output: every SDR canvas is a linear float texture. Preroll and underrun frames are
   v210 black. Only the keyer (UI hidden) still uses 8-bit BGRA.
+- **Output range** (Limited, the default, or Full) in the output settings chooses the levels of the
+  Y'CbCr put on SDI so that it matches the monitor's setting; SDR SDI carries no range flag. The
+  stream and canvas are always limited. Full rescales black/white from 64/940 to 0/1023 as BT.2100
+  defines full range, clipped to the SDI codes 4-1019 (so values that were sub-black or
+  super-white are clipped), and lands within one code of the ideal mapping; Limited stays exact.
+  Together with the capture's range setting this gives one rule: the sender's input range matches
+  the grading system, the receiver's output range matches the monitor.
 - With an HDR canvas and a device reporting HDR metadata support (and Force SDR off), the v210
   frames carry Rec.2020 HDR metadata: a PQ canvas leaves as PQ (EOTF 2), an HLG canvas as HLG
   (EOTF 3). Without HDR metadata support the HDR canvas is tone-mapped to SDR v210. The start logs
@@ -652,6 +659,12 @@ gate) fail in the current environment regardless of changes.
   exact, NV12 within one 8-bit step). The harness replicates the output UI's render with the
   shared `decklink-v210-render.hpp`; the app's own UI path, a monitor's picture and a Desktop
   sender to Desktop receiver session were still not exercised.
+- Output range switch (2026-10-02, same loop and offline probe, signed build): with Output range
+  Full the captured SDI was within one code of the BT.2100 full-range mapping on every sample of
+  all five patterns (luma 91-100% exact, chroma 94-100%, neutral chroma exact), the log reported
+  `10-bit 4:2:2 YUV SDR, full range`, and limited stayed bit-exact. The setting itself was applied
+  through the output's settings in the harness; the dropdown in the app's Output settings and a
+  monitor set to full were not looked at.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);

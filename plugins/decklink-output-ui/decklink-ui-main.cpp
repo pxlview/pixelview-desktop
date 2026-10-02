@@ -237,7 +237,7 @@ void output_start()
 			vi.fps_num = context.ovi.fps_num;
 			vi.cache_size = 16;
 			vi.colorspace = VIDEO_CS_DEFAULT;
-			vi.range = context.v210 ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
+			vi.range = conversion->range;
 			vi.name = "decklink_output";
 
 			video_output_open(&context.video_queue, &vi);
@@ -335,7 +335,8 @@ static void decklink_ui_render(void *param)
 			return;
 		}
 		pixelview_v210::draw(tex, scaled_width, scaled_height,
-				     pixelview_v210::mode_for(ctx->ovi.colorspace, target_hdr));
+				     pixelview_v210::mode_for(ctx->ovi.colorspace, target_hdr),
+				     conversion->range == VIDEO_RANGE_FULL);
 		gs_texrender_end(ctx->texrender);
 	} else {
 	if (!gs_texrender_begin(ctx->texrender, scaled_width, scaled_height)) {
