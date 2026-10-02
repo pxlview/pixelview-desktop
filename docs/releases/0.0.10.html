@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pixelview Desktop 0.0.10</title></head>
+<body>
+  <h1>Pixelview Desktop 0.0.10</h1>
+  <p>Tenth Apple Silicon release.</p>
+  <ul>
+    <li>Stream diagnostics for support: the app now sends Pixelview the log lines that describe a stream, so support can see what happened when a send or a receive goes wrong. This covers the encoder and its settings (codec, profile, bitrate, keyframe interval), the video and audio settings, connection and stream start and stop events, DeckLink events, pairing and receiving events, the app version and which Mac it is (for example "Apple M1 Pro"). Scene names, source names, file names and the rest of the application log are not sent, and tokens and passwords are removed before upload.</li>
+    <li>Diagnostics sharing is on by default. Switch it off at any time under Help &gt; Log Files &gt; Share Logs with Pixelview Support; that also deletes anything not yet sent.</li>
+    <li>New installs default to a two-second keyframe interval for HEVC (Main, Main10 and Main 4:2:2 10). Existing encoder settings are kept as they are.</li>
+  </ul>
+  <p>Pixelview Desktop is a modified distribution based on OBS Studio development snapshot <code>32.2.1-66-g6b3e55072</code> (commit <code>6b3e550729f125b6c5b3767df88c08f5aef9d264</code>). It is not an official OBS Project release.</p>
+  <p>Corresponding source: <a href="https://github.com/pxlview/pixelview-desktop/tree/v0.0.10">https://github.com/pxlview/pixelview-desktop/tree/v0.0.10</a></p>
+</body>
+</html>
