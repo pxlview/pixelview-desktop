@@ -4,6 +4,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 root="$PWD"
+source "$root/cmake/macos/pixelview-python.sh"
 version_file="$root/version.json"
 release_config="$root/release/macos.json"
 mode=prepare

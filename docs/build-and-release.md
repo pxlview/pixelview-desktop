@@ -18,6 +18,7 @@ This runbook covers the toolchain, the canonical local Developer ID build and la
 
   SDK: `.deps/gstreamer-upstream-1.28.3/sdk`; staged runtime `.deps/pixelview-gstreamer`, embedded in `pixelview-whep.plugin/Contents/Resources/GStreamer`.
 - **Target.** arm64 only, deployment target macOS 14.0, Xcode generator, CMake preset `macos`. Bundle ID `com.pixelview.desktop`; executable `Pixelview Desktop`.
+- **Python.** The build and release helpers need Python 3.12 or newer. `cmake/macos/pixelview-build.sh` and `cmake/macos/pixelview-release.sh` source `cmake/macos/pixelview-python.sh`, which keeps the first `python3` on `PATH` when it is new enough and otherwise puts `/opt/homebrew/bin` or `/usr/local/bin` first if its `python3` is; with none available they stop before building. Run the test suites with the same interpreter (`test_build_signing.py` refuses an older one).
 - **Release-only tools.** `git cmake codesign hdiutil security shasum spctl xcrun curl python3`, the AWS CLI (`aws`) for R2, the 1Password CLI (`op`).
 
 ## 2. Local development build and launch

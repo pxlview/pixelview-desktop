@@ -2,6 +2,7 @@
 # Pixelview macOS build helper. Development builds keep updates disabled.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source cmake/macos/pixelview-python.sh
 # Ordinary local builds always enter the canonical identity/process gate.
 # Release preparation keeps its independent explicit identity and clean-tag policy.
 if [[ "${PIXELVIEW_RELEASE_BUILD:-OFF}" != "ON" && "${PIXELVIEW_LOCAL_SIGNING_VERIFIED:-}" != "1" ]]; then

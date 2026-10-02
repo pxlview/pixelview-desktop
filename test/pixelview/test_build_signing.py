@@ -11,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class BuildSigningTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The build helper replaces a python3 older than 3.12 with another one,
+        # which would bypass the stub below and run the real dependency scripts.
+        assert sys.version_info >= (3, 12), "run this suite with Python 3.12 or newer"
+
     def run_helper(self, **settings):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -28,7 +34,7 @@ class BuildSigningTests(unittest.TestCase):
                               'if len(sys.argv) > 1 and sys.argv[1].endswith("bundle-runtime.py"):\n'
                               '    assert sys.argv[2:] == ["stage", ".deps/pixelview-gstreamer"]\n'
                               '    sys.exit(0)\n'
-                              'if len(sys.argv) > 1 and sys.argv[1] != "-":\n'
+                              'if len(sys.argv) > 1 and sys.argv[1] not in ("-", "-c"):\n'
                               '    sys.exit("Unstubbed build script: " + sys.argv[1])\n'
                               f'os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n')
             python.chmod(0o755)
