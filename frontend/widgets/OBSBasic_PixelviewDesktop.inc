@@ -117,6 +117,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    if(!pixelviewPairingDurable) {pixelviewUnpairRetry=true;pixelviewLease.fail("Could not save pairing identity. Click Unpair before pairing again.");return;}
    pixelviewExpectedIdentity.clear();pixelviewUnpairRetry=false;
    pixelviewPushedState.clear();
+   pixelviewLinkReport.forget();
    pixelviewAuthDeadline=0; pixelviewReconnectAt=0;
    pixelviewBackoff=1000;
    blog(LOG_INFO,"Pixelview: control socket ready (node %s, desktop %s)",pixelviewIdentity.nodeId.toUtf8().constData(),pixelviewIdentity.desktopId.toUtf8().constData());
@@ -190,6 +191,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   else if(pixelviewReconnectAt && now>=pixelviewReconnectAt && (drained || (settled && pixelviewLease.started))) {pixelviewReconnectAt=0;ConnectPixelviewDesktop();}
   RefreshPixelviewReconnect();
  }); pixelviewWatchdog->start();
+ InitPixelviewStats();
  connect(this,&OBSBasic::StreamingStarted,this,[this](bool withDelay){
   if(!PixelviewLeaseValid()) {pixelviewLease.fail("Stream authority lost before output started.");return;}
   if(withDelay) {pixelviewConnectionStatus->setText(QStringLiteral("Starting WHIP stream (delay)…"));return;}

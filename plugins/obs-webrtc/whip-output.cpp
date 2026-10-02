@@ -47,6 +47,35 @@ WHIPOutput::WHIPOutput(obs_data_t *, obs_output_t *output)
 	  start_time_ns(0),
 	  last_audio_timestamp(0)
 {
+	// Pixelview: link statistics for the Desktop's admin connection report.
+	proc_handler_add(
+		obs_output_get_proc_handler(output),
+		"void pixelview_link_stats(out bool reported, out int age_ms, out int rtt_ms, out float loss_pct, "
+		"out float jitter_ms, out int lost, out int nacked)",
+		[](void *priv_data, calldata_t *cd) { static_cast<WHIPOutput *>(priv_data)->LinkStats(cd); }, this);
+}
+
+void WHIPOutput::LinkStats(calldata_t *cd)
+{
+	std::shared_ptr<pixelview::LinkStats> video, audio;
+	{
+		std::lock_guard<std::mutex> l(link_mutex);
+		video = video_link;
+		audio = audio_link;
+	}
+	// Video carries nearly all of the stream; audio answers for an audio-only one.
+	// With simulcast this is the first layer, which Pixelview never sends more than.
+	const int64_t now = pixelview::LinkProbe::nowUs();
+	pixelview::LinkSnapshot link;
+	if (video) link = video->snapshot(now);
+	if (!link.reported && audio) link = audio->snapshot(now);
+	calldata_set_bool(cd, "reported", link.reported);
+	calldata_set_int(cd, "age_ms", link.age_ms);
+	calldata_set_int(cd, "rtt_ms", link.rtt_ms);
+	calldata_set_float(cd, "loss_pct", link.loss_pct);
+	calldata_set_float(cd, "jitter_ms", link.jitter_ms);
+	calldata_set_int(cd, "lost", link.lost);
+	calldata_set_int(cd, "nacked", (long long)link.nacked);
 }
 
 WHIPOutput::~WHIPOutput()
@@ -159,8 +188,13 @@ void WHIPOutput::ConfigureAudioTrack(std::string media_stream_id, std::string cn
 	audio_sr_reporter = std::make_shared<rtc::RtcpSrReporter>(rtp_config);
 	auto nack_responder = std::make_shared<rtc::RtcpNackResponder>();
 
-	packetizer->addToChain(audio_sr_reporter);
+	auto link = std::make_shared<pixelview::LinkStats>(ssrc, rtc::OpusRtpPacketizer::DefaultClockRate);
+	packetizer->addToChain(std::make_shared<pixelview::LinkProbe>(audio_sr_reporter, link));
 	packetizer->addToChain(nack_responder);
+	{
+		std::lock_guard<std::mutex> l(link_mutex);
+		audio_link = link;
+	}
 	audio_track->setMediaHandler(packetizer);
 }
 
@@ -238,7 +272,12 @@ void WHIPOutput::ConfigureVideoTrack(std::string media_stream_id, std::string cn
 	}
 
 	video_sr_reporter = std::make_shared<rtc::RtcpSrReporter>(rtp_config);
-	packetizer->addToChain(video_sr_reporter);
+	auto link = std::make_shared<pixelview::LinkStats>(ssrc, rtp_config->clockRate);
+	packetizer->addToChain(std::make_shared<pixelview::LinkProbe>(video_sr_reporter, link));
+	{
+		std::lock_guard<std::mutex> l(link_mutex);
+		video_link = link;
+	}
 	packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(video_nack_buffer_size));
 
 	if (video_bitrate != 0) {
@@ -694,6 +733,11 @@ void WHIPOutput::StopThread(bool signal)
 		peer_connection = nullptr;
 		audio_track = nullptr;
 		video_track = nullptr;
+	}
+	{
+		std::lock_guard<std::mutex> l(link_mutex);
+		audio_link = nullptr;
+		video_link = nullptr;
 	}
 
 	SendDelete();

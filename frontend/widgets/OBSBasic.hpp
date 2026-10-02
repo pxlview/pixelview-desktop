@@ -56,6 +56,7 @@ class OBSAbout;
 #include <utility/PixelviewReceiveCredentialStore.hpp>
 #include <utility/PixelviewDeepLink.hpp>
 #include <utility/PixelviewLogShipper.hpp>
+#include <utility/PixelviewLinkReport.hpp>
 class QTabBar;
 class QLineEdit;
 class QToolButton;
@@ -388,6 +389,11 @@ private:
 	QByteArray pixelviewPushedState;
 	QString pixelviewStateInstance;
 	quint64 pixelviewStateSeq = 0;
+	// Connection report pushed as DESKTOP_STATS (OBSBasic_PixelviewStats.inc).
+	void InitPixelviewStats();
+	void PushPixelviewStats();
+	QTimer *pixelviewStatsTimer = nullptr;
+	pixelview::LinkReport pixelviewLinkReport;
 	// Sender-setting failures are dialogs locally but errors for a remote command.
 	QString *pixelviewRemoteError = nullptr;
 	void PixelviewWarn(const QString &title, const QString &message);

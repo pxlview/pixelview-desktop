@@ -1,5 +1,6 @@
 // Compiles extracted, unmodified production frontend methods against offline boundaries.
 #include "frontend/utility/PixelviewDesktop.hpp"
+#include "frontend/utility/PixelviewLinkReport.hpp"
 #include <QtCore/QJsonDocument>
 #include <QtCore/QStringList>
 #include <cassert>
@@ -112,6 +113,7 @@ public:
  int controls=0; void HandlePixelviewControl(const QJsonObject &){++controls;}
  int streamEnds=0; void PixelviewStreamEnded(const QJsonObject &){++streamEnds;}
  int statePushes=0; QByteArray pixelviewPushedState; void QueuePixelviewStatePush(){++statePushes;}
+ pixelview::LinkReport pixelviewLinkReport; void InitPixelviewStats(){}
  void PixelviewOutputStopped();
  void QueuePixelviewOutputStopped(int delay=0);
  void CancelPixelviewStart();
