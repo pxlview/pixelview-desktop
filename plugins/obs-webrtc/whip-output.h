@@ -14,6 +14,8 @@
 
 #include <rtc/rtc.hpp>
 
+#include "pixelview-link-probe.h"
+
 struct videoLayerState {
 	uint16_t sequenceNumber;
 	uint32_t rtpTimestamp;
@@ -34,6 +36,9 @@ public:
 	inline size_t GetTotalBytes() { return total_bytes_sent; }
 
 	inline int GetConnectTime() { return connect_time_ms; }
+
+	// Pixelview: what the media server reports back about this stream.
+	void LinkStats(calldata_t *cd);
 
 private:
 	void ConfigureAudioTrack(std::string media_stream_id, std::string cname);
@@ -66,6 +71,11 @@ private:
 	std::shared_ptr<rtc::Track> video_track;
 	std::shared_ptr<rtc::RtcpSrReporter> audio_sr_reporter;
 	std::shared_ptr<rtc::RtcpSrReporter> video_sr_reporter;
+
+	// Read from the UI thread while the stop thread clears them.
+	std::mutex link_mutex;
+	std::shared_ptr<pixelview::LinkStats> audio_link;
+	std::shared_ptr<pixelview::LinkStats> video_link;
 
 	std::map<obs_encoder_t *, std::shared_ptr<videoLayerState>> videoLayerStates;
 

@@ -29,6 +29,8 @@ public:
  std::function<void(QByteArray)> message=[](QByteArray){};
  std::function<void(int)> disconnected=[](int){};
  void *socket=nullptr;
+ // Round trip of the last answered control ping (RFC6455), -1 until the first one on this socket.
+ int controlRttMs=-1;
  void openSocket(QUrl url,QString token);
  void sendSocket(QByteArray body);
  void closeSocket(bool normal=true);

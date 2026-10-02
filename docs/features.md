@@ -159,6 +159,34 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   selection, the DeckLink properties with their options, encoders, profiles, FPS options and the
   current values, bitrate in kbps with the 1-12 Mbps range, and mute.
 
+### Connection report
+
+- The Desktop reports its connection quality on the control socket as `DESKTOP_STATS {stats}`, so
+  the admin can show signal bars per Desktop (backend `docs/desktop-remote-control.md`; the
+  backend keeps the last report with the Desktop's presence and forwards it to the node's admins
+  as `SOCKET_DESKTOP_STATS`). A report is measurements only; the admin grades them.
+- While streaming it is sent every two seconds with `media`: the bitrate sent over the last
+  interval (from the output's byte counter) and what the media server reports back about the
+  stream over RTCP - `rtt_ms`, `loss_pct`, `jitter_ms`, the cumulative `lost` and `nacked`
+  (packets the server asked to have resent) and `report_age_ms`. Nothing extra is sent on the
+  wire: the WHIP output already sends an RTCP sender report per second and the engine answers
+  each with a receiver report, so the round trip is the time from a sender report leaving to its
+  receiver report arriving, minus the delay the server states (`plugins/obs-webrtc/
+  pixelview-link-stats.h`, fed by `pixelview-link-probe.h` in the track's handler chain and read
+  by the frontend through the output's `pixelview_link_stats` procedure). It is the round trip
+  to the server the stream is published to, on the media path itself, smoothed over the last few
+  reports. With simulcast it covers the first video layer; Pixelview sends one.
+- Always, `control.rtt_ms` is the round trip of the control socket's own WebSocket ping (every
+  20 s, so it is `null` for the first 20 s of a socket). Not streaming, a report is sent only
+  when it differs from the last one, which is once per answered ping. A new socket gets one
+  after `DESKTOP_READY`.
+- Once per minute of streaming a summary goes to the application log, and with it to the log
+  upload as a `send` line: `Pixelview link: 60 s, 7950 kb/s sent, round trip 23 ms (max 41),
+  loss max 0.4 %, jitter max 3.1 ms, 12 lost, 20 resent on request, control round trip 34 ms`.
+  Sampling and the log summary continue through a control-socket reconnect; only the push waits
+  for the socket.
+- An older backend answers `DESKTOP_STATS` with `unknown_message`, which is ignored.
+
 ### Capture
 
 - DeckLink devices are enumerated every two seconds from the input plugin's own property list (no
@@ -490,7 +518,7 @@ configuration.
   central Loki as `job="pixelview-desktop"` (backend `docs/desktop-log-ingestion.md`). The Desktop
   never talks to Loki or Grafana directly.
 - Only lines on an allowlist are uploaded (`LogShipper::role`): Pixelview's own lines (pairing,
-  control socket, remote control, receiving), the encoders with their settings blocks
+  control socket, remote control, the per-minute link summary, receiving), the encoders with their settings blocks
   (`[VideoToolbox …]`, `[CoreAudio …]`, `[… encoder: '…']`), the stream output (`[obs-webrtc]`,
   streaming start/stop, `Output '…'` frame totals), the failure lines libobs logs bare (`Stream
   output type … failed to start!  Last Error: …`, `Error encoding with encoder`, `creating encoder
@@ -582,7 +610,12 @@ gate) fail in the current environment regardless of changes.
   `test_pairing_ux.py`, `test_pairing_defaults.py`, `test_backend_selection.py`, `test_stream_lock.py`,
   `test_streaming_ui.py`, `test_remote_control.py` (admin remote-control source contracts),
   `test_log_shipper.py` (`log_shipper.cpp`: capture bound and switch, redaction, roles, batching,
-  retry/pause outcomes, spool across launches; plus the log-handler, menu and receiver wiring).
+  retry/pause outcomes, spool across launches; plus the log-handler, menu and receiver wiring),
+  `test_link_stats.py` (connection report: `link_stats_native.cpp` parses sender reports,
+  receiver reports and NACKs including truncated and foreign input; `link_probe_loopback.cpp`
+  runs the WHIP handler chain on a real libdatachannel peer connection against an in-process
+  receiver and measures a round trip from its receiver reports; `link_report.cpp` covers bitrate,
+  send-on-change, the report shape and the log summary; plus the plugin and frontend wiring).
   `desktop_backend_smoke.mm` is an opt-in live tool.
 - Keychain: `test_keychain_reliability.py`, `test_keychain_noninteractive.py`,
   `test_keychain_async.py` (mocked Security APIs), `test_receive_keychain_restart.py` and
@@ -798,6 +831,12 @@ gate) fail in the current environment regardless of changes.
 
 ### Not verified
 
+- The connection report in the built app (2026-10-02: written against a tree another build was
+  using, so the app was not compiled; `whip-output.cpp`, `OBSBasic.cpp` and the two socket files
+  passed a syntax-only compile with the app target's flags). Not run: a real stream to an engine
+  (that the engine's receiver reports arrive and give a plausible round trip, loss and jitter
+  over a real network), `DESKTOP_STATS` against a backend, the bars in the admin, and the log
+  summary reaching Loki.
 - The receive canvas following the DeckLink output mode's frame rate, and the on-screen Start
   failure warning, on real DeckLink hardware (offline harness and compile only).
 - Physical SDI picture inspection of the receiver's DeckLink output (cadence, colour, long-run A/V
@@ -870,7 +909,8 @@ gate) fail in the current environment regardless of changes.
   WHIP service, streaming retry; `OBSBasic_PixelviewReceive.inc` - Receiving panel, viewer
   controller wiring, jitter setting, canvas precision transaction, DeckLink output binding;
   `OBSBasic_PixelviewEncoding.inc`, `OBSBasic_PixelviewAudio.inc`, `OBSBasic_PixelviewDeepLinks.inc`,
-  `OBSBasic_PixelviewLogs.inc` (log upload transport and switch).
+  `OBSBasic_PixelviewLogs.inc` (log upload transport and switch),
+  `OBSBasic_PixelviewStats.inc` (connection report timer and push).
   Capture shell, FPS, mode persistence and the close gate are in `OBSBasic.cpp`.
 - `frontend/utility/Pixelview*.{hpp,cpp,mm}` - `PixelviewDesktop.hpp` (control policy),
   `PixelviewDesktopConnection.hpp` / `PixelviewDesktopMac.mm` (exchange, socket, Keychain),
@@ -878,7 +918,11 @@ gate) fail in the current environment regardless of changes.
   defaults), `PixelviewReceiver*` (viewer flow), `PixelviewReceiveCredentialStore*`,
   `Pixelview*Keychain*.hpp`, `PixelviewDeepLink*`, `PixelviewEncoding.hpp`, `PixelviewFPS.hpp`,
   `PixelviewCapturePolicy.hpp`, `PixelviewConfig.hpp`, `PixelviewAudio.hpp`, `PixelviewSparkle.*`,
-  `PixelviewLogShipper.hpp` (log capture and upload policy).
+  `PixelviewLogShipper.hpp` (log capture and upload policy), `PixelviewLinkReport.hpp`
+  (connection report shape, send-on-change and log summary).
+- `plugins/obs-webrtc` - `pixelview-whip-security.h` (WHIP resource origin rule),
+  `pixelview-link-stats.h` / `pixelview-link-probe.h` (RTCP link statistics for the connection
+  report).
 - `plugins/pixelview-whep` - WHEP source, capability probe, profile offer, video-format policy,
   `codec-route.c` (codec/profile route selector), `scripts/` (runtime staging, rswebrtc build,
   SBOM), `patches/`, `tests/`.

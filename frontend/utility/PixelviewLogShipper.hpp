@@ -136,7 +136,7 @@ public:
   // encoders and the DeckLink output, which libobs and the plugin log bare.
   static const char *receive[]={"[pixelview-whep]","[pixelview-receive]","Pixelview receive","[decklink-output-ui]",
    "[decklink] ","failed to create video frame","failed to schedule video frame","No active audio"};
-  static const char *send[]={"[obs-webrtc]","==== Streaming","Pixelview remote control","[pixelview-send]",
+  static const char *send[]={"[obs-webrtc]","==== Streaming","Pixelview remote control","Pixelview link:","[pixelview-send]",
    "[VideoToolbox ","[CoreAudio ","Output '","obs-output '","Stream output type ","Error encoding with encoder '",
    "creating encoder '","Video stopped, number of skipped frames","video_thread("};
   static const char *app[]={"Pixelview","[pixelview-","video settings reset:","audio settings reset:","decklink:",
