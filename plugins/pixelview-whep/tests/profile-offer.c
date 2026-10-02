@@ -79,6 +79,17 @@ int main(int argc, char **argv)
  /* Without the Main 4:2:2 10 probe bit there is no profile-id 4 entry. */
  limits.profiles=31; limited = pixelview_profile_offer_caps_limited(base,&limits);
  g_assert_nonnull(limited); g_assert_cmpuint(gst_caps_get_size(limited),==,5); gst_caps_unref(limited);
+ /* With the Main 4:4:4 10 probe bit there is a second profile-id 4 entry, told apart by its constraints. */
+ limits.profiles=127; limited = pixelview_profile_offer_caps_limited(base,&limits);
+ g_assert_nonnull(limited); g_assert_cmpuint(gst_caps_get_size(limited),==,7);
+ unsigned main422=0, main444=0;
+ for (guint i=0; i<gst_caps_get_size(limited); i++) {
+  const GstStructure *s=gst_caps_get_structure(limited,i);
+  if (g_strcmp0(gst_structure_get_string(s,"profile-id"),"4")) continue;
+  main422 += !g_strcmp0(gst_structure_get_string(s,"interop-constraints"),"1d0800000000");
+  main444 += !g_strcmp0(gst_structure_get_string(s,"interop-constraints"),"1c0800000000");
+ }
+ g_assert_cmpuint(main422,==,1); g_assert_cmpuint(main444,==,1); gst_caps_unref(limited);
  limits.profiles=63;
  limits.max_width=3840; g_assert_null(pixelview_profile_offer_caps_limited(base,&limits));
  limits.max_width=1920; limits.hevc_level_id=93;

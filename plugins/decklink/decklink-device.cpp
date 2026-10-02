@@ -171,6 +171,20 @@ bool DeckLinkDevice::GetOutput(IDeckLinkOutput **output)
 	return true;
 }
 
+bool DeckLinkDevice::SupportsOutputPixelFormat(DeckLinkDeviceMode *mode, BMDPixelFormat format)
+{
+	ComPtr<IDeckLinkOutput> output;
+	if (!mode || !GetOutput(&output)) {
+		return false;
+	}
+	BMDDisplayMode actual = bmdModeUnknown;
+	decklink_bool_t supported = false;
+	return output->DoesSupportVideoMode(bmdVideoConnectionUnspecified, mode->GetDisplayMode(), format,
+					    bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
+					    &supported) == S_OK &&
+	       supported;
+}
+
 bool DeckLinkDevice::GetKeyer(IDeckLinkKeyer **deckLinkKeyer)
 {
 	if (device->QueryInterface(IID_IDeckLinkKeyer, (void **)deckLinkKeyer) != S_OK) {

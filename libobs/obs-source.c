@@ -1718,6 +1718,7 @@ enum convert_type {
 	CONVERT_P010,
 	CONVERT_V210,
 	CONVERT_R10L,
+	CONVERT_P416,
 };
 
 static inline enum convert_type get_convert_type(enum video_format format, bool full_range, uint8_t trc)
@@ -1780,8 +1781,10 @@ static inline enum convert_type get_convert_type(enum video_format format, bool 
 	case VIDEO_FORMAT_R10L:
 		return CONVERT_R10L;
 
-	case VIDEO_FORMAT_P216:
 	case VIDEO_FORMAT_P416:
+		return CONVERT_P416;
+
+	case VIDEO_FORMAT_P216:
 		/* Unimplemented */
 		break;
 	}
@@ -2063,6 +2066,20 @@ static inline bool set_v210_sizes(struct obs_source *source, const struct obs_so
 	return true;
 }
 
+/* Pixelview: 4:4:4 Y'CbCr in 16-bit words (ten-bit codes << 6), both planes at
+ * full resolution. */
+static inline bool set_p416_sizes(struct obs_source *source, const struct obs_source_frame *frame)
+{
+	source->async_convert_width[0] = frame->width;
+	source->async_convert_width[1] = frame->width;
+	source->async_convert_height[0] = frame->height;
+	source->async_convert_height[1] = frame->height;
+	source->async_texture_formats[0] = GS_R16;
+	source->async_texture_formats[1] = GS_RG16;
+	source->async_channel_count = 2;
+	return true;
+}
+
 static inline bool set_r10l_sizes(struct obs_source *source, const struct obs_source_frame *frame)
 {
 	source->async_convert_width[0] = frame->width;
@@ -2132,6 +2149,9 @@ static inline bool init_gpu_conversion(struct obs_source *source, const struct o
 
 	case CONVERT_R10L:
 		return set_r10l_sizes(source, frame);
+
+	case CONVERT_P416:
+		return set_p416_sizes(source, frame);
 
 	case CONVERT_NONE:
 		assert(false && "No conversion requested");
@@ -2214,6 +2234,7 @@ static void upload_raw_frame(gs_texture_t *tex[MAX_AV_PLANES], const struct obs_
 	case CONVERT_P010:
 	case CONVERT_V210:
 	case CONVERT_R10L:
+	case CONVERT_P416:
 		for (size_t c = 0; c < MAX_AV_PLANES; c++) {
 			if (tex[c])
 				gs_texture_set_image(tex[c], frame->data[c], frame->linesize[c], false);
@@ -2356,6 +2377,17 @@ static const char *select_conversion_technique(enum video_format format, bool fu
 		}
 	}
 
+	case VIDEO_FORMAT_P416: {
+		switch (trc) {
+		case VIDEO_TRC_PQ:
+			return "P416_PQ_2020_709_Reverse";
+		case VIDEO_TRC_HLG:
+			return "P416_HLG_2020_709_Reverse";
+		default:
+			return "P416_SRGB_Reverse";
+		}
+	}
+
 	case VIDEO_FORMAT_BGRA:
 	case VIDEO_FORMAT_BGRX:
 	case VIDEO_FORMAT_RGBA:
@@ -2367,7 +2399,6 @@ static const char *select_conversion_technique(enum video_format format, bool fu
 		break;
 
 	case VIDEO_FORMAT_P216:
-	case VIDEO_FORMAT_P416:
 		/* Unimplemented */
 		break;
 	}
@@ -3488,8 +3519,12 @@ static void copy_frame_data(struct obs_source_frame *dst, const struct obs_sourc
 		copy_frame_data_plane(dst, src, 3, dst->height);
 		break;
 
-	case VIDEO_FORMAT_P216:
 	case VIDEO_FORMAT_P416:
+		copy_frame_data_plane(dst, src, 0, dst->height);
+		copy_frame_data_plane(dst, src, 1, dst->height);
+		break;
+
+	case VIDEO_FORMAT_P216:
 		/* Unimplemented */
 		break;
 	}

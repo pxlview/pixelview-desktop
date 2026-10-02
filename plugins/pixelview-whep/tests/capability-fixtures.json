@@ -616,6 +616,106 @@
         "92461b53b363f692b351e4d644f1f30fb12d1f4ed8bfd364f0a93e6ac693ee8c",
         "d4b91bfe374a2ef583128dbb577dc2f03ec1b6c3de611dd0bbb1d143c3377f7b"
       ]
+    },
+    {
+      "name": "main444",
+      "command": [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=192x108:rate=60,scale=1920:1080:flags=neighbor,format=yuv444p10le",
+        "-frames:v",
+        "3",
+        "-color_range",
+        "tv",
+        "-colorspace",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-c:v",
+        "libx265",
+        "-preset",
+        "ultrafast",
+        "-profile:v",
+        "main444-10",
+        "-x265-params",
+        "level-idc=4.1:high-tier=0:log-level=error:pools=1:frame-threads=1:bframes=0:keyint=3:info=0",
+        "-crf",
+        "35",
+        "/Users/max/src/pixelview-desktop/plugins/pixelview-whep/.test-build/capability-fixtures/main444.hevc"
+      ],
+      "sha256": "7173952de9903b5586f1eb70e53a1ac65a0230c0d095b0833025bea8e177db94",
+      "bytes": 9852,
+      "ffprobe": {
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "hevc",
+            "codec_long_name": "H.265 / HEVC (High Efficiency Video Coding)",
+            "profile": "Rext",
+            "codec_type": "video",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "width": 1920,
+            "height": 1080,
+            "coded_width": 1920,
+            "coded_height": 1088,
+            "has_b_frames": 0,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "16:9",
+            "pix_fmt": "yuv444p10le",
+            "level": 123,
+            "color_range": "tv",
+            "color_space": "bt709",
+            "refs": 1,
+            "view_ids_available": "",
+            "view_pos_available": "",
+            "r_frame_rate": "60/1",
+            "avg_frame_rate": "25/1",
+            "time_base": "1/1200000",
+            "nb_read_frames": "3",
+            "extradata_size": 89,
+            "disposition": {
+              "default": 0,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "non_diegetic": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0,
+              "multilayer": 0
+            }
+          }
+        ]
+      },
+      "encoded_timing": {
+        "vui_num_units_in_tick": 1,
+        "vui_time_scale": 60,
+        "general_tier_flag": 0
+      },
+      "packet_sha256": [
+        "4a5d5f2453ad123fac7ca2d4c88bf5fa0a174db7ddb04482f71734766987776c",
+        "335181b7ae8e2a0edcb713f4882c6e5cb29cdb1614a260bb1e37e9ea2cc44a24",
+        "e8ad73448e3244f0767ad852235b1e2a25baf43b99fff7a5f42099c8179c8866"
+      ]
     }
   ]
 }

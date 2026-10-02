@@ -9,7 +9,7 @@ static GstStaticCaps route_caps = GST_STATIC_CAPS("video/x-h265,stream-format=hv
 struct route_selector {
  gint refs;
  GstElement *bin, *policy; /* borrowed while the event probe is installed */
- gboolean selected, admit_main422;
+ gboolean selected, admit_main422, admit_main444;
 };
 static void selector_unref(gpointer opaque)
 {
@@ -46,12 +46,13 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
    * the decoder chosen for this one. */
   const char *profile=gst_structure_get_string(wire,"profile");
   if(!profile) { gst_caps_unref(policy);goto failed; }
-  gboolean main422=!g_strcmp0(profile,"main-422-10");
-  if(g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !(main422 && s->admit_main422)) {
-   /* A sender on HEVC 4:2:2 10-bit that this Mac did not verify (or on another
-    * non-Main profile) is refused with a canonical reason before any AU; the
-    * profile string itself is never copied into the message. */
-   unsupported=main422?PV_UNSUPPORTED_HEVC_MAIN_422_10:PV_UNSUPPORTED_HEVC_PROFILE;
+  gboolean main422=!g_strcmp0(profile,"main-422-10"),main444=!g_strcmp0(profile,"main-444-10");
+  if(g_strcmp0(profile,"main") && g_strcmp0(profile,"main-10") && !(main422 && s->admit_main422) &&
+     !(main444 && s->admit_main444)) {
+   /* A sender on HEVC 4:2:2 or 4:4:4 10-bit that this Mac did not verify (or on
+    * another non-Main profile) is refused with a canonical reason before any AU;
+    * the profile string itself is never copied into the message. */
+   unsupported=main422?PV_UNSUPPORTED_HEVC_MAIN_422_10:main444?PV_UNSUPPORTED_HEVC_MAIN_444_10:PV_UNSUPPORTED_HEVC_PROFILE;
    gst_caps_unref(policy);goto failed;
   }
   gst_caps_set_simple(policy,"profile",G_TYPE_STRING,profile,NULL);
@@ -89,4 +90,9 @@ void pv_codec_route_admit_main422(GstElement *filter, gboolean admit)
 {
  struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
  if(s) s->admit_main422=admit;
+}
+void pv_codec_route_admit_main444(GstElement *filter, gboolean admit)
+{
+ struct route_selector *s=g_object_get_data(G_OBJECT(filter),"pixelview-route");
+ if(s) s->admit_main444=admit;
 }

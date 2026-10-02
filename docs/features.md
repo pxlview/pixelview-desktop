@@ -228,6 +228,13 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   to 8-bit, which truncated a 10-bit SDI signal before a 10-bit encode); a pixel format saved
   explicitly in Device settings is kept. SDR limited-range capture is not clamped to 64-940, so
   sub-black and super-white (PLUGE, overshoots) survive into a 10-bit canvas.
+- An RGB 4:4:4 SDI signal is captured without chroma subsampling as 10-bit RGB (R10l): chosen
+  automatically in Auto mode, or as **10-bit RGB** under Pixel Format (Device settings, and
+  `set_capture` `pixel_format` on the control route) with a fixed mode. With a fixed mode the pixel
+  format has to match the signal: the card delivers black for an RGB format on a Y'CbCr signal,
+  and converts an RGB signal to 4:2:2 for a YUV format. RGB is read at video levels (64-940)
+  unless Color Range says Full, unclamped like Y'CbCr. An upstream shader bug that dropped the low
+  four bits of green in every R10l capture is fixed (`compute_r10l_reverse`).
 - Canvas and output are fixed at 1920x1080 on every video reset. **Fit** resets position, scale,
   bounds, crop and rotation to an inner-fit; polling, hotplug and restored sources never rewrite
   transforms. FPS offers 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 as exact rationals through the
@@ -305,11 +312,17 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   the backend refuses a blocked one with `DESKTOP_ERROR profile_blocked`, which re-applies the
   switch. Unpairing forgets the list, and a backend without the policy blocks nothing. Covered by the
   protocol and encoding harness tests; not yet run in the built app against a backend.
-- The sidebar Profile list labels HEVC Main10 "(recommended)" and Main 4:2:2 10 "(transcoded for
-  browsers)", each with a tooltip (the Pixelview Player iOS app and Pixelview Desktop on Apple
-  silicon play 4:2:2 natively; browsers get a server transcode). The saved profile value is unchanged.
-- HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
-  range only). AMD AMF HEVC lists Main (default) and, only when `obs-amf-test` reports
+- The sidebar Profile list labels HEVC Main10 "(recommended)", Main 4:2:2 10 "(transcoded for
+  browsers)" and Main 4:4:4 10 "(Pixelview Desktop only)", each with a tooltip (the Pixelview
+  Player iOS app and Pixelview Desktop on Apple silicon play 4:2:2 natively, only Pixelview Desktop
+  plays 4:4:4; everything else gets a server transcode). The saved profile value is unchanged.
+- Main 4:4:4 10 (`main44410`) is offered only where the selected VideoToolbox encoder itself lists
+  `HEVC_Main44410_AutoLevel` among its supported profile values (asked once per process; Apple
+  silicon hardware does). The macOS SDK declares no constant for it and Apple documents no 4:4:4
+  HEVC encode, so this relies on undocumented behaviour that a macOS update could change. The
+  profile must be set explicitly: a 4:4:4 pixel buffer without it is silently encoded as 4:2:0.
+- HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 and
+  Main 4:4:4 10 to P416 (both limited range only). AMD AMF HEVC lists Main (default) and, only when `obs-amf-test` reports
   `supports_hevc_10bit` for the render adapter (HEVC max profile Main10, else native P010 input),
   Main10; it codes the profile matching that input format and refuses P010 input on adapters
   without 10-bit HEVC. An HEVC encoder without a profile property keeps a P010 canvas and otherwise
@@ -324,6 +337,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   - Main 4:2:2 10 (P216): luma and chroma exact; the VideoToolbox encoder plugin rounds the 16-bit
     canvas words to the nearest 10-bit code instead of letting VideoToolbox truncate them (which
     cost one code on some samples).
+  - Main 4:4:4 10 (P416): no chroma is shared between pixels. From a Y'CbCr source the encoder
+    input is exact; from an RGB capture it is the BT.709 conversion rounded once (exact or one
+    code off). The same rounding to 10-bit codes applies. A 4:2:2 capture gains nothing from this
+    profile: it needs an RGB 4:4:4 source.
   - Main10 (P010): luma exact; chroma is the mean of each row pair in SDR, and `[1 2 1]/4` around
     the even row for the top-left sited BT.2100 modes, with no horizontal filtering.
   - Main and H.264 (NV12): the 10-bit value rounded once to 8 bits, chroma as for Main10.
@@ -428,9 +445,9 @@ An earlier backend handoff proposing receiver registration over the control sock
   (source-built patched rswebrtc 0.15.2, libnice, VideoToolbox decoders, libopus) in the plugin
   bundle. No host GStreamer is used.
 - On each connection the plugin probes the VideoToolbox decoders and offers only verified profiles:
-  H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10 and Main 4:2:2 10
-  (see below), VP9 profiles 0 and 2, plus stereo Opus. Each stream is decoded in its
-  own sampling and depth (v210 for 4:2:2, P010 for 10-bit 4:2:0, NV12 for 8-bit) at up to 1920x1080 (30 or 60 fps depending on the negotiated HEVC level) in the
+  H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10, Main 4:2:2 10
+  and Main 4:4:4 10 (see below), VP9 profiles 0 and 2, plus stereo Opus. Each stream is decoded in its
+  own sampling and depth (P416 for 4:4:4, v210 for 4:2:2, P010 for 10-bit 4:2:0, NV12 for 8-bit) at up to 1920x1080 (30 or 60 fps depending on the negotiated HEVC level) in the
   operator's colour mode, passed as `connect(..., color)`:
   - SDR (default): limited-range BT.709 only. BT.2020 or PQ/HLG input stops with
     `hdr-source-needs-hdr-receive`.
@@ -521,6 +538,29 @@ An earlier backend handoff proposing receiver registration over the control sock
   Receiving panel stops with "The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot
   decode. Please use the HEVC Main or Main10 profile on the sender."
 
+### HEVC 4:4:4 10 reception
+
+- HEVC Main 4:4:4 10 is one more profile on the same route. The capability probe decodes a Main
+  4:4:4 10 fixture through the patched `vtdec_hw` to AYUV64 (the patch picks it only for a 4:4:4
+  stream; upstream would subsample to a 4:2:0 format), and only then does the offer add a second
+  `profile-id=4` entry with `interop-constraints=1c0800000000` (Main 4:2:2 10 is `1d08...`). The
+  offer no longer asks for ULPFEC/RED: the engine never answered with them, and with seven video
+  entries their payload types exhausted the 96-127 range, which left the last codec (VP9 profile
+  2) without its RTX type. Every offered codec now carries RTX only. The
+  engine passes a 4:4:4 sender through only to a receiver that offers exactly that entry
+  (pv-engine `hevc-10bit-444`); every other viewer gets its VP9 transcode.
+- VideoToolbox fills AYUV64 with the stream's codes scaled to sixteen bits, within 16 of
+  code << 6; the plugin rounds each sample to the nearest ten-bit code and hands OBS
+  `VIDEO_FORMAT_P416` holding exactly code << 6 (`pixelview_video_unpack_ayuv64`, one copy of the
+  frame on the CPU). libobs reads P416 texel for texel, with no chroma interpolation (a Pixelview
+  addition: upstream has no P416 source conversion). SDR, PQ and HLG use the ordinary colour modes.
+- Where the probe does not decode 4:4:4, the entry is not offered and the engine transcodes. A
+  `main-444-10` stream that arrives anyway stops with `unsupported-hevc-main-444-10` and "The
+  sender is streaming HEVC 4:4:4 10-bit, which this Mac cannot decode. Please use the HEVC Main or
+  Main10 profile on the sender."
+- 4:4:4 only reaches SDI as 4:4:4 with the DeckLink output format set to 10-bit 4:4:4 RGB (below);
+  the default 4:2:2 output subsamples it like any other program.
+
 ### Jitter buffer
 
 `PixelviewReceive/BufferMs` defaults to 100 ms and is passed explicitly on every `connect`. The
@@ -572,8 +612,16 @@ follows the sender rate. The reset is refused, with an on-screen reason, while a
   output mode of another size is scaled in linear light first. The sender's profile does not limit
   the output: every SDR canvas is a linear float texture. Preroll and underrun frames are
   v210 black. Only the keyer (UI hidden) still uses 8-bit BGRA.
+- **Output format** in the output settings is 10-bit 4:2:2 Y'CbCr (the default, above) or 10-bit
+  4:4:4 RGB: the program is packed as R10l by the `DrawR10L*` techniques (one word per pixel, no
+  chroma subsampling, the same transfer handling and SDR/PQ/HLG modes) and the card's SDI output is
+  switched to RGB 4:4:4 on a single link for as long as the output runs. A card with two SDI
+  outputs may default to dual link, which would put half of R and B on the second connector; the
+  output always asks for single link, so dual-link RGB monitors are not served. The start fails
+  with a message when the device cannot send RGB in the selected mode: a 3G-SDI device carries RGB
+  4:4:4 up to 1080p30 only. The setting applies at the next output start.
 - **Output range** (Limited, the default, or Full) in the output settings chooses the levels of the
-  Y'CbCr put on SDI so that it matches the monitor's setting; SDR SDI carries no range flag. The
+  Y'CbCr (or RGB) put on SDI so that it matches the monitor's setting; SDR SDI carries no range flag. The
   stream and canvas are always limited. Full rescales black/white from 64/940 to 0/1023 as BT.2100
   defines full range, clipped to the SDI codes 4-1019 (so values that were sub-black or
   super-white are clipped), and lands within one code of the ideal mapping; Limited stays exact.
@@ -756,9 +804,12 @@ gate) fail in the current environment regardless of changes.
   `test_receiver_login_errors.py`, `receiver_expiry.cpp`, `test_receive_ui.py`,
   `test_mode_persistence.py`, `test_deep_links.py`, `test_canvas_fullscreen.py`,
   `test_receive_preview_zoom.py`, `test_receive_precision_canvas.py`, `run_receive_precision_probe.py`, `run_video_fidelity_probe.py`
-  (v210 through the real libobs canvas to the encoder input and to the DeckLink v210 render)
-  (real libobs/OpenGL level count). `receiver_live.py` and `receiver_media_live.py` are opt-in live
-  tools.
+  (v210 through the real libobs canvas to the encoder input and to the DeckLink v210 render),
+  `run_video_fidelity_444_probe.py` (10-bit RGB and P416 through the canvas to the P416 encoder
+  input and the DeckLink RGB render)
+  (real libobs/OpenGL level count). `receiver_live.py`, `receiver_media_live.py` and
+  `run_receive_sdi_live.py` (a live session received and played out of a DeckLink device without
+  the application window) are opt-in live tools.
 - Test patterns (`plugins/pixelview-test-pattern/tests/run-generator.py`, generator only, no
   libobs): RP 219 code values and bar/PLUGE layout, every pattern legal at four sizes, v210 packing
   round trip with co-sited chroma, overlay bounds (inside the 75 % bars, chroma aligned, nothing
@@ -1007,6 +1058,52 @@ gate) fail in the current environment regardless of changes.
   eye and on the scopes against a still of the same footage. Video levels in and out, Full levels
   in and out, and a full-range source to a limited- range output all matched the still, with the
   loss of fine detail expected at 12 Mbit/s. Not recorded to a file and not measured numerically.
+- HEVC 4:4:4 10, offline (2026-10-02, M1 Pro, signed development build):
+  `run_video_fidelity_444_probe.py` through a real libobs scene: a 10-bit RGB source reached the
+  DeckLink RGB render identical on every sample (grey ramp, gradients, a colour changing on every
+  pixel, random noise, codes 4-1019) and the P416 encoder input exact or one code off (one BT.709
+  rounding); a P416 source reached the encoder input identical and the RGB render exact or one
+  code off; full-range output within one code. `run-422-rounding.py` on the hardware encoder with
+  the Main 4:4:4 10 profile: ffprobe reports `yuv444p10le` and all 128 patches decode to the exact
+  codes. `run-whep-loopback.py` (22 cases, loopback server built from pv-engine
+  `feat/hevc-444-passthrough`): x265 Main 4:4:4 10 in SDR, PQ and HLG was selected as
+  `hevc-10bit-444` passthrough and reached OBS as `VIDEO_FORMAT_P416` with every sample a multiple
+  of 64 and a fixture whose Cb alternates on every pixel intact on all 128 rows; PQ-in-SDR stopped
+  with its typed reason. One of the 22 cases needed a rerun because the capability probe dropped a
+  profile in that process (see Known limitations). VideoToolbox's AYUV64 output was compared with
+  its native 4:4:4 decode over all 1024 codes of each component: rounding recovers every code.
+- HEVC 4:4:4 10 on SDI hardware (2026-10-02, same build, 1080p25 unless noted, local pentest backend and local
+  pv-engine with `feat/hevc-444-passthrough`):
+  - Cables alone (`run-e2e-sdi-tool.py --format rgb444`, pattern out of one card, captured on
+    another, no stream): UltraStudio 4K Mini to Recorder 3G and Monitor 3G to 4K Mini both carried
+    10-bit RGB 4:4:4 identically on every measured value in limited and full range (all patches,
+    632 ramp codes, a field whose R and B swap on every pixel, sub-black and super-white).
+  - End to end: the 4K Mini played the RGB picture into the Recorder 3G; the sender application
+    captured it as 10-bit RGB and streamed Main 4:4:4 10 from the hardware encoder at 12 Mbit/s
+    (configured and started through the backend's Desktop control route: capture device, mode,
+    `pixel_format`, profile, bitrate); the engine detected `hevc-10bit-444` and passed it through
+    to the receiver's Main 4:4:4 10 offer; `run_receive_sdi_live.py` (the real `PixelviewReceiver`,
+    the packaged receive plugin, a libobs canvas and the built DeckLink output with the shared
+    renderer, without the application window) played it out of the Monitor 3G as RGB 4:4:4 into
+    the 4K Mini, where 50 captured frames were averaged. Flat patches were within 1 code in R, G
+    and B, sub-black 40 and super-white 980 came through, 618 of the ramp's 632 steps were
+    present, the per-pixel R/B swap kept 297-298 of its 300 codes and the bar edge on an odd pixel
+    stayed one pixel wide. With the receiver's Output range Full: within 1.5 codes of the
+    full-range mapping, black and white at 4 and 1019. The same RGB chain with the Main 4:2:2 10
+    profile kept 41 of the 300 (chroma shared by pixel pairs) and smeared the edge.
+  - An eleven-minute Main 4:4:4 10 run: 16,590 frames from the sender with no lagged, skipped or
+    dropped frames logged, the receiver's five-second windows at 125 frames plus or minus one
+    throughout, video lateness up to 9 ms, about 12.3 Mbit/s from the engine.
+  - Regression on the same build: the 10-bit 4:2:2 Y'CbCr picture with Main 4:2:2 10 and the
+    4:2:2 output measured as before (luma exact, chroma within 1, row-alternating chroma at full
+    amplitude), also directly after an RGB run had been killed.
+  - 1080p24 (generator, sender frame rate and capture mode, receiver output and analyser all at
+    24 fps): the same figures as at 25.
+  Not verified: the receiving application itself (screen control was declined, so the receive
+  form, the Output format dropdown and the output dialog were not driven; the harness uses the
+  same receiver class, plugin, shaders and output plugin), the sender's sidebar label and tooltip
+  on screen, 23.976 and 30 fps, HDR 4:4:4, a monitor's picture, any Mac other than this M1 Pro,
+  two separate Macs, the engine's VP9 transcode of a 4:4:4 sender for other viewers, production.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
@@ -1121,12 +1218,22 @@ gate) fail in the current environment regardless of changes.
   output mode; scaling resamples. Main10 and Main streams are 4:2:0 (and Main 8-bit) by definition,
   so on the receiver the DeckLink output's 4:2:2 chroma is interpolated vertically from them. HDR is not bit-exact for very saturated colours (float canvas precision).
   The lossy HEVC encode in between is of course not bit-exact either.
-- The sender enforces limited range only for Main 4:2:2 10 (P216); Main/Main10 honour a saved Full
-  setting.
+- The sender enforces limited range only for Main 4:2:2 10 (P216) and Main 4:4:4 10 (P416);
+  Main/Main10 honour a saved Full setting.
+- HEVC 4:4:4 rests on VideoToolbox behaviour Apple does not document (the encoder profile has no
+  SDK constant; hardware 4:4:4 decode is not in any published specification). It was measured on
+  one M1 Pro only. A Mac whose encoder does not list the profile does not offer it, and a Mac
+  whose probe does not decode it receives the engine's transcode. 4:4:4 on SDI is RGB, single
+  link, 10-bit: a 3G-SDI device carries it up to 1080p30, 12-bit and dual-link RGB are not
+  offered, and the UltraStudio Recorder 3G does not capture RGB on HDMI. RGB to Y'CbCr and back
+  rounds twice, so even before the lossy encode an RGB picture returns within one code, not
+  bit-exact. Browsers and the iOS player get a VP9 transcode of a 4:4:4 sender.
 - Capability probing caches a reduced decoder mask for the process if the pinned applemedia decoder
   sends EOS before its last probe frame (about one probe in twelve in a 2026-10-01 repetition, a
-  different profile each time); an isolated decoder patch was evaluated and rejected. A run that
-  loses the Main 4:2:2 10 bit receives a 4:2:2 sender as the engine's VP9 transcode until restart.
+  different profile each time); an isolated decoder patch was evaluated and rejected. With the
+  seventh fixture (Main 4:4:4 10), 34 of 40 probes on 2026-10-02 returned the full mask while a
+  test suite loaded the Mac; one of the six lost the 4:4:4 bit. A run that loses the Main 4:2:2 10
+  or Main 4:4:4 10 bit receives such a sender as the engine's VP9 transcode until restart.
 - Signal-lock and frozen-frame telemetry are not implemented; device presence only.
 - Deep-link HTTPS dispatch needs Associated Domains and a served AASA; only the custom scheme works
   today. Fit has no undo; UI strings are English only.
@@ -1166,8 +1273,11 @@ gate) fail in the current environment regardless of changes.
 - `plugins/decklink` - `decklink-output-receive.inc` (receive bind, health, `receive_status`);
   `plugins/decklink-output-ui/decklink-receive-ui.inc`
   (watchdog, resume budget, AutoStart, Start refusal logging).
-- `plugins/mac-videotoolbox` - SDK compatibility header, spatial-AQ handling and the 10-bit rounding
-  of 4:2:2 canvas frames for the sender (`tests/run-422-rounding.py`, hardware encoder plus ffmpeg).
+- `plugins/mac-videotoolbox` - SDK compatibility header, spatial-AQ handling, the Main 4:4:4 10
+  profile and the 10-bit rounding of 4:2:2 and 4:4:4 canvas frames for the sender
+  (`tests/run-422-rounding.py`, hardware encoder plus ffmpeg).
+- `libobs/data` - `default.effect` (`DrawV210*`, `DrawR10L*`: the DeckLink output's packing) and
+  `format_conversion.effect` (canvas outputs, and the v210, P416 and R10l source conversions).
 - `test/pixelview` - Python drivers and the C++/Objective-C++ harness sources they compile.
 - `release/` - `pixelview-macos.sh` (1Password-wrapped prepare/publish), `macos.json` (team, Sparkle
   public key), `source-inventory.json`; `version.json` at the root is the product-version source.

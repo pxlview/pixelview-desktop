@@ -168,11 +168,14 @@ protected:
 	FrameQueue frameQueueObsToDecklink;
 	FrameQueue frameQueueDecklinkToObs;
 	uint8_t *activeBlob = nullptr;
-	// Pixelview: the scheduled frames' layout (v210, or BGRA for the keyer).
-	bool outputV210 = false;
+	// Pixelview: the scheduled frames' layout (v210, R10l RGB, or BGRA for the keyer).
+	BMDPixelFormat outputFormat = bmdFormat8BitBGRA;
+	// Held while the output runs: the SDK reverts configuration changes (the
+	// SDI 4:4:4 switch) as soon as the interface that made them is released.
+	ComPtr<IDeckLinkConfiguration> outputConfiguration;
 	bool outputFullRange = false;
 	int outputRowBytes = 0;
-	static void FillBlack(uint8_t *bytes, size_t size, bool v210, bool fullRange);
+	static void FillBlack(uint8_t *bytes, size_t size, BMDPixelFormat format, bool fullRange);
 	BMDTimeValue frameDuration = 0;
 	BMDTimeScale frameTimescale = 0;
 	BMDTimeScale totalFramesScheduled;

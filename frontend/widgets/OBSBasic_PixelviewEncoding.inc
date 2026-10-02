@@ -155,6 +155,7 @@ static QString PixelviewProfileLabel(const QString &name, const QString &value)
 {
 	if (value == QStringLiteral("main10")) return name + QStringLiteral(" (recommended)");
 	if (value == QStringLiteral("main42210")) return name + QStringLiteral(" (transcoded for browsers)");
+	if (value == QStringLiteral("main44410")) return name + QStringLiteral(" (Pixelview Desktop only)");
 	return name;
 }
 static QString PixelviewProfileTip(const QString &value)
@@ -163,6 +164,8 @@ static QString PixelviewProfileTip(const QString &value)
 		return QStringLiteral("Recommended. Plays directly everywhere.");
 	if (value == QStringLiteral("main42210"))
 		return PIXELVIEW_PLATFORM_TEXT("Native in the Pixelview Player iOS app and in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, lower quality.", "Native in the Pixelview Player iOS app and in Pixelview Desktop on a Mac with Apple silicon. Transcoded for browsers: more latency, lower quality.");
+	if (value == QStringLiteral("main44410"))
+		return PIXELVIEW_PLATFORM_TEXT("Full-resolution colour for RGB sources. Native only in Pixelview Desktop on Apple silicon; every other viewer gets a transcode. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.", "Full-resolution colour for RGB sources. Native only in Pixelview Desktop on a Mac with Apple silicon; every other viewer gets a transcode. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.");
 	return QString();
 }
 // END PROFILE LABELS
@@ -416,8 +419,10 @@ bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool 
 				 ? pixelview::implicitProfileFormat(config_get_string(activeConfiguration, "Video", "ColorFormat"))
 				 : pixelview::profileFormat(profile);
 		if (!pixelview::profileRangeSupported(profile, config_get_string(activeConfiguration, "Video", "ColorRange")))
-			return fail(QStringLiteral("Main 4:2:2 10 requires limited-range P216. The current full-range video setting is incompatible; preferences were not changed."));
-		if (format.empty()) return fail(QStringLiteral("This HEVC profile has no verified input-format mapping in Pixelview; select Main, Main10 or Main 4:2:2 10."));
+			return fail(profile == "main44410"
+					    ? QStringLiteral("Main 4:4:4 10 requires limited-range P416. The current full-range video setting is incompatible; preferences were not changed.")
+					    : QStringLiteral("Main 4:2:2 10 requires limited-range P216. The current full-range video setting is incompatible; preferences were not changed."));
+		if (format.empty()) return fail(QStringLiteral("This HEVC profile has no verified input-format mapping in Pixelview; select Main, Main10, Main 4:2:2 10 or Main 4:4:4 10."));
 	} else if (strcmp(obs_get_encoder_codec(id), "h264") == 0) {
 		format = "NV12";
 	}

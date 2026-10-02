@@ -30,6 +30,8 @@ public:
 	// Pixelview: the stream and canvas are always limited range; this only chooses
 	// the levels of the Y'CbCr put on SDI, to match what the monitor expects.
 	bool full_range = false;
+	// Pixelview: 10-bit 4:4:4 RGB (R10l) on the wire instead of 10-bit 4:2:2 Y'CbCr.
+	bool rgb444 = false;
 
 	DeckLinkOutput(obs_output_t *output, DeckLinkDeviceDiscovery *discovery);
 	virtual ~DeckLinkOutput(void);

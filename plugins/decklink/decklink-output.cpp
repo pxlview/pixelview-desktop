@@ -26,6 +26,7 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 	decklinkOutput->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklinkOutput->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
 	decklinkOutput->full_range = obs_data_get_int(settings, OUTPUT_RANGE) == 1;
+	decklinkOutput->rgb444 = obs_data_get_int(settings, OUTPUT_FORMAT) == 1;
 	proc_handler_add(
 		obs_output_get_proc_handler(output), "void bind_receive(ptr source, out bool bound)",
 		[](void *p, calldata_t *cd) {
@@ -67,15 +68,16 @@ static void *decklink_output_create(obs_data_t *settings, obs_output_t *output)
 			return decklinkOutput;
 		}
 
-		// Pixelview: the program leaves as 10-bit 4:2:2 Y'CbCr (v210, limited range),
-		// in SDR as well as HDR. Only the keyer needs alpha and stays 8-bit BGRA.
-		const bool v210 = decklinkOutput->keyerMode == 0;
+		// Pixelview: the program leaves as 10-bit 4:2:2 Y'CbCr (v210) or, when the
+		// operator chooses it, 10-bit 4:4:4 RGB (R10l), in SDR as well as HDR. Only
+		// the keyer needs alpha and stays 8-bit BGRA.
+		const bool tenBit = decklinkOutput->keyerMode == 0;
 		struct video_scale_info to = {};
-		to.format = v210 ? VIDEO_FORMAT_V210 : VIDEO_FORMAT_BGRA;
+		to.format = !tenBit ? VIDEO_FORMAT_BGRA : decklinkOutput->rgb444 ? VIDEO_FORMAT_R10L : VIDEO_FORMAT_V210;
 		to.width = mode->GetWidth();
 		to.height = mode->GetHeight();
-		// BGRA is full-range RGB by nature; for v210 the operator picks the SDI levels.
-		to.range = (v210 && !decklinkOutput->full_range) ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
+		// BGRA is full-range RGB by nature; for the 10-bit formats the operator picks the SDI levels.
+		to.range = (tenBit && !decklinkOutput->full_range) ? VIDEO_RANGE_PARTIAL : VIDEO_RANGE_FULL;
 		to.colorspace = (device->GetSupportsHDRMetadata() && !decklinkOutput->force_sdr) ? VIDEO_CS_2100_PQ
 												 : VIDEO_CS_709;
 
@@ -97,6 +99,7 @@ static void decklink_output_update(void *data, obs_data_t *settings)
 	decklink->keyerMode = (int)obs_data_get_int(settings, KEYER);
 	decklink->force_sdr = obs_data_get_bool(settings, FORCE_SDR);
 	decklink->full_range = obs_data_get_int(settings, OUTPUT_RANGE) == 1;
+	decklink->rgb444 = obs_data_get_int(settings, OUTPUT_FORMAT) == 1;
 }
 
 static bool decklink_output_start(void *data)
@@ -160,6 +163,14 @@ static bool decklink_output_start(void *data)
 	decklink->SetSize(mode->GetWidth(), mode->GetHeight());
 
 	device->SetKeyerMode(decklink->keyerMode);
+
+	if (decklink->keyerMode == 0 && decklink->rgb444 && !device->SupportsOutputPixelFormat(mode, bmdFormat10BitRGBXLE)) {
+		obs_output_set_last_error(decklink->GetOutput(),
+					  "This DeckLink device cannot send 10-bit 4:4:4 RGB in the selected output mode. "
+					  "A 3G-SDI device carries RGB 4:4:4 up to 1080p30; choose a lower frame rate or "
+					  "the 4:2:2 output format.");
+		return false;
+	}
 
 	if (!decklink->Activate(device, decklink->modeID)) {
 		obs_output_set_last_error(
@@ -338,6 +349,11 @@ static obs_properties_t *decklink_output_properties(void *unused)
 							OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(range, TEXT_OUTPUT_RANGE_LIMITED, 0);
 	obs_property_list_add_int(range, TEXT_OUTPUT_RANGE_FULL, 1);
+	// Pixelview: 4:4:4 needs an RGB-capable link (3G-SDI: up to 1080p30) and monitor input.
+	obs_property_t *format = obs_properties_add_list(props, OUTPUT_FORMAT, TEXT_OUTPUT_FORMAT, OBS_COMBO_TYPE_LIST,
+							 OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(format, TEXT_OUTPUT_FORMAT_YUV422, 0);
+	obs_property_list_add_int(format, TEXT_OUTPUT_FORMAT_RGB444, 1);
 
 	obs_properties_add_list(props, KEYER, TEXT_ENABLE_KEYER, OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 

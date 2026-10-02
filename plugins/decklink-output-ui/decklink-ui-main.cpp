@@ -30,9 +30,11 @@ struct decklink_ui_output {
 
 	video_t *video_queue;
 	gs_texrender_t *texrender;
-	// Pixelview v210 output: program scaled to the output mode when the sizes differ.
+	// Pixelview 10-bit output: program scaled to the output mode when the sizes differ.
 	gs_texrender_t *scaled;
+	// v210 (4:2:2 Y'CbCr) or R10l (4:4:4 RGB) packed on the GPU; neither means keyer BGRA.
 	bool v210;
+	bool r10l;
 	gs_stagesurf_t *stagesurfaces[STAGE_BUFFER_COUNT];
 	bool surf_written[STAGE_BUFFER_COUNT];
 	size_t stage_index;
@@ -207,15 +209,18 @@ void output_start()
 			const uint32_t width = conversion->width;
 			const uint32_t height = conversion->height;
 
-			// Pixelview: the card gets 10-bit 4:2:2 Y'CbCr (v210) packed on the GPU, one
-			// RGBA8 texel per 32-bit word. Only the keyer still takes 8-bit BGRA.
+			// Pixelview: the card gets 10-bit 4:2:2 Y'CbCr (v210) or 10-bit 4:4:4 RGB
+			// (R10l) packed on the GPU, one RGBA8 texel per 32-bit word. Only the keyer
+			// still takes 8-bit BGRA.
 			context.v210 = conversion->format == VIDEO_FORMAT_V210;
+			context.r10l = conversion->format == VIDEO_FORMAT_R10L;
+			const bool packed = context.v210 || context.r10l;
 			const uint32_t surface_width = context.v210 ? pixelview_v210::row_words(width) : width;
-			const enum gs_color_format surface_format = context.v210 ? GS_RGBA : GS_BGRA;
+			const enum gs_color_format surface_format = packed ? GS_RGBA : GS_BGRA;
 
 			obs_enter_graphics();
 			context.texrender = gs_texrender_create(surface_format, GS_ZS_NONE);
-			if (context.v210 && (context.ovi.base_width != width || context.ovi.base_height != height)) {
+			if (packed && (context.ovi.base_width != width || context.ovi.base_height != height)) {
 				context.scaled = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 			}
 			for (gs_stagesurf_t *&surf : context.stagesurfaces) {
@@ -230,7 +235,7 @@ void output_start()
 			context.stage_index = 0;
 
 			video_output_info vi = {0};
-			vi.format = context.v210 ? VIDEO_FORMAT_V210 : VIDEO_FORMAT_BGRA;
+			vi.format = conversion->format;
 			vi.width = width;
 			vi.height = height;
 			vi.fps_den = context.ovi.fps_den;
@@ -309,7 +314,7 @@ static void decklink_ui_render(void *param)
 	const bool source_hdr = (ctx->ovi.colorspace == VIDEO_CS_2100_PQ) || (ctx->ovi.colorspace == VIDEO_CS_2100_HLG);
 	const bool target_hdr = source_hdr && (conversion->colorspace == VIDEO_CS_2100_PQ);
 
-	if (ctx->v210) {
+	if (ctx->v210 || ctx->r10l) {
 		if (ctx->scaled) {
 			// Output mode and canvas differ in size: scale in linear light first. A
 			// same-size program is read 1:1 so its samples stay exact.
@@ -331,12 +336,18 @@ static void decklink_ui_render(void *param)
 			gs_texrender_end(ctx->scaled);
 			tex = gs_texrender_get_texture(ctx->scaled);
 		}
-		if (!gs_texrender_begin(ctx->texrender, pixelview_v210::row_words(scaled_width), scaled_height)) {
+		if (!gs_texrender_begin(ctx->texrender,
+					ctx->v210 ? pixelview_v210::row_words(scaled_width) : scaled_width,
+					scaled_height)) {
 			return;
 		}
-		pixelview_v210::draw(tex, scaled_width, scaled_height,
-				     pixelview_v210::mode_for(ctx->ovi.colorspace, target_hdr),
-				     conversion->range == VIDEO_RANGE_FULL);
+		const pixelview_v210::Mode mode = pixelview_v210::mode_for(ctx->ovi.colorspace, target_hdr);
+		const bool full_range = conversion->range == VIDEO_RANGE_FULL;
+		if (ctx->v210) {
+			pixelview_v210::draw(tex, scaled_width, scaled_height, mode, full_range);
+		} else {
+			pixelview_v210::draw_r10l(tex, scaled_width, scaled_height, mode, full_range);
+		}
 		gs_texrender_end(ctx->texrender);
 	} else {
 	if (!gs_texrender_begin(ctx->texrender, scaled_width, scaled_height)) {

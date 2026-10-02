@@ -136,6 +136,8 @@ int main(void)
 	check_profile(encoder_id, kVTProfileLevel_HEVC_Main_AutoLevel, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
 	check_profile(encoder_id, kVTProfileLevel_HEVC_Main10_AutoLevel, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange);
 	check_profile(encoder_id, kVTProfileLevel_HEVC_Main42210_AutoLevel, kCVPixelFormatType_422YpCbCr16BiPlanarVideoRange);
+	/* Main 4:4:4 10: listed by the hardware encoder itself, no SDK constant. */
+	check_profile(encoder_id, CFSTR("HEVC_Main44410_AutoLevel"), kCVPixelFormatType_444YpCbCr16BiPlanarVideoRange);
 	CFRelease(list);
 	return 0;
 }

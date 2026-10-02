@@ -37,7 +37,7 @@
  
  /* TODO: Add support for more formats to videotexturecache-vulkan/gl.
   * VideoToolbox will output most formats with HW-backed buffers,
-@@ -544,11 +545,40 @@
+@@ -544,11 +545,47 @@
   * TODO: read src_pix_fmt to get the preferred output format
   * https://wiki.multimedia.cx/index.php/Apple_ProRes#Frame_header
   */
@@ -57,7 +57,7 @@
  static GstVideoFormat
 -get_preferred_video_format (GstStructure * s, gboolean prores)
 +get_preferred_video_format (GstStructure * s, gboolean prores,
-+    gboolean chroma_422, guint bit_depth)
++    gboolean chroma_422, gboolean chroma_444, guint bit_depth)
  {
    const GValue *list = gst_structure_get_value (s, "format");
    guint i, size = gst_value_list_get_size (list);
@@ -66,6 +66,13 @@
 +   * formats below would make VideoToolbox subsample it vertically. */
 +  if (chroma_422 && format_list_has (list, GST_VIDEO_FORMAT_v210))
 +    return GST_VIDEO_FORMAT_v210;
++
++  /* A 4:4:4 stream keeps its chroma as AYUV64, the one 4:4:4 Y'CbCr layout
++   * this element maps to a CoreVideo format. VideoToolbox fills it with the
++   * stream's code scaled to sixteen bits, within 16 of code << 6, so rounding
++   * to the nearest multiple of 64 gives back a ten-bit stream's exact codes. */
++  if (chroma_444 && !prores && format_list_has (list, GST_VIDEO_FORMAT_AYUV64))
++    return GST_VIDEO_FORMAT_AYUV64;
 +
 +  /* When downstream accepts both, a 4:2:0 stream is delivered at its own bit
 +   * depth whatever the list order. VideoToolbox widens eight-bit video to
@@ -79,33 +86,38 @@
    for (i = 0; i < size; i++) {
      const GValue *value = gst_value_list_get_value (list, i);
      const char *fmt = g_value_get_string (value);
-@@ -673,8 +703,15 @@
+@@ -673,8 +710,18 @@
      if (gst_structure_has_field_typed (s, "format", GST_TYPE_LIST)) {
        GstStructure *is = gst_caps_get_structure (vtdec->input_state->caps, 0);
        const char *name = gst_structure_get_name (is);
 +      guint bit_depth = 0;
 +
 +      gst_structure_get_uint (is, "bit-depth-luma", &bit_depth);
++      const char *chroma = gst_structure_get_string (is, "chroma-format");
++      const char *profile = gst_structure_get_string (is, "profile");
++
        format = get_preferred_video_format (s,
 -          g_strcmp0 (name, "video/x-prores") == 0);
 +          g_strcmp0 (name, "video/x-prores") == 0,
-+          g_strcmp0 (gst_structure_get_string (is, "chroma-format"),
-+              "4:2:2") == 0
-+          || g_strcmp0 (gst_structure_get_string (is, "profile"),
-+              "main-422-10") == 0, bit_depth);
++          g_strcmp0 (chroma, "4:2:2") == 0
++          || g_strcmp0 (profile, "main-422-10") == 0,
++          g_strcmp0 (chroma, "4:4:4") == 0
++          || g_strcmp0 (profile, "main-444-10") == 0, bit_depth);
      }
  
      if (format == GST_VIDEO_FORMAT_UNKNOWN) {
-@@ -2036,10 +2073,73 @@
+@@ -2034,12 +2081,75 @@
+ out:
+   gst_h264_decoder_config_record_free (config);
    return ret;
- }
- 
++}
++
 +/* The reorder queue only has to hold the stream's own reordering depth:
 + * sps_max_num_reorder_pics bounds how many frames can precede any frame in
 + * output order. Holding the level-agnostic DPB size instead delays every
 + * frame by up to 16 frames (640 ms at 25 fps) even when the stream has no
 + * B-frames, and that delay is not reported when the framerate is unknown. */
- static gboolean
++static gboolean
 +get_hevc_reorder_depth (GstVtdec * vtdec, GstBuffer * codec_data, gint * depth)
 +{
 +  GstH265Parser *parser;
@@ -155,9 +167,9 @@
 +  gst_h265_parser_free (parser);
 +  gst_buffer_unmap (codec_data, &map);
 +  return found;
-+}
-+
-+static gboolean
+ }
+ 
+ static gboolean
  compute_hevc_decode_picture_buffer_size (GstVtdec * vtdec,
      GstBuffer * codec_data, int *length)
  {

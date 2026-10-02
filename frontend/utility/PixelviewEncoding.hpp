@@ -115,7 +115,7 @@ inline std::string withoutAmfBFrameOverrides(const std::string &options, bool av
 inline int quickBitrateKbps(int mbps) { return mbps >= 1 && mbps <= 12 ? mbps * 1000 : 0; }
 inline bool profileRangeSupported(const std::string &profile, const std::string &range)
 {
-	return profile != "main42210" || range != "Full";
+	return (profile != "main42210" && profile != "main44410") || range != "Full";
 }
 // Explicit SDR input format; profile metadata alone never changes the OBS video pipeline.
 inline std::string profileFormat(const std::string &profile)
@@ -123,6 +123,7 @@ inline std::string profileFormat(const std::string &profile)
 	if (profile == "main") return "NV12";
 	if (profile == "main10") return "P010";
 	if (profile == "main42210") return "P216";
+	if (profile == "main44410") return "P416";
 	return {};
 }
 // HEVC encoders without a profile property (AMD AMF) derive Main or Main10 from

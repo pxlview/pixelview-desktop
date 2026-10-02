@@ -26,18 +26,20 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
   gboolean hevc = !g_ascii_strcasecmp(name,"H265");
   gboolean vp9 = !g_ascii_strcasecmp(name,"VP9");
   gboolean opus = !g_ascii_strcasecmp(name,"OPUS");
-  unsigned choices[3] = {0,0,0};
+  unsigned choices[4] = {0,0,0,0};
   if (h264) choices[0] = profiles & PV_PROFILE_H264;
   if (hevc && valid_level) {
    choices[0] = profiles & PV_PROFILE_HEVC_MAIN;
    choices[1] = profiles & PV_PROFILE_HEVC_MAIN10;
    /* Main 4:2:2 10 only when the probe decoded it, at the probed level. */
    choices[2] = profiles & PV_PROFILE_HEVC_MAIN422_10;
+   /* Main 4:4:4 10 likewise: RExt with the 4:2:2 chroma constraint cleared. */
+   choices[3] = profiles & PV_PROFILE_HEVC_MAIN444_10;
   }
   if (vp9) { choices[0] = profiles & PV_PROFILE_VP9_0; choices[1] = profiles & PV_PROFILE_VP9_2; }
   if (opus) choices[0] = 1;
   gboolean first = TRUE;
-  for (unsigned j=0; j<3; j++) {
+  for (unsigned j=0; j<4; j++) {
    if (!choices[j]) continue;
    GstStructure *s = gst_structure_copy(source);
    if (!first) {
@@ -58,7 +60,7 @@ GstCaps *pixelview_profile_offer_caps(const GstCaps *input, unsigned profiles, u
     /* GstSDP serializes string fields in insertion order. Reinsert in engine order. */
     gst_structure_remove_fields(s,"level-id","profile-id","tier-flag","tx-mode",NULL);
     gst_structure_set(s,"level-id",G_TYPE_STRING,level_string,"profile-id",G_TYPE_STRING,j ? "2" : "1","tier-flag",G_TYPE_STRING,"0","tx-mode",G_TYPE_STRING,"SRST",NULL);
-    if (j == 2) gst_structure_set(s,"profile-id",G_TYPE_STRING,"4","interop-constraints",G_TYPE_STRING,"1d0800000000",NULL);
+    if (j >= 2) gst_structure_set(s,"profile-id",G_TYPE_STRING,"4","interop-constraints",G_TYPE_STRING,j == 2 ? "1d0800000000" : "1c0800000000",NULL);
    }
    if (vp9) gst_structure_set(s,"profile-id",G_TYPE_STRING,j ? "2" : "0",NULL);
    gst_caps_append_structure(out,s);
@@ -72,7 +74,7 @@ GstCaps *pixelview_profile_offer_caps_limited(const GstCaps *input,
 {
  if (!l || !l->max_width || !l->max_height || !l->max_fps ||
      l->max_width > 1920 || l->max_height > 1080 || l->max_fps > 60) return NULL;
- if (l->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10)) {
+ if (l->profiles & PV_PROFILE_HEVC_ANY) {
   /* H.265 Table A.6 MaxLumaPs / MaxLumaSr, limited to current HD policy. */
   guint64 ps=0, sr=0;
   switch (l->hevc_level_id) {

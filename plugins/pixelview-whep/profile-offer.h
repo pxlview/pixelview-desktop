@@ -6,6 +6,8 @@
  * No default mask: caller must supply hardware/decoder/output-path probe results.
  * HEVC Main 4:2:2 10 is offered only when the probe decoded it to v210 (the
  * patched vtdec), so the chroma is never silently subsampled to 4:2:0.
+ * HEVC Main 4:4:4 10 likewise only when the probe decoded it to AYUV64, the
+ * patched vtdec's un-subsampled 4:4:4 output.
  * VP9 profile 3 is deliberately absent until a 4:2:2/4:4:4 decode path is proven. */
 enum pixelview_receive_profile {
  PV_PROFILE_H264 = 1u,
@@ -14,7 +16,9 @@ enum pixelview_receive_profile {
  PV_PROFILE_VP9_0 = 8u,
  PV_PROFILE_VP9_2 = 16u,
  PV_PROFILE_HEVC_MAIN422_10 = 32u,
+ PV_PROFILE_HEVC_MAIN444_10 = 64u,
 };
+#define PV_PROFILE_HEVC_ANY (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10 | PV_PROFILE_HEVC_MAIN444_10)
 /* Transfer-full result; input unchanged. HEVC advertises the exact supplied valid
  * level-id. Zero or an invalid level removes HEVC, never upgrades capability.
  * Do not claim level 6 from a smaller roundtrip or copy Safari capabilities.

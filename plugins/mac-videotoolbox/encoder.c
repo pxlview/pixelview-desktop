@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <obs-module.h>
 #include <util/darray.h>
 #include <util/platform.h>
@@ -119,6 +120,72 @@ static void log_osstatus(int log_level, struct vt_encoder *enc, const char *cont
 	CFRelease(err);
 }
 
+/* Pixelview: HEVC Main 4:4:4 10. The hardware encoder lists this value among its
+ * supported ProfileLevel values on Apple silicon, but the SDK declares no
+ * constant for it (the header stops at Main42210). Without the profile set, a
+ * 4:4:4 pixel buffer is silently encoded as 4:2:0. */
+#define PV_PROFILE_HEVC_MAIN444_10 CFSTR("HEVC_Main44410_AutoLevel")
+
+#ifdef ENABLE_HEVC
+/* Whether this encoder offers Main 4:4:4 10: asked of a throwaway session,
+ * since only the encoder itself knows (no public API or constant). */
+static bool hevc_444_query(const char *encoder_id)
+{
+	CFStringRef id = CFStringCreateWithCString(kCFAllocatorDefault, encoder_id, kCFStringEncodingUTF8);
+	const void *keys[] = {kVTVideoEncoderSpecification_EncoderID};
+	const void *values[] = {id};
+	CFDictionaryRef spec = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 1, &kCFTypeDictionaryKeyCallBacks,
+						  &kCFTypeDictionaryValueCallBacks);
+	VTCompressionSessionRef session = NULL;
+	bool supported = false;
+	if (VTCompressionSessionCreate(kCFAllocatorDefault, 1920, 1080, kCMVideoCodecType_HEVC, spec, NULL, NULL, NULL,
+				       NULL, &session) == noErr) {
+		CFDictionaryRef properties = NULL;
+		if (VTSessionCopySupportedPropertyDictionary(session, &properties) == noErr && properties) {
+			CFDictionaryRef level = CFDictionaryGetValue(properties, kVTCompressionPropertyKey_ProfileLevel);
+			CFArrayRef list = level ? CFDictionaryGetValue(level, kVTPropertySupportedValueListKey) : NULL;
+			supported = list && CFArrayContainsValue(list, CFRangeMake(0, CFArrayGetCount(list)),
+								 PV_PROFILE_HEVC_MAIN444_10);
+		}
+		if (properties)
+			CFRelease(properties);
+		VTCompressionSessionInvalidate(session);
+		CFRelease(session);
+	}
+	CFRelease(spec);
+	CFRelease(id);
+	return supported;
+}
+
+/* The properties are rebuilt often; ask each encoder once per process. */
+static bool hevc_444_supported(const char *encoder_id)
+{
+	static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+	static struct {
+		char id[128];
+		bool supported;
+	} cache[4];
+	static size_t cached;
+	bool supported = false, found = false;
+	pthread_mutex_lock(&mutex);
+	for (size_t i = 0; i < cached && !found; i++) {
+		if (strcmp(cache[i].id, encoder_id) == 0) {
+			supported = cache[i].supported;
+			found = true;
+		}
+	}
+	if (!found) {
+		supported = hevc_444_query(encoder_id);
+		if (cached < sizeof(cache) / sizeof(cache[0]) && strlen(encoder_id) < sizeof(cache[0].id)) {
+			strcpy(cache[cached].id, encoder_id);
+			cache[cached++].supported = supported;
+		}
+	}
+	pthread_mutex_unlock(&mutex);
+	return supported;
+}
+#endif
+
 static CFStringRef obs_to_vt_profile(CMVideoCodecType codec_type, const char *profile, enum video_format format)
 {
 	if (codec_type == kCMVideoCodecType_H264) {
@@ -146,6 +213,8 @@ static CFStringRef obs_to_vt_profile(CMVideoCodecType codec_type, const char *pr
 			if (strcmp(profile, "main42210") == 0)
 				return kVTProfileLevel_HEVC_Main42210_AutoLevel;
 		}
+		if (strcmp(profile, "main44410") == 0)
+			return PV_PROFILE_HEVC_MAIN444_10;
 		return kVTProfileLevel_HEVC_Main_AutoLevel;
 #else
 		(void)format;
@@ -1141,11 +1210,12 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
 		size_t plane_linesize = CVPixelBufferGetBytesPerRowOfPlane(pixbuf, i);
 		size_t plane_height = CVPixelBufferGetHeightOfPlane(pixbuf, i);
 
-		/* Pixelview: the 4:2:2 canvas output holds ten-bit codes in 16-bit words
-		 * (code << 6) plus up to about +-16 of float rounding noise from the linear
-		 * canvas. VideoToolbox truncates to ten bits, which turned that noise into
-		 * a -1 code error on roughly half the samples; round to the nearest code. */
-		const bool round10 = enc->vt_pix_fmt == kCVPixelFormatType_422YpCbCr16BiPlanarVideoRange;
+		/* Pixelview: the 4:2:2 and 4:4:4 canvas outputs hold ten-bit codes in 16-bit
+		 * words (code << 6) plus up to about +-16 of float rounding noise from the
+		 * linear canvas. VideoToolbox truncates to ten bits, which turned that noise
+		 * into a -1 code error on roughly half the samples; round to the nearest code. */
+		const bool round10 = enc->vt_pix_fmt == kCVPixelFormatType_422YpCbCr16BiPlanarVideoRange ||
+				     enc->vt_pix_fmt == kCVPixelFormatType_444YpCbCr16BiPlanarVideoRange;
 		for (size_t j = 0; j < plane_height; j++) {
 			if (round10) {
 				const uint16_t *in = (const uint16_t *)f;
@@ -1304,6 +1374,9 @@ static obs_properties_t *vt_properties_h26x(void *data __unused, void *type_data
 		obs_property_list_add_string(p, "main10", "main10");
 		if (__builtin_available(macOS 12.3, *)) {
 			obs_property_list_add_string(p, "main 4:2:2 10", "main42210");
+		}
+		if (hevc_444_supported(encoder_type_data->id)) {
+			obs_property_list_add_string(p, "main 4:4:4 10", "main44410");
 		}
 #endif
 	}

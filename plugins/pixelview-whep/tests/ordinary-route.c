@@ -20,6 +20,8 @@ static void test_profile(const char *profile)
  assert(gst_element_set_state(pipe,GST_STATE_PLAYING)!=GST_STATE_CHANGE_FAILURE);
  /* A probed Main 4:2:2 10 decoder admits that profile on the SAME stock route. */
  if(!strcmp(profile,"main-422-10")) pv_codec_route_admit_main422(filter,TRUE);
+ /* And a probed Main 4:4:4 10 decoder admits that one. */
+ if(!strcmp(profile,"main-444-10")) pv_codec_route_admit_main444(filter,TRUE);
  GstPad *input=gst_element_get_static_pad(filter,"sink");
  assert(gst_pad_send_event(input,gst_event_new_stream_start(profile)));
  GstCaps *caps=gst_caps_new_simple("video/x-h265","stream-format",G_TYPE_STRING,"hvc1","alignment",G_TYPE_STRING,"au","profile",G_TYPE_STRING,profile,NULL);
@@ -55,9 +57,10 @@ static void missing_profile_failure(void)
  assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
-/* Without a probed 4:2:2 decoder, a sender on HEVC 4:2:2 10-bit (or, always,
- * any other non-Main profile) is refused before its first AU with the typed reason the frontend maps to
- * "use HEVC Main or Main10". Admission covers main-422-10 only. */
+/* Without a probed 4:2:2 (or 4:4:4) decoder, a sender on HEVC 4:2:2 (or 4:4:4)
+ * 10-bit, and always any other non-Main profile, is refused before its first AU
+ * with the typed reason the frontend maps to "use HEVC Main or Main10". Each
+ * admission covers its own profile only. */
 static void unsupported_profile_refusal(const char *profile,const char *reason,gboolean admit)
 {
  GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
@@ -84,9 +87,11 @@ static void unsupported_profile_refusal(const char *profile,const char *reason,g
 }
 int main(void)
 {
- gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");missing_profile_failure();
+ gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");test_profile("main-444-10");missing_profile_failure();
  unsupported_profile_refusal("main-422-10",PV_UNSUPPORTED_HEVC_MAIN_422_10,FALSE);
  unsupported_profile_refusal("main-422-12",PV_UNSUPPORTED_HEVC_PROFILE,FALSE);
- unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_PROFILE,TRUE); /* admission covers main-422-10 only */
- puts("Main/Main10 and probed Main 4:2:2 10: stock capsfilter route, all 96 compressed AUs unchanged, profile pinned; missing profile fails closed; unprobed 4:2:2 and other profiles refused with typed Main/Main10 guidance");
+ unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_MAIN_444_10,FALSE);
+ unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_MAIN_444_10,TRUE); /* the 4:2:2 admission does not cover 4:4:4 */
+ unsupported_profile_refusal("main-444-12",PV_UNSUPPORTED_HEVC_PROFILE,TRUE);
+ puts("Main/Main10 and probed Main 4:2:2 10 / Main 4:4:4 10: stock capsfilter route, all 128 compressed AUs unchanged, profile pinned; missing profile fails closed; unprobed 4:2:2, 4:4:4 and other profiles refused with typed Main/Main10 guidance");
 }

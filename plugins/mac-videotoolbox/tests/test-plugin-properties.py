@@ -45,7 +45,7 @@ while enumerate_encoder(index, c.byref(identifier)):
     assert codec(identifier.value) == b"hevc"
     props = properties(identifier.value)
     for name, expected, reader in [
-        (b"profile", [b"main", b"main10", b"main42210"], string_item),
+        (b"profile", [b"main", b"main10", b"main42210", b"main44410"], string_item),
         (b"rate_control", [b"CBR", b"ABR", b"CRF"], string_item),
         (b"spatial_aq_mode", [1, 2, 3], int_item),
     ]:

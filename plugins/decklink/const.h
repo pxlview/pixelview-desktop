@@ -13,6 +13,7 @@
 #define AUTO_START "auto_start"
 #define FORCE_SDR "force_sdr"
 #define OUTPUT_RANGE "output_range" /* Pixelview: 0 limited (default), 1 full */
+#define OUTPUT_FORMAT "output_format" /* Pixelview: 0 10-bit 4:2:2 Y'CbCr (default), 1 10-bit 4:4:4 RGB */
 #define KEYER "keyer"
 #define SWAP "swap"
 #define ALLOW_10_BIT "allow_10_bit"
@@ -43,6 +44,9 @@
 #define TEXT_OUTPUT_RANGE obs_module_text("OutputRange")
 #define TEXT_OUTPUT_RANGE_LIMITED obs_module_text("OutputRange.Limited")
 #define TEXT_OUTPUT_RANGE_FULL obs_module_text("OutputRange.Full")
+#define TEXT_OUTPUT_FORMAT obs_module_text("OutputFormat")
+#define TEXT_OUTPUT_FORMAT_YUV422 obs_module_text("OutputFormat.YUV422")
+#define TEXT_OUTPUT_FORMAT_RGB444 obs_module_text("OutputFormat.RGB444")
 #define TEXT_ENABLE_KEYER obs_module_text("Keyer")
 #define TEXT_SWAP obs_module_text("SwapFC-LFE")
 #define TEXT_SWAP_TOOLTIP obs_module_text("SwapFC-LFE.Tooltip")

@@ -12,7 +12,7 @@ Create the source with empty settings. Obtain `obs_source_get_proc_handler(sourc
 | `disconnect` | no arguments |
 | `get_status` | outputs `state` string, `frames` int, `audio_frames` int, `latency` int, `jitter_latency` int, `failure` string, `ready` bool |
 
-`failure` is empty or one of two canonical reasons for the current generation: `unsupported-hevc-main-422-10` (the sender is streaming HEVC 4:2:2 10-bit and this Mac's probe did not decode it) or `unsupported-hevc-profile` (another non-Main/Main10 HEVC profile). Both mean the receiver stopped before decoding and the operator must switch the sender to HEVC Main or Main10; Desktop renders that guidance. Connect and disconnect clear it. The profile string from the wire is never copied into telemetry or logs.
+`failure` is empty or one of the canonical reasons for the current generation: `unsupported-hevc-main-422-10` or `unsupported-hevc-main-444-10` (the sender is streaming HEVC 4:2:2 or 4:4:4 10-bit and this Mac's probe did not decode it) or `unsupported-hevc-profile` (another non-Main/Main10 HEVC profile). All mean the receiver stopped before decoding and the operator must switch the sender to HEVC Main or Main10; Desktop renders that guidance. Connect and disconnect clear it. The profile string from the wire is never copied into telemetry or logs.
 
 States: `idle`, `connecting`, `playing` (decoded video observed), `error`, `ended`. `frames` counts video buffers; `audio_frames` counts decoded PCM sample frames. Counters reset on connect. `latency` reports the explicit requested milliseconds, or **-1 when unset**; `jitter_latency` is **-1 until internal webrtcbin exists**, then the actual property readback. The `webrtcbin-ready` callback only sets the property when connect explicitly supplied an override. Omission leaves the native GStreamer default untouched; zero remains a valid explicit override.
 
@@ -26,8 +26,8 @@ Control procs are thread-safe and asynchronous. Source destruction joins the med
 
 ## Media path
 
-- `whepclientsrc`: probed H264, HEVC Main/Main10/Main 4:2:2 10, VP9 profiles0/2 and Opus. The parsed CAPS selector (`codec-route.c`) is a stock capsfilter that pins the codec and HEVC profile for the attempt; it admits `main`, `main-10` and, when its probe bit is set, `main-422-10`. Any other parsed HEVC profile (and `main-422-10` without the probe bit) is refused before its first AU with `GST_STREAM_ERROR_WRONG_TYPE` and the `pixelview-unsupported-profile` details structure.
-- Video: decodebin3 → `{P010_10LE, v210, NV12}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec delivers each stream in its own sampling and depth: v210 for 4:2:2, P010 for ten-bit 4:2:0, NV12 for eight-bit.
+- `whepclientsrc`: probed H264, HEVC Main/Main10/Main 4:2:2 10/Main 4:4:4 10, VP9 profiles0/2 and Opus, each with RTX and without ULPFEC/RED (set off before the offer is created: the engine never answers with FEC, and its payload types exhausted 96-127 once seven video entries were offered). The parsed CAPS selector (`codec-route.c`) is a stock capsfilter that pins the codec and HEVC profile for the attempt; it admits `main`, `main-10` and, when their probe bits are set, `main-422-10` and `main-444-10`. Any other parsed HEVC profile (and `main-422-10` without the probe bit) is refused before its first AU with `GST_STREAM_ERROR_WRONG_TYPE` and the `pixelview-unsupported-profile` details structure.
+- Video: decodebin3 → `{P010_10LE, v210, NV12, AYUV64}` policy → clocked appsink → direct `obs_source_output_video2`. The patched vtdec delivers each stream in its own sampling and depth: AYUV64 for 4:4:4 (handed to OBS as P416), v210 for 4:2:2, P010 for ten-bit 4:2:0, NV12 for eight-bit.
 - Audio: static bounded queue → audioconvert/audioresample → interleaved stereo F32/48 kHz → bounded clocked queue → synchronized appsink → `obs_source_output_audio`. There is no tee, probe or second PCM path: the DeckLink output consumes the stock OBS mix.
 - Both branches use pipeline running-time PTS plus a common base clock; synchronized sinks preserve A/V timing. This is a CPU raw-frame path, not zero-copy.
 - The source enables libobs async unbuffered mode because the synchronized appsinks already pace delivery on the pipeline clock. This avoids a second OBS-side video rebuffer; hardware smoothness remains to be checked.
@@ -55,7 +55,7 @@ Runtime initialization refuses an already initialized external GStreamer registr
 
 Do not run multiple stages/builds concurrently against the same `.deps/pixelview-gstreamer` directory: current staging recreates that directory. Parent should stage once before building. Source archive and build inputs live alongside it in `.deps/gst-build-inputs`. No system/Homebrew libraries are modified.
 
-## Patched vtdec: reorder depth and 4:2:2 output
+## Patched vtdec: reorder depth, 4:2:2 and 4:4:4 output
 
 `patches/gst-plugins-bad-1.28.3-vtdec-reorder-v210.patch` changes
 `sys/applemedia/vtdec.c` and `sys/applemedia/helpers.m`. Upstream sizes the HEVC output reorder queue from a
@@ -76,7 +76,17 @@ bit depth (`bit-depth-luma` from the parser): NV12 for eight-bit, P010 for
 ten-bit or unknown. Upstream takes the first of the two in its own template
 order (NV12, truncating ten-bit streams), and VideoToolbox widens eight-bit
 video to P010 with a full-range gain (white 235 becomes 943, neutral chroma
-514). The receiver's raw policy is `{P010_10LE, v210, NV12}`.
+514).
+
+A 4:4:4 stream (`chroma-format=4:4:4` or `profile=main-444-10`) is delivered
+as AYUV64 when downstream lists it; upstream would subsample it to a 4:2:0
+format. AYUV64 (`kCVPixelFormatType_4444AYpCbCr16`) is the one 4:4:4 Y'CbCr
+layout vtdec already maps. VideoToolbox fills it with the stream's code scaled
+to sixteen bits, within 16 of code << 6 (measured over all 1024 codes of each
+component), so the plugin rounds every sample to the nearest ten-bit code and
+hands OBS P416 holding exactly code << 6 (`pixelview_video_unpack_ayuv64`).
+
+The receiver's raw policy is `{P010_10LE, v210, NV12, AYUV64}`.
 
 `build-applemedia.py` verifies the official gst-plugins-bad1.28.3 tarball
 SHA256, extracts it fresh, applies the patch and builds only the applemedia

@@ -13,12 +13,13 @@ static GMutex audit_lock;
 static unsigned videos, codes;
 static bool seen[1024];
 static enum video_trc expected_trc=VIDEO_TRC_DEFAULT;
-static bool expect_422, expect_8; /* eight-bit streams reach OBS as P010 holding exactly code * 4 */
+static bool expect_422, expect_444, expect_8; /* eight-bit streams reach OBS as P010 holding exactly code * 4 */
 static unsigned chroma_rows; /* adjacent row pairs whose chroma differs: impossible after 4:2:0 */
+static unsigned chroma_columns; /* rows whose neighbouring pixels differ in chroma: impossible after 4:2:2 */
 static double audio_energy;
 static void audit_video(obs_source_t *s,const struct obs_source_frame2 *f)
 {
- g_assert_cmpint(f->format,==,expect_422?VIDEO_FORMAT_V210:VIDEO_FORMAT_P010);
+ g_assert_cmpint(f->format,==,expect_422?VIDEO_FORMAT_V210:expect_444?VIDEO_FORMAT_P416:VIDEO_FORMAT_P010);
  g_assert_cmpint(f->range,==,VIDEO_RANGE_PARTIAL);
  g_assert_cmpint(f->trc,==,expected_trc);
  g_mutex_lock(&audit_lock);
@@ -44,6 +45,16 @@ static void audit_video(obs_source_t *s,const struct obs_source_frame2 *f)
    unsigned c=p[x]>>6;if(!seen[c]){seen[c]=true;codes++;}
    /* VideoToolbox's own widening (code * 1023 / 255) would leave odd codes. */
    if(expect_8) g_assert_cmpuint(p[x]&0xff,==,0);
+  }
+  if(expect_444) {
+   /* P416: full-resolution CbCr pairs holding exact ten-bit codes << 6. */
+   const uint16_t *c=(const uint16_t *)(f->data[1]+y*f->linesize[1]);
+   unsigned swings=0;
+   for(unsigned x=0;x<f->width;x++) {
+    g_assert_cmpuint((p[x]|c[2*x]|c[2*x+1])&63,==,0);
+    if(x+1<f->width && abs((int)(c[2*x]>>6)-(int)(c[2*x+2]>>6))>200) swings++;
+   }
+   if(swings>=f->width/2) chroma_columns++;
   }
   if(expect_8 && y<(f->height+1)/2) {
    const uint16_t *c=(const uint16_t *)(f->data[1]+y*f->linesize[1]);
@@ -130,7 +141,7 @@ int main(int argc,char **argv)
  g_assert_null(endpoint_token("not a url"));
  const char *color=argc>3?argv[3]:NULL,*refusal=argc>4?argv[4]:NULL;
  expected_trc=color&&!strcmp(color,"pq")?VIDEO_TRC_PQ:color&&!strcmp(color,"hlg")?VIDEO_TRC_HLG:VIDEO_TRC_DEFAULT;setbuf(stdout,NULL);
- expect_422=!strcmp(argv[2],"422"); expect_8=!strcmp(argv[2],"8"); /* HEVC Main 4:2:2 10 must reach OBS as v210 with per-row chroma */gst_init(NULL,NULL);g_mutex_init(&audit_lock);
+ expect_422=!strcmp(argv[2],"422"); expect_444=!strcmp(argv[2],"444"); expect_8=!strcmp(argv[2],"8"); /* HEVC Main 4:2:2 10 must reach OBS as v210 with per-row chroma */gst_init(NULL,NULL);g_mutex_init(&audit_lock);
  g_assert_true(obs_startup("en-US",NULL,NULL));struct obs_audio_info ai={.samples_per_sec=48000,.speakers=SPEAKERS_STEREO};g_assert_true(obs_reset_audio(&ai));g_assert_true(obs_module_load());
  obs_source_t *source=obs_source_create_private("pixelview_whep_source","isolated-loopback",NULL);g_assert_nonnull(source);
  proc_handler_t *ph=obs_source_get_proc_handler(source);calldata_t cd;calldata_init(&cd);calldata_set_string(&cd,"endpoint",argv[1]);calldata_set_int(&cd,"latency",50);if(color)calldata_set_string(&cd,"color",color);g_assert_true(proc_handler_call(ph,"connect",&cd));
@@ -146,9 +157,11 @@ int main(int argc,char **argv)
   if(!negative&&frames>=30&&audio>=24000){passed=true;break;}
  }
  g_assert_true(proc_handler_call(ph,"disconnect",&cd));obs_source_release(source);obs_wait_for_destroy_queue();
- g_mutex_lock(&audit_lock);printf("LOOPBACK_RESULT frames=%llu audio=%llu jitter=%d audited=%u codes=%u chroma_rows=%u energy=%g negative=%d passed=%d\n",(unsigned long long)frames,(unsigned long long)audio,jitter,videos,codes,chroma_rows,audio_energy,negative,passed);
+ g_mutex_lock(&audit_lock);printf("LOOPBACK_RESULT frames=%llu audio=%llu jitter=%d audited=%u codes=%u chroma_rows=%u chroma_columns=%u energy=%g negative=%d passed=%d\n",(unsigned long long)frames,(unsigned long long)audio,jitter,videos,codes,chroma_rows,chroma_columns,audio_energy,negative,passed);
  if(!negative&&!refusal)passed=passed&&jitter==50&&videos>=30&&audio_energy>1&&codes>(strcmp(argv[2],"8")?256u:0u);
  /* The fixture alternates Cb on every row; 4:2:0 subsampling would average the pairs away. */
  if(expect_422&&!refusal)passed=passed&&chroma_rows>=100;
+ /* The 4:4:4 fixture alternates Cb on every pixel; 4:2:2 subsampling would average the pairs away. */
+ if(expect_444&&!refusal)passed=passed&&chroma_columns>=100;
  g_mutex_unlock(&audit_lock);calldata_free(&cd);obs_shutdown();g_mutex_clear(&audit_lock);return passed?0:1;
 }

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Pixelview: draw a linear RGB program texture as v210 (10-bit 4:2:2 Y'CbCr)
-// with the DrawV210* techniques in libobs/data/default.effect. Shared by the
+// or R10l (10-bit 4:4:4 R'G'B') with the DrawV210* and DrawR10L* techniques in
+// libobs/data/default.effect. Shared by the
 // DeckLink output UI and its offline fidelity probe; graphics thread only.
 #pragma once
 #include <obs.h>
 #include <graphics/matrix4.h>
+#include <graphics/vec2.h>
 
 namespace pixelview_v210 {
 
@@ -70,6 +72,36 @@ inline bool draw(gs_texture_t *source, uint32_t width, uint32_t height, Mode mod
 	gs_effect_set_float(gs_effect_get_param_by_name(effect, "hdr_lw"), obs_get_video_hdr_nominal_peak_level());
 	while (gs_effect_loop(effect, technique))
 		gs_draw_sprite(source, 0, words, height);
+	gs_enable_blending(true);
+	gs_enable_framebuffer_srgb(previous);
+	return true;
+}
+
+// The same program picture as R10l (10-bit 4:4:4 R'G'B', one 32-bit word per
+// pixel) with the DrawR10L* techniques. Call between
+// gs_texrender_begin(target, width, height) and gs_texrender_end. Limited
+// range puts black at 64 and white at 940; full range uses 0-1023, clipped to
+// the SDI-legal 4-1019 by the shader.
+inline bool draw_r10l(gs_texture_t *source, uint32_t width, uint32_t height, Mode mode, bool full_range = false)
+{
+	gs_effect_t *const effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	const char *const technique = mode == Mode::PQ        ? "DrawR10LPQ"
+				      : mode == Mode::HLG     ? "DrawR10LHLG"
+				      : mode == Mode::Tonemap ? "DrawR10LTonemap"
+							      : "DrawR10L";
+	const bool previous = gs_framebuffer_srgb_enabled();
+	gs_enable_framebuffer_srgb(false);
+	gs_enable_blending(false);
+	gs_ortho(0.0f, (float)width, 0.0f, (float)height, -100.0f, 100.0f);
+	gs_effect_set_texture_srgb(gs_effect_get_param_by_name(effect, "image"), source);
+	struct vec2 levels;
+	vec2_set(&levels, full_range ? 0.0f : 64.0f, full_range ? 1023.0f : 876.0f);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(effect, "r10l_levels"), &levels);
+	gs_effect_set_float(gs_effect_get_param_by_name(effect, "multiplier"),
+			    obs_get_video_sdr_white_level() / 10000.f);
+	gs_effect_set_float(gs_effect_get_param_by_name(effect, "hdr_lw"), obs_get_video_hdr_nominal_peak_level());
+	while (gs_effect_loop(effect, technique))
+		gs_draw_sprite(source, 0, width, height);
 	gs_enable_blending(true);
 	gs_enable_framebuffer_srgb(previous);
 	return true;

@@ -431,7 +431,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 				const bool hevc422 = failure && strcmp(failure, "unsupported-hevc-main-422-10") == 0;
 				const bool hevcOther = failure && strcmp(failure, "unsupported-hevc-profile") == 0;
 				const auto is = [failure](const char *reason) { return failure && strcmp(failure, reason) == 0; };
-				const bool typed = (failure && *failure) || hevc422 || hevcOther;
+				const bool hevc444 = failure && strcmp(failure, "unsupported-hevc-main-444-10") == 0;
+				const bool typed = (failure && *failure) || hevc422 || hevc444 || hevcOther;
 				if (!typed) {
 					// A stalled or ended stream reconnects on its own; typed
 					// refusals need an operator change and never retry.
@@ -451,6 +452,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					QStringLiteral("The sender's colour format is not supported. Use limited-range BT.709 SDR or limited-range BT.2020 PQ/HLG on the sender.") :
 					hevc422 ?
 					PIXELVIEW_PLATFORM_TEXT("The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.", "The sender is streaming HEVC 4:2:2 10-bit, which this computer cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
+					hevc444 ?
+					PIXELVIEW_PLATFORM_TEXT("The sender is streaming HEVC 4:4:4 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.", "The sender is streaming HEVC 4:4:4 10-bit, which this computer cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);

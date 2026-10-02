@@ -11,6 +11,8 @@ uniform float4 v210_vec_y;
 uniform float4 v210_vec_cb;
 uniform float4 v210_vec_cr;
 uniform float v210_width;
+// Pixelview DrawR10L*: x = code of black, y = codes from black to white.
+uniform float2 r10l_levels;
 
 sampler_state def_sampler {
 	Filter   = Linear;
@@ -76,7 +78,7 @@ float4 PSDrawAlphaDivideR10L(VertInOut vert_in) : TARGET
  * conversions use, so a 10-bit 4:2:2 picture that fills the canvas 1:1 leaves
  * with the code values it arrived with. mode: 0 SDR, 1 HDR canvas tone-mapped
  * to SDR, 2 PQ, 3 HLG. No alpha: the DeckLink keyer path stays BGRA. */
-float3 pv_v210_codes(int x, int y, int mode)
+float3 pv_program_rgb(int x, int y, int mode)
 {
 	float3 rgb = image.Load(int3(x, y, 0)).rgb;
 	if (mode == 1) {
@@ -90,6 +92,12 @@ float3 pv_v210_codes(int x, int y, int mode)
 		rgb = rec709_to_rec2020(rgb * multiplier);
 		rgb = (mode == 2) ? linear_to_st2084(rgb) : linear_to_hlg(rgb, hdr_lw);
 	}
+	return rgb;
+}
+
+float3 pv_v210_codes(int x, int y, int mode)
+{
+	float3 rgb = pv_program_rgb(x, y, mode);
 	float3 yuv = float3(dot(v210_vec_y.xyz, rgb) + v210_vec_y.w, dot(v210_vec_cb.xyz, rgb) + v210_vec_cb.w,
 			    dot(v210_vec_cr.xyz, rgb) + v210_vec_cr.w);
 	/* SDI reserves codes 0-3 and 1020-1023. */
@@ -127,6 +135,43 @@ float4 pv_v210_word(float2 pos, int mode)
 	uint b = (c.y >> 6) | ((c.z & 0xFu) << 4);
 	uint a = c.z >> 4;
 	return float4(uint4(r, g, b, a)) / 255.;
+}
+
+/* Pixelview: pack the program picture as R10l (10-bit 4:4:4 R'G'B', one
+ * little-endian 32-bit word per pixel: R in bits 31-22, G in 21-12, B in 11-2)
+ * for the DeckLink output. The render target is RGBA8, one texel per word.
+ * r10l_levels holds the code of black and the black-to-white span: 64 and 876
+ * at video levels, 0 and 1023 at data levels. Same modes as the v210 packer. */
+float4 pv_r10l_word(float2 pos, int mode)
+{
+	float3 rgb = pv_program_rgb(int(pos.x), int(pos.y), mode);
+	/* SDI reserves codes 0-3 and 1020-1023. */
+	uint3 c = uint3(clamp(floor(rgb * r10l_levels.y + r10l_levels.x + 0.5), 4., 1019.));
+	uint b0 = (c.b & 0x3Fu) << 2;
+	uint b1 = (c.b >> 6) | ((c.g & 0xFu) << 4);
+	uint b2 = (c.g >> 4) | ((c.r & 0x3u) << 6);
+	uint b3 = c.r >> 2;
+	return float4(uint4(b0, b1, b2, b3)) / 255.;
+}
+
+float4 PSDrawR10L(VertInOut vert_in) : TARGET
+{
+	return pv_r10l_word(vert_in.pos.xy, 0);
+}
+
+float4 PSDrawR10LTonemap(VertInOut vert_in) : TARGET
+{
+	return pv_r10l_word(vert_in.pos.xy, 1);
+}
+
+float4 PSDrawR10LPQ(VertInOut vert_in) : TARGET
+{
+	return pv_r10l_word(vert_in.pos.xy, 2);
+}
+
+float4 PSDrawR10LHLG(VertInOut vert_in) : TARGET
+{
+	return pv_r10l_word(vert_in.pos.xy, 3);
 }
 
 float4 PSDrawV210(VertInOut vert_in) : TARGET
@@ -303,6 +348,42 @@ technique DrawV210HLG
 	{
 		vertex_shader = VSDefault(vert_in);
 		pixel_shader  = PSDrawV210HLG(vert_in);
+	}
+}
+
+technique DrawR10L
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawR10L(vert_in);
+	}
+}
+
+technique DrawR10LTonemap
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawR10LTonemap(vert_in);
+	}
+}
+
+technique DrawR10LPQ
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawR10LPQ(vert_in);
+	}
+}
+
+technique DrawR10LHLG
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawR10LHLG(vert_in);
 	}
 }
 

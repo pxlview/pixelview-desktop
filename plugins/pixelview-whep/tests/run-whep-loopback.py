@@ -65,14 +65,17 @@ if os.environ.get('PV_LOOPBACK_BUILD_ONLY') == '1':
     raise SystemExit(0)
 # (format, encoder profile, depth, payload type, fixture colour, receive mode, expected colour refusal).
 # Receive mode None is the historical connect without a colour argument.
-cases=[('h264-8bit-420','h264','8',97,'sdr',None,None),('hevc-8bit-420','main','8',96,'sdr',None,None),('hevc-10bit-420','main10','10',120,'sdr',None,None),('vp9-8bit-420','vp9_0','8',98,'sdr',None,None),('vp9-10bit-420','vp9_2','10',122,'sdr',None,None),('negative','negative','negative',None,'sdr',None,None),
+cases=[('h264-8bit-420','h264','8',97,'sdr',None,None),('hevc-8bit-420','main','8',96,'sdr',None,None),('hevc-10bit-420','main10','10',120,'sdr',None,None),('vp9-8bit-420','vp9_0','8',98,'sdr',None,None),('vp9-10bit-420','vp9_2','10',123,'sdr',None,None),('negative','negative','negative',None,'sdr',None,None),
  ('hevc-10bit-420','main10','10',120,'pq','pq',None),('hevc-10bit-420','main10','10',120,'hlg','hlg',None),
- ('vp9-10bit-420','vp9_2','10',122,'pq','pq',None),('vp9-10bit-420','vp9_2','10',122,'hlg','hlg',None),
+ ('vp9-10bit-420','vp9_2','10',123,'pq','pq',None),('vp9-10bit-420','vp9_2','10',123,'hlg','hlg',None),
  ('hevc-10bit-420','main10','10',120,'pq','hlg','hdr-transfer-mismatch'),('hevc-10bit-420','main10','10',120,'pq','sdr','hdr-source-needs-hdr-receive'),
- ('hevc-10bit-420','main10','10',120,'sdr','pq','sdr-source-in-hdr-receive'),('vp9-10bit-420','vp9_2','10',122,'pq','sdr','hdr-source-needs-hdr-receive'),
+ ('hevc-10bit-420','main10','10',120,'sdr','pq','sdr-source-in-hdr-receive'),('vp9-10bit-420','vp9_2','10',123,'pq','sdr','hdr-source-needs-hdr-receive'),
  # HEVC Main 4:2:2 10 passthrough: v210 at the source with per-row chroma, in SDR and HDR.
  ('hevc-10bit-422','main422-10','422',121,'sdr',None,None),('hevc-10bit-422','main422-10','422',121,'pq','pq',None),('hevc-10bit-422','main422-10','422',121,'hlg','hlg',None),
- ('hevc-10bit-422','main422-10','422',121,'pq','sdr','hdr-source-needs-hdr-receive')]
+ ('hevc-10bit-422','main422-10','422',121,'pq','sdr','hdr-source-needs-hdr-receive'),
+ # HEVC Main 4:4:4 10 passthrough: P416 at the source with per-pixel chroma, in SDR and HDR.
+ ('hevc-10bit-444','main444-10','444',122,'sdr',None,None),('hevc-10bit-444','main444-10','444',122,'pq','pq',None),('hevc-10bit-444','main444-10','444',122,'hlg','hlg',None),
+ ('hevc-10bit-444','main444-10','444',122,'pq','sdr','hdr-source-needs-hdr-receive')]
 HDR_TAGS={'pq':('bt2020','smpte2084','bt2020nc'),'hlg':('bt2020','arib-std-b67','bt2020nc'),'sdr':('bt709','bt709','bt709')}
 results=[]
 for fmt,name,depth,pt,fixture,mode,refusal in cases:
@@ -100,9 +103,11 @@ for fmt,name,depth,pt,fixture,mode,refusal in cases:
                 cached=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(file)],text=True)).get('streams',[])
             color_ok=bool(cached) and all(cached[0].get(k)==v for k,v in expected_color.items())
             if not color_ok:
-                pixel={'10':'yuv420p10le','422':'yuv422p10le'}.get(depth,'yuv420p');ramp='16+219*X/W' if depth=='8' else '64+876*X/W';chroma='128' if depth=='8' else '512'
+                pixel={'10':'yuv420p10le','422':'yuv422p10le','444':'yuv444p10le'}.get(depth,'yuv420p');ramp='16+219*X/W' if depth=='8' else '64+876*X/W';chroma='128' if depth=='8' else '512'
                 # 4:2:2: Cb alternates on every row, which no 4:2:0 path can carry.
                 blue="'if(mod(Y,2),312,712)'" if depth=='422' else chroma
+                # 4:4:4: Cb alternates on every pixel of a row, which neither 4:2:2 nor 4:2:0 can carry.
+                if depth=='444':blue="'if(mod(X,2),312,712)'"
                 gen=['ffmpeg','-hide_banner','-loglevel','error','-y','-f','lavfi','-i',f'nullsrc=s=1024x128:r=30,format={pixel},geq=lum={ramp}:cb={blue}:cr={chroma}','-frames:v','300','-color_range','tv','-colorspace',space,'-color_trc',trc,'-color_primaries',prim]
                 if name=='h264':gen+=['-c:v','libx264','-preset','ultrafast','-profile:v','baseline','-level:v','4.2','-x264-params','keyint=30:bframes=0:threads=1:colorprim=bt709:transfer=bt709:colormatrix=bt709','-crf','10']
                 elif name.startswith('main'):gen+=['-c:v','libx265','-preset','ultrafast','-profile:v',name,'-x265-params',f'crf=1:level-idc=4.1:high-tier=0:bframes=0:keyint=30:log-level=error:pools=1:frame-threads=1:colorprim={prim}:transfer={trc}:colormatrix={space}'+(':hdr10=1:max-cll=1000,400' if fixture=='pq' else '')]

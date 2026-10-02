@@ -40,6 +40,7 @@ class Packaging(unittest.TestCase):
   self.assertIn('sps.max_num_reorder_pics[sps.max_sub_layers_minus1]', patch)
   self.assertIn('kCVPixelFormatType_422YpCbCr10', patch)
   self.assertIn('GST_VIDEO_FORMAT_v210', patch)
+  self.assertIn('chroma_444 && !prores && format_list_has (list, GST_VIDEO_FORMAT_AYUV64)', patch)
   self.assertIn('bit_depth == 8 ? GST_VIDEO_FORMAT_NV12 : GST_VIDEO_FORMAT_P010_10LE', patch)
 class UpstreamAcquisition(unittest.TestCase):
  def test_package_hash_fails_closed(self):

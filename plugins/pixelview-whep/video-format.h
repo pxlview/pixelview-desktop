@@ -13,7 +13,7 @@ enum pixelview_color { PIXELVIEW_COLOR_SDR, PIXELVIEW_COLOR_PQ, PIXELVIEW_COLOR_
 /* Borrowed planes: caller must output/copy before unmapping.
  * SDR: exact limited BT.709 (or sRGB BGRA). DEFAULT deliberately uses OBS's
  * existing SDR processing, not an assertion that BT709's transfer curve is
- * exactly sRGB. HDR: P010 or v210 only, labelled with the operator's transfer.
+ * exactly sRGB. HDR: P010, v210 or AYUV64 only, labelled with the operator's transfer.
  * Neither is a grading transform. */
 bool pixelview_video_info(GstCaps *caps, enum pixelview_color color, GstVideoInfo *info);
 bool pixelview_video_frame(const GstVideoFrame *mapped, enum pixelview_color color, struct obs_source_frame2 *frame);
@@ -23,6 +23,12 @@ bool pixelview_video_frame(const GstVideoFrame *mapped, enum pixelview_color col
  * converts NV12 sources through an eight-bit RGB texture, and VideoToolbox
  * widens eight-bit video with a full-range gain (white 943 instead of 940). */
 bool pixelview_video_widen_nv12(struct obs_source_frame2 *frame, uint8_t **storage, size_t *capacity);
+/* A 4:4:4 AYUV64 frame (marked by pixelview_video_frame as VIDEO_FORMAT_AYUV
+ * with 16-bit samples) becomes P416 holding the stream's exact ten-bit codes
+ * << 6, in *storage like the above. VideoToolbox scales the codes to sixteen
+ * bits within 16 of code << 6, so each sample is rounded to the nearest
+ * ten-bit code. Other formats are left untouched. */
+bool pixelview_video_unpack_ayuv64(struct obs_source_frame2 *frame, uint8_t **storage, size_t *capacity);
 /* NULL when the caps' colorimetry fits the mode, else one PV_COLOR_* reason. */
 const char *pixelview_video_color_mismatch(GstCaps *caps, enum pixelview_color color);
 /* Every stream is delivered in its own sampling and bit depth. The patched
@@ -32,7 +38,9 @@ const char *pixelview_video_color_mismatch(GstCaps *caps, enum pixelview_color c
  * video must not be decoded to P010: VideoToolbox widens it with a full-range
  * gain (white 235 becomes 943 rather than 940, neutral chroma 514). It is
  * decoded as NV12 and widened exactly by pixelview_video_widen_nv12 instead.
+ * A 4:4:4 stream is delivered as AYUV64 (the patched vtdec picks it only for
+ * 4:4:4) and unpacked to P416 by pixelview_video_unpack_ayuv64.
  * Upstream vtdec would pick NV12 for every stream from this list, so the
  * patch is required here too.
  * Compatibility BGRA and I422_10LE samples remain accepted by the adapter. */
-#define PIXELVIEW_RECEIVE_RAW_CAPS "video/x-raw,format=(string){P010_10LE,v210,NV12}"
+#define PIXELVIEW_RECEIVE_RAW_CAPS "video/x-raw,format=(string){P010_10LE,v210,NV12,AYUV64}"

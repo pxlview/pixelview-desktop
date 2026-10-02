@@ -59,7 +59,8 @@ bool pixelview_video_info(GstCaps *caps, enum pixelview_color color, GstVideoInf
  if (color!=PIXELVIEW_COLOR_SDR) {
   GstVideoColorimetry c;
   if (!caps_colorimetry(caps,&c) || hdr_mismatch(&c,color) || !gst_video_info_from_caps(info,caps) ||
-      (GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_P010_10LE && GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_v210)) return false;
+      (GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_P010_10LE && GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_v210 &&
+       GST_VIDEO_INFO_FORMAT(info)!=GST_VIDEO_FORMAT_AYUV64)) return false;
   /* The label, not GstVideoInfo's resolution-based defaults, describes the frame. */
   hdr_label(&info->colorimetry,color);
   return true;
@@ -75,10 +76,12 @@ bool pixelview_video_info(GstCaps *caps, enum pixelview_color color, GstVideoInf
 bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, struct obs_source_frame2 *f)
 {
  memset(f,0,sizeof(*f));
- unsigned planes; bool rgb=false, planar=false, v210=false; unsigned bytes=2;
+ unsigned planes; bool rgb=false, planar=false, v210=false, ayuv64=false; unsigned bytes=2;
  switch(GST_VIDEO_FRAME_FORMAT(m)) {
  case GST_VIDEO_FORMAT_P010_10LE: f->format=VIDEO_FORMAT_P010; planes=2; break;
  case GST_VIDEO_FORMAT_v210: f->format=VIDEO_FORMAT_V210; planes=1; v210=true; break;
+ /* Packed A Y U V, 16 bits each: handed on as P416 by pixelview_video_unpack_ayuv64. */
+ case GST_VIDEO_FORMAT_AYUV64: f->format=VIDEO_FORMAT_AYUV; planes=1; bytes=8; ayuv64=true; break;
  case GST_VIDEO_FORMAT_NV12: f->format=VIDEO_FORMAT_NV12; planes=2; bytes=1; break;
  case GST_VIDEO_FORMAT_BGRA: f->format=VIDEO_FORMAT_BGRA; planes=1; bytes=4; rgb=true; break;
  case GST_VIDEO_FORMAT_I422_10LE: f->format=VIDEO_FORMAT_I210; planes=3; planar=true; break;
@@ -88,7 +91,7 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
  const bool hdr=color!=PIXELVIEW_COLOR_SDR;
  if (hdr) {
   GstVideoColorimetry label; hdr_label(&label,color);
-  if ((f->format!=VIDEO_FORMAT_P010 && f->format!=VIDEO_FORMAT_V210) || !gst_video_colorimetry_is_equal(c,&label)) return false;
+  if ((f->format!=VIDEO_FORMAT_P010 && f->format!=VIDEO_FORMAT_V210 && !ayuv64) || !gst_video_colorimetry_is_equal(c,&label)) return false;
  } else if (c->primaries!=GST_VIDEO_COLOR_PRIMARIES_BT709 ||
      c->matrix!=(rgb?GST_VIDEO_COLOR_MATRIX_RGB:GST_VIDEO_COLOR_MATRIX_BT709) ||
      c->transfer!=(rgb?GST_VIDEO_TRANSFER_SRGB:GST_VIDEO_TRANSFER_BT709) ||
@@ -115,7 +118,8 @@ bool pixelview_video_frame(const GstVideoFrame *m, enum pixelview_color color, s
   f->data[p]=(uint8_t*)start; f->linesize[p]=(uint32_t)stride;
  }
  const enum video_colorspace space=!hdr?VIDEO_CS_709:color==PIXELVIEW_COLOR_PQ?VIDEO_CS_2100_PQ:VIDEO_CS_2100_HLG;
- if(!video_format_get_parameters_for_format(space,f->range,f->format,f->color_matrix,f->color_range_min,f->color_range_max)) return false;
+ /* The 4:4:4 frame is output as P416, so it takes that format's (ten-bit) matrix. */
+ if(!video_format_get_parameters_for_format(space,f->range,ayuv64?VIDEO_FORMAT_P416:f->format,f->color_matrix,f->color_range_min,f->color_range_max)) return false;
  /* SDR Y'CbCr keeps sub-black and super-white (PLUGE, overshoots): the float
   * canvas carries them to the SDI output, so do not clamp to 64-940 on the way
   * in. HDR keeps the clamp; PQ and HLG are not defined below black. */
@@ -152,4 +156,33 @@ bool pixelview_video_widen_nv12(struct obs_source_frame2 *f, uint8_t **storage, 
  /* The same matrix at ten-bit scale; the caller's range window is kept. */
  float min[3],max[3];
  return video_format_get_parameters_for_format(VIDEO_CS_709,f->range,f->format,f->color_matrix,min,max);
+}
+/* AYUV64 is A Y U V in 16-bit little-endian words. P416 is a luma plane and an
+ * interleaved CbCr plane at full resolution, 16-bit words holding code << 6. */
+bool pixelview_video_unpack_ayuv64(struct obs_source_frame2 *f, uint8_t **storage, size_t *capacity)
+{
+ if (f->format!=VIDEO_FORMAT_AYUV) return true;
+ if (!f->width || !f->height || !f->data[0] || f->linesize[0]<(size_t)f->width*8) return false;
+ const size_t luma_row=(size_t)f->width*2, chroma_row=(size_t)f->width*4;
+ const size_t need=(luma_row+chroma_row)*f->height;
+ if (*capacity<need) {
+  uint8_t *grown=g_try_realloc(*storage,need);
+  if (!grown) return false;
+  *storage=grown; *capacity=need;
+ }
+ uint16_t *luma=(uint16_t *)*storage, *chroma=(uint16_t *)(*storage+luma_row*f->height);
+ for (size_t y=0;y<f->height;y++) {
+  const uint16_t *in=(const uint16_t *)(f->data[0]+y*f->linesize[0]);
+  uint16_t *l=luma+y*f->width, *c=chroma+y*(size_t)f->width*2;
+  for (size_t x=0;x<f->width;x++) {
+   const uint32_t yy=((uint32_t)in[4*x+1]+32)>>6, u=((uint32_t)in[4*x+2]+32)>>6, v=((uint32_t)in[4*x+3]+32)>>6;
+   l[x]=(uint16_t)((yy>1023?1023:yy)<<6);
+   c[2*x]=(uint16_t)((u>1023?1023:u)<<6);
+   c[2*x+1]=(uint16_t)((v>1023?1023:v)<<6);
+  }
+ }
+ f->data[0]=(uint8_t *)luma; f->data[1]=(uint8_t *)chroma;
+ f->linesize[0]=(uint32_t)luma_row; f->linesize[1]=(uint32_t)chroma_row;
+ f->format=VIDEO_FORMAT_P416;
+ return true;
 }

@@ -84,6 +84,46 @@ static void v210_cases(void)
  }
 }
 /* Eight-bit streams: NV12 from the decoder becomes P010 holding exactly code * 4. */
+/* AYUV64 as VideoToolbox fills it (codes scaled to sixteen bits, within 16 of
+ * code << 6) must reach OBS as P416 holding exactly code << 6. */
+static void unpack_444_cases(void)
+{
+ enum { UW=7, UH=3 };
+ GstVideoInfo i; gst_video_info_set_format(&i,GST_VIDEO_FORMAT_AYUV64,UW,UH);
+ gst_video_colorimetry_from_string(&i.colorimetry,"bt709");
+ GstBuffer *b=gst_buffer_new_allocate(NULL,i.size,NULL);
+ GstVideoFrame m={0}; assert(gst_video_frame_map(&m,&i,b,GST_MAP_WRITE));
+ unsigned code[UH][UW][3];
+ for(unsigned y=0;y<UH;y++) for(unsigned x=0;x<UW;x++) {
+  guint16 *p=(guint16 *)((guint8 *)GST_VIDEO_FRAME_PLANE_DATA(&m,0)+y*GST_VIDEO_FRAME_PLANE_STRIDE(&m,0))+4*x;
+  p[0]=65535;
+  for(unsigned c=0;c<3;c++) {
+   code[y][x][c]=(y*331+x*97+c*211)%1024;
+   const int noise=(int)((x+y*3+c*5)%33)-16; /* -16..16 */
+   int v=(int)(code[y][x][c]<<6)+noise; if(v<0) v=0; if(v>65535) v=65535;
+   p[1+c]=(guint16)v;
+  }
+ }
+ struct obs_source_frame2 f; assert(pixelview_video_frame(&m,PIXELVIEW_COLOR_SDR,&f));
+ assert(f.format==VIDEO_FORMAT_AYUV && f.range==VIDEO_RANGE_PARTIAL && f.linesize[0]>=UW*8);
+ float matrix[16],min[3],max[3];
+ assert(video_format_get_parameters_for_format(VIDEO_CS_709,VIDEO_RANGE_PARTIAL,VIDEO_FORMAT_P416,matrix,min,max));
+ assert(!memcmp(matrix,f.color_matrix,sizeof(matrix)));
+ uint8_t *storage=NULL; size_t capacity=0;
+ assert(pixelview_video_unpack_ayuv64(&f,&storage,&capacity) && storage && f.format==VIDEO_FORMAT_P416);
+ assert(f.linesize[0]==UW*2 && f.linesize[1]==UW*4 && f.data[0]==storage && f.data[1]==storage+UW*2*UH);
+ for(unsigned y=0;y<UH;y++) for(unsigned x=0;x<UW;x++) {
+  const guint16 *l=(const guint16 *)(f.data[0]+y*f.linesize[0]),*c=(const guint16 *)(f.data[1]+y*f.linesize[1]);
+  assert(l[x]==code[y][x][0]<<6 && c[2*x]==code[y][x][1]<<6 && c[2*x+1]==code[y][x][2]<<6);
+ }
+ /* Other formats pass through untouched; HDR accepts the same frame with the operator's label. */
+ struct obs_source_frame2 other={.format=VIDEO_FORMAT_P010}; uint8_t *kept=storage;
+ assert(pixelview_video_unpack_ayuv64(&other,&storage,&capacity) && other.format==VIDEO_FORMAT_P010 && storage==kept);
+ gst_video_colorimetry_from_string(&m.info.colorimetry,"bt2100-pq");
+ assert(pixelview_video_frame(&m,PIXELVIEW_COLOR_PQ,&f) && f.format==VIDEO_FORMAT_AYUV && f.trc==VIDEO_TRC_PQ);
+ assert(!pixelview_video_frame(&m,PIXELVIEW_COLOR_SDR,&f));
+ g_free(storage);gst_video_frame_unmap(&m);gst_buffer_unref(b);
+}
 static void widen_cases(void)
 {
  for(unsigned odd=0;odd<2;odd++) {
@@ -159,8 +199,10 @@ int main(void)
  hdr_cases();
  v210_cases();
  widen_cases();
+ unpack_444_cases();
  puts("PASS P010/NV12/BGRA/I210, odd padded planes, SDR709 limited YUV/full RGB; rejects PQ/gamut/unknown range/invalid strides/bounds");
  puts("PASS v210 (HEVC 4:2:2): SDR/PQ/HLG single packed plane, odd widths, short stride refused");
  puts("PASS eight-bit NV12 widened to P010 as exactly code * 4, odd sizes, storage reuse");
+ puts("PASS 4:4:4 AYUV64 unpacked to P416 as exactly code << 6 from noisy sixteen-bit samples");
  puts("PASS HDR PQ/HLG: BT.2100 caps and VP9-style unsignalled transfer labelled; SDR/full/other-transfer/non-P010 refused with typed reasons");
 }

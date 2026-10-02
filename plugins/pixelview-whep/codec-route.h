@@ -11,6 +11,7 @@
  * PV_UNSUPPORTED_* strings (never sender-controlled text). */
 #define PV_UNSUPPORTED_PROFILE_DETAILS "pixelview-unsupported-profile"
 #define PV_UNSUPPORTED_HEVC_MAIN_422_10 "unsupported-hevc-main-422-10"
+#define PV_UNSUPPORTED_HEVC_MAIN_444_10 "unsupported-hevc-main-444-10"
 #define PV_UNSUPPORTED_HEVC_PROFILE "unsupported-hevc-profile"
 /* Floating reference; NULL when the capsfilter factory is unavailable. */
 GstElement *pv_codec_route_new(void);
@@ -19,3 +20,6 @@ GstElement *pv_codec_route_new(void);
  * 4:2:2 10. Closed by default; main and main-10 are always admitted. Call
  * before the first parsed CAPS event, i.e. before the filter is published. */
 void pv_codec_route_admit_main422(GstElement *filter, gboolean admit);
+/* The same for main-444-10, which the patched vtdec delivers as AYUV64. Set
+ * only when the capability probe decoded Main 4:4:4 10. */
+void pv_codec_route_admit_main444(GstElement *filter, gboolean admit);

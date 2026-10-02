@@ -47,7 +47,7 @@ struct receiver {
  uint64_t audio_dropped; /* lock; stale audio frames withheld from OBS this window */
  uint64_t late_window; /* worker-owned; start of the current lateness window */
 };
-/* Typed refusal from the route selector (codec-route.h). Only the two
+/* Typed refusal from the route selector (codec-route.h). Only the
  * canonical reasons are retained; arbitrary error text is never consumed. */
 static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
 {
@@ -57,6 +57,7 @@ static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
  if(!s || !gst_structure_has_name(s,PV_UNSUPPORTED_PROFILE_DETAILS)) return;
  const char *reason=gst_structure_get_string(s,"reason");
  if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_MAIN_422_10)) r->failure=PV_UNSUPPORTED_HEVC_MAIN_422_10;
+ else if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_MAIN_444_10)) r->failure=PV_UNSUPPORTED_HEVC_MAIN_444_10;
  else if(!g_strcmp0(reason,PV_UNSUPPORTED_HEVC_PROFILE)) r->failure=PV_UNSUPPORTED_HEVC_PROFILE;
  if(r->failure) blog(LOG_ERROR,"[pixelview-whep] %s: this Mac did not verify that profile; the sender must use HEVC Main or Main10",r->failure);
 }
@@ -216,8 +217,8 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  if (!pixelview_video_info(caps, color, &info)) {
   color_failure(r, caps, color); gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
- /* The clocked appsink maps and delivers directly to OBS (P010, or v210 for an
-  * HEVC 4:2:2 stream). */
+ /* The clocked appsink maps and delivers directly to OBS (P010, v210 for an
+  * HEVC 4:2:2 stream, P416 for a 4:4:4 one). */
  if (!gst_video_frame_map(&mapped, &info, gst_sample_get_buffer(sample), GST_MAP_READ)) {
   gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
@@ -228,7 +229,9 @@ static GstFlowReturn video_sample(GstAppSink *sink, gpointer opaque)
  frame.timestamp = timestamp(sample, r->pipe, sink);
  g_rec_mutex_lock(&r->delivery);
  /* An eight-bit stream is decoded as NV12 and reaches OBS as exact ten-bit P010. */
- if (!pixelview_video_widen_nv12(&frame, &r->widened, &r->widened_capacity)) {
+ /* A 4:4:4 stream is decoded as AYUV64 and reaches OBS as exact ten-bit P416. */
+ if (!pixelview_video_widen_nv12(&frame, &r->widened, &r->widened_capacity) ||
+     !pixelview_video_unpack_ayuv64(&frame, &r->widened, &r->widened_capacity)) {
   g_rec_mutex_unlock(&r->delivery);
   gst_video_frame_unmap(&mapped); gst_sample_unref(sample); return GST_FLOW_ERROR;
  }
@@ -343,7 +346,7 @@ static bool attempt_current(struct receive_attempt *a)
  * can impose the older level-120 HD30 envelope; absent HEVC has level zero. */
 static unsigned receive_max_fps(const struct pixelview_receive_capabilities *caps)
 {
- bool hevc = caps->profiles & (PV_PROFILE_HEVC_MAIN | PV_PROFILE_HEVC_MAIN10 | PV_PROFILE_HEVC_MAIN422_10);
+ bool hevc = caps->profiles & PV_PROFILE_HEVC_ANY;
  return hevc && caps->hevc_level_id < 123 ? 30u : 60u;
 }
 static void configure_transceiver(GstElement *rtc, GObject *transceiver, gpointer opaque)
@@ -384,7 +387,19 @@ static void guard_offer(GstElement *rtc, GstStructure *options, GstPromise *prom
  g_mutex_lock(&a->gate);
  bool allowed = !a->failed && a->caps.profiles && attempt_current(a);
  g_mutex_unlock(&a->gate);
- if (allowed) return;
+ if (allowed) {
+  /* rswebrtc asks for ULPFEC/RED on every transceiver after it is created,
+   * which costs three payload types per offered codec (red, ulpfec, rtx of
+   * red). The engine never answers with them, and with seven video entries
+   * the 96-127 range ran out: the last codec was left without its RTX type.
+   * Offer the codecs and their RTX only. */
+  GArray *transceivers = NULL;
+  g_signal_emit_by_name(rtc, "get-transceivers", &transceivers);
+  for (guint i = 0; transceivers && i < transceivers->len; i++)
+   gst_util_set_object_arg(G_OBJECT(g_array_index(transceivers, GObject *, i)), "fec-type", "none");
+  if (transceivers) g_array_unref(transceivers);
+  return;
+ }
  g_signal_stop_emission_by_name(rtc, "create-offer");
  GError *error = g_error_new_literal(GST_CORE_ERROR, GST_CORE_ERROR_NEGOTIATION, "No verified receive profile");
  gst_promise_reply(promise, gst_structure_new("application/x-gst-promise", "error", G_TYPE_ERROR, error, NULL));
@@ -422,6 +437,7 @@ static GstElement *request_encoded_filter(GstElement *rx, const char *peer, cons
  GstElement *filter = current && !a->failed ? pv_codec_route_new() : NULL;
  if (filter) {
   pv_codec_route_admit_main422(filter,(a->caps.profiles & PV_PROFILE_HEVC_MAIN422_10)!=0);
+  pv_codec_route_admit_main444(filter,(a->caps.profiles & PV_PROFILE_HEVC_MAIN444_10)!=0);
   /* The signal's object GValue transfers an owned reference to Rust. A floating
    * bin would have its only reference stolen by bin.add, then unrefed again by
    * Rust's returned Element wrapper, leaving bus messages with a dangling src. */

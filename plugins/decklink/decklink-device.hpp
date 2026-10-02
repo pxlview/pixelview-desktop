@@ -71,6 +71,9 @@ public:
 
 	bool GetInput(IDeckLinkInput **input);
 	bool GetOutput(IDeckLinkOutput **output);
+	// Pixelview: whether the card plays this pixel format in this mode (e.g. RGB
+	// 4:4:4 does not fit 1080p50/60 on a 3G-SDI link).
+	bool SupportsOutputPixelFormat(DeckLinkDeviceMode *mode, BMDPixelFormat format);
 	bool GetKeyer(IDeckLinkKeyer **keyer);
 
 	inline bool IsDevice(IDeckLink *device_) { return device_ == device; }

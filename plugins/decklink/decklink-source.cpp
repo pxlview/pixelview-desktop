@@ -235,6 +235,8 @@ static obs_properties_t *decklink_get_properties(void *data)
 	obs_property_list_add_int(list, "8-bit YUV", bmdFormat8BitYUV);
 	obs_property_list_add_int(list, "10-bit YUV", bmdFormat10BitYUV);
 	obs_property_list_add_int(list, "8-bit BGRA", bmdFormat8BitBGRA);
+	// Pixelview: an RGB 4:4:4 SDI signal captured without chroma subsampling.
+	obs_property_list_add_int(list, "10-bit RGB", bmdFormat10BitRGBXLE);
 
 	list = obs_properties_add_list(props, COLOR_SPACE, TEXT_COLOR_SPACE, OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(list, TEXT_COLOR_SPACE_DEFAULT, VIDEO_CS_DEFAULT);

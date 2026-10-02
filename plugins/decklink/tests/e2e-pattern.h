@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// End-to-end test picture, 1920x1080 10-bit 4:2:2, defined in limited-range codes.
+// End-to-end test pictures. First the 4:2:2 one, 1920x1080 10-bit Y'CbCr, defined in limited-range codes.
 // Rows   0-299: sixteen flat patches (120 px each)
 // Rows 300-479: fine luma ramp, one code per three pixels (200..839), neutral chroma
 // Rows 480-659: left half Cb alternates 412/612 on every row (needs 4:2:2); right half flat grey
@@ -40,5 +40,45 @@ static inline double e2e_expected(unsigned x, unsigned y, unsigned c, int source
 	double v = e2e_sample(x, y, c, source_full);
 	if (source_full) v = c ? 512 + (v - 512) * 896.0 / 1023.0 : 64 + v * 876.0 / 1023.0; // to limited
 	if (out_full) v = c ? e2e_full_c(v) : e2e_full_y(v);
+	return v < 4 ? 4 : v > 1019 ? 1019 : v;
+}
+
+// The 4:4:4 picture, 1920x1080 10-bit R'G'B', defined in video-level codes (64-940).
+// Rows   0-299: sixteen flat patches (120 px each)
+// Rows 300-479: fine grey ramp, one code per three pixels (200..839)
+// Rows 480-659: left half R and B swap on every pixel at constant G (needs 4:4:4: 4:2:2 or
+//               4:2:0 chroma averages the pairs to grey); right half flat grey
+// Rows 660-1079: 75% colour bars with their edges on odd pixels
+static const char *const e2e_rgb_patch_name[E_PATCHES] = {"black", "white", "grey", "dark", "bright", "yellow", "cyan", "green",
+	"magenta", "red", "blue", "pastel1", "pastel2", "skin", "sub-black", "super-white"};
+static const unsigned e2e_rgb_patch[E_PATCHES][3] = {{64, 64, 64}, {940, 940, 940}, {502, 502, 502}, {100, 100, 100}, {850, 850, 850},
+	{721, 721, 64}, {64, 721, 721}, {64, 721, 64}, {721, 64, 721}, {721, 64, 64}, {64, 64, 721},
+	{640, 580, 520}, {420, 380, 470}, {680, 520, 440}, {40, 40, 40}, {980, 980, 980}};
+static const unsigned e2e_rgb_bars[8][3] = {{721, 721, 721}, {721, 721, 64}, {64, 721, 721}, {64, 721, 64},
+	{721, 64, 721}, {721, 64, 64}, {64, 64, 721}, {64, 64, 64}};
+#define E_RGB_ALT_LOW 350u
+#define E_RGB_ALT_HIGH 650u
+// video-level sample at (x, y): c = 0 R, 1 G, 2 B
+static inline unsigned e2e_rgb_limited(unsigned x, unsigned y, unsigned c)
+{
+	if (y < 300) return e2e_rgb_patch[x / 120][c];
+	if (y < 480) return 200 + x / 3;
+	if (y < 660) {
+		if (x >= EW / 2 || c == 1) return 500;
+		return ((x & 1) != (c == 2)) ? E_RGB_ALT_HIGH : E_RGB_ALT_LOW;
+	}
+	return e2e_rgb_bars[(x + 239) / 240 > 7 ? 7 : (x + 239) / 240][c]; // edges at x = 1, 241, 481, ...
+}
+static inline unsigned e2e_rgb_sample(unsigned x, unsigned y, unsigned c, int full)
+{
+	unsigned v = e2e_rgb_limited(x, y, c);
+	return full ? e2e_clip(e2e_full_y(v)) : v;
+}
+// What the output should carry, as for e2e_expected: every R'G'B' component scales like luma.
+static inline double e2e_rgb_expected(unsigned x, unsigned y, unsigned c, int source_full, int out_full)
+{
+	double v = e2e_rgb_sample(x, y, c, source_full);
+	if (source_full) v = 64 + v * 876.0 / 1023.0;
+	if (out_full) v = e2e_full_y(v);
 	return v < 4 ? 4 : v > 1019 ? 1019 : v;
 }

@@ -389,9 +389,14 @@ void DeckLinkDeviceInstance::SetupVideoFormat(DeckLinkDeviceMode *mode_)
 	}
 
 	colorRange = static_cast<DeckLinkInput *>(decklink)->GetColorRange();
-	currentFrame.range = colorRange;
+	// Pixelview: 10-bit RGB on SDI is at video levels (64-940) unless the operator
+	// chooses Full; libobs would otherwise read every RGB format as full range.
+	const video_range_type frameRange = (colorRange == VIDEO_RANGE_DEFAULT && pixelFormat == bmdFormat10BitRGBXLE)
+						    ? VIDEO_RANGE_PARTIAL
+						    : colorRange;
+	currentFrame.range = frameRange;
 
-	video_format_get_parameters_for_format(activeColorSpace, colorRange, format, currentFrame.color_matrix,
+	video_format_get_parameters_for_format(activeColorSpace, frameRange, format, currentFrame.color_matrix,
 					       currentFrame.color_range_min, currentFrame.color_range_max);
 	// Pixelview: SDI legally carries sub-black and super-white (PLUGE, overshoots).
 	// The SDR conversion keeps them through the float canvas, so do not clamp
@@ -597,6 +602,38 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		return false;
 	}
 
+	// Pixelview: 10-bit 4:2:2 Y'CbCr (v210) or 10-bit 4:4:4 RGB (R10l) unless the
+	// keyer needs BGRA alpha; the same rule decklink_output_create applies.
+	const bool tenBit = decklinkOutput->keyerMode == 0;
+	const bool rgb444 = tenBit && decklinkOutput->rgb444;
+	const bool v210 = tenBit && !rgb444;
+	// The card converts R10l frames to 4:2:2 Y'CbCr on SDI unless told to send
+	// RGB 4:4:4. The setting is made through a configuration interface that is
+	// kept until the output stops: the SDK reverts a change when the interface
+	// that made it is released, yet a device can also be left in 4:4:4 by an
+	// earlier run (seen on an UltraStudio Monitor 3G after a killed process, where
+	// v210 frames then left the card as black RGB), so it is set both ways.
+	outputConfiguration.Clear();
+	if (tenBit) {
+		if (output_->QueryInterface(IID_IDeckLinkConfiguration, (void **)&outputConfiguration) != S_OK ||
+		    outputConfiguration->SetFlag(bmdDeckLinkConfig444SDIVideoOutput, rgb444) != S_OK) {
+			outputConfiguration.Clear();
+			if (rgb444) {
+				LOG(LOG_ERROR, "This device cannot switch its SDI output to RGB 4:4:4");
+				return false;
+			}
+		}
+	}
+	if (rgb444) {
+		// One cable: a card with two SDI outputs may default to dual link (the
+		// UltraStudio 4K Mini does), which puts R and B of every second pixel on
+		// the other connector, so a single cable would carry half the chroma.
+		if (outputConfiguration->SetInt(bmdDeckLinkConfigSDIOutputLinkConfiguration,
+						bmdLinkConfigurationSingleLink) != S_OK) {
+			LOG(LOG_INFO, "SDI output link configuration left as the device has it");
+		}
+	}
+
 	bool videoEnabled = false, audioEnabled = false;
 	// Non-owning scope guard; output_ retains the SDK reference until rollback.
 	auto cleanup = [&](IDeckLinkOutput *sdk) {
@@ -615,6 +652,7 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		}
 		renderDelegate.Clear();
 		output.Clear();
+		outputConfiguration.Clear();
 		mode = nullptr;
 	};
 	std::unique_ptr<IDeckLinkOutput, decltype(cleanup)> rollback(output_.Get(), cleanup);
@@ -652,34 +690,33 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 	frameQueueDecklinkToObs.reset();
 	frameQueueObsToDecklink.reset();
 
-	// Pixelview: 10-bit 4:2:2 Y'CbCr (v210) unless the keyer needs BGRA alpha.
-	const bool v210 = decklinkOutput->keyerMode == 0; // the rule decklink_output_create applies
+	const BMDPixelFormat pixelFormat = rgb444 ? bmdFormat10BitRGBXLE : v210 ? bmdFormat10BitYUV : bmdFormat8BitBGRA;
 	const int rowSize = v210 ? ((decklinkOutput->GetWidth() + 47) / 48) * 128 : decklinkOutput->GetWidth() * 4;
 	const int frameSize = rowSize * decklinkOutput->GetHeight();
-	outputV210 = v210;
+	outputFormat = pixelFormat;
 	outputFullRange = decklinkOutput->full_range;
 	outputRowBytes = rowSize;
 	for (std::vector<uint8_t> &blob : frameBlobs) {
 		blob.assign(frameSize, 0);
-		FillBlack(blob.data(), size_t(frameSize), v210, outputFullRange);
+		FillBlack(blob.data(), size_t(frameSize), pixelFormat, outputFullRange);
 		frameQueueDecklinkToObs.push(blob.data());
 	}
+
 	activeBlob = nullptr;
 
 	struct obs_video_info ovi;
 	const enum video_colorspace colorspace = obs_get_video_info(&ovi) ? ovi.colorspace : VIDEO_CS_DEFAULT;
 	const bool source_hdr = (colorspace == VIDEO_CS_2100_PQ) || (colorspace == VIDEO_CS_2100_HLG);
 	const bool enable_hdr =
-		source_hdr && v210 &&
+		source_hdr && tenBit &&
 		(obs_output_get_video_conversion(decklinkOutput->GetOutput())->colorspace == VIDEO_CS_2100_PQ);
-	BMDPixelFormat pixelFormat = v210 ? bmdFormat10BitYUV : bmdFormat8BitBGRA;
-	blog(LOG_INFO, "[decklink] output video: %s, %s range (canvas %s, %.0f nits)",
-	     !v210        ? "8-bit BGRA for the keyer"
-	     : enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "10-bit 4:2:2 YUV HLG with HDR metadata"
-							     : "10-bit 4:2:2 YUV PQ with HDR metadata")
-	     : source_hdr ? "10-bit 4:2:2 YUV SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
-			  : "10-bit 4:2:2 YUV SDR",
-	     !v210 || decklinkOutput->full_range ? "full" : "limited",
+	blog(LOG_INFO, "[decklink] output video: %s%s, %s range (canvas %s, %.0f nits)",
+	     !tenBit ? "8-bit BGRA for the keyer" : rgb444 ? "10-bit 4:4:4 RGB " : "10-bit 4:2:2 YUV ",
+	     !tenBit      ? ""
+	     : enable_hdr ? (colorspace == VIDEO_CS_2100_HLG ? "HLG with HDR metadata" : "PQ with HDR metadata")
+	     : source_hdr ? "SDR, tone-mapped (no HDR metadata support on this device, or Force SDR)"
+			  : "SDR",
+	     !tenBit || decklinkOutput->full_range ? "full" : "limited",
 	     colorspace == VIDEO_CS_2100_PQ ? "Rec.2100 PQ" : colorspace == VIDEO_CS_2100_HLG ? "Rec.2100 HLG" : "SDR",
 	     obs_get_video_hdr_nominal_peak_level());
 	const int64_t minimumPrerollFrames = std::max(device->GetMinimumPrerollFrames(), INT64_C(3));
@@ -707,7 +744,7 @@ bool DeckLinkDeviceInstance::StartOutputInternal(DeckLinkDeviceMode *mode_)
 		    theFrame->GetBytes(&initialBytes) != S_OK || !initialBytes) {
 			return false;
 		}
-		FillBlack(static_cast<uint8_t *>(initialBytes), size_t(frameSize), v210, outputFullRange);
+		FillBlack(static_cast<uint8_t *>(initialBytes), size_t(frameSize), pixelFormat, outputFullRange);
 		result = output_->ScheduleVideoFrame(theFrame, i * frameDuration, frameDuration, frameTimescale);
 		if (result != S_OK) {
 			blog(LOG_ERROR, "failed to schedule video frame for preroll 0x%X", result);
@@ -748,6 +785,7 @@ bool DeckLinkDeviceInstance::StopOutput()
 	output->DisableVideoOutput();
 	output->DisableAudioOutput();
 	output.Clear();
+	outputConfiguration.Clear();
 	mode = nullptr;
 	device->ReleaseOwner(this);
 	renderDelegate.Clear();
@@ -758,10 +796,19 @@ bool DeckLinkDeviceInstance::StopOutput()
 }
 
 // Zero bytes are black in BGRA but a dark green in v210, where black is Cb=Cr=512
-// with Y'=64 in limited range and the lowest SDI code, 4, in full range.
-void DeckLinkDeviceInstance::FillBlack(uint8_t *bytes, size_t size, bool v210, bool fullRange)
+// with Y'=64 in limited range and the lowest SDI code, 4, in full range. R10l
+// black is the same level in all three components.
+void DeckLinkDeviceInstance::FillBlack(uint8_t *bytes, size_t size, BMDPixelFormat format, bool fullRange)
 {
-	if (!v210) {
+	if (format == bmdFormat10BitRGBXLE) {
+		const uint32_t level = fullRange ? 4u : 64u;
+		const uint32_t word = level << 22 | level << 12 | level << 2;
+		for (size_t offset = 0; offset + sizeof(word) <= size; offset += sizeof(word)) {
+			memcpy(bytes + offset, &word, sizeof(word));
+		}
+		return;
+	}
+	if (format != bmdFormat10BitYUV) {
 		memset(bytes, 0, size);
 		return;
 	}
@@ -811,7 +858,7 @@ void DeckLinkDeviceInstance::ScheduleVideoFrame(IDeckLinkVideoFrame *frame)
 		if (blob) {
 			memcpy(bytes, blob, frameSize);
 		} else {
-			FillBlack(static_cast<uint8_t *>(bytes), size_t(frameSize), outputV210, outputFullRange);
+			FillBlack(static_cast<uint8_t *>(bytes), size_t(frameSize), outputFormat, outputFullRange);
 		}
 
 		output->ScheduleVideoFrame(frame, totalFramesScheduled * frameDuration, frameDuration, frameTimescale);
