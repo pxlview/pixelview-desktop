@@ -775,6 +775,14 @@ gate) fail in the current environment regardless of changes.
   selection, DeckLink settings round trip, all FPS options, Fit, save-failure rollback; ffprobe of
   all three Apple HEVC profiles and H.264 (no B-frames, 1 s keyframes); loopback SRT smoke with
   mute/listen measured through CoreAudio.
+- Log upload to production (2026-10-02): the signed development build from local master, paired
+  to `api4` with the normal settings root, uploaded through the deployed `POST /desktop/logs` and
+  the lines were read back from the AMS Loki as `job="pixelview-desktop"`. Startup lines (video and
+  audio settings, DeckLink API and capture, control socket) arrived as `app` and three WHIP sends
+  (VideoToolbox settings block, Opus encoder, `[obs-webrtc]` states and connect time, streaming
+  start/stop, output frame totals) as `send`, each stamped with the desktop ID, node, version and
+  build, macOS version, `cpu` and `hardware_model`; no scene, source or module lines, and the
+  audio-buffering source name removed. The spool was cleared after upload.
 - Clean shutdown via SIGTERM on the signed bundle: log ends with `Shutting down`, zero leaks, sentinel
   removed, no crash report. With the stream-failure box still open after a WHIP 404 against the
   local backend (pentest mode, no engine), SIGTERM logged the dialog wait, then shut down with zero
@@ -798,11 +806,11 @@ gate) fail in the current environment regardless of changes.
   backend reload was exercised.
 - Admin remote control: a remote start that reaches an engine and streams, remote stop of a live
   stream, and the relay and state push across several backend workers (FakeRedis test only).
-- Log upload against a running backend: the signed build was launched unpaired with an isolated
-  settings root and spooled its log from the first line and at SIGTERM close (clean shutdown), but
-  no batch was posted to `/desktop/logs`, and the receive-session attribution and the menu switch
-  were exercised offline only. The backend side was checked by pushing through its forwarder into a
-  local Loki, not the AMS Loki.
+- Log upload: receive lines with a session verified by the viewer token, an unpaired receiver
+  uploading with its viewer token alone, the menu switch on the running app, the failure lines of a
+  stream that does not start, spooled lines uploaded by a later launch, and the backend budgets
+  (429) were exercised offline only. The Desktop Logs dashboard and alert rules have not been
+  checked against these live lines.
 - Production notarization, Gatekeeper, R2 publication, appcast and the Sparkle update cycle;
   the interactive Pair forms on the rebuilt bundle (offscreen tests only);
   clicking the red close button (SIGTERM shares the path).
