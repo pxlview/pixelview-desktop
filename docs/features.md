@@ -665,6 +665,27 @@ gate) fail in the current environment regardless of changes.
   `10-bit 4:2:2 YUV SDR, full range`, and limited stayed bit-exact. The setting itself was applied
   through the output's settings in the harness; the dropdown in the app's Output settings and a
   monitor set to full were not looked at.
+- End to end through two running apps (2026-10-02, signed development build, local pentest backend
+  and local pv-engine `main`): an UltraStudio 4K Mini played a 10-bit 4:2:2 test picture into an
+  UltraStudio Recorder 3G; a sender instance captured it and streamed over WHIP, configured and
+  started through the backend's Desktop control route (frame rate, capture mode and range, profile,
+  12 Mbit/s); a receiver instance received the session and played it out of an UltraStudio Monitor
+  3G into the 4K Mini, where `plugins/decklink/tests/run-e2e-sdi-tool.py` averaged 50 captured
+  frames. Twelve cases, each profile with the source and the output in limited or full range:
+  - Main 4:2:2 10 and Main10: flat patches (black, white, greys, primaries, skin) within 1 code in
+    luma and 2 in chroma of the source expressed in the output range, neutral chroma exactly 512,
+    609-618 of the ramp's 632 ten-bit steps present. Main 4:2:2 10 kept the row-alternating chroma
+    at full amplitude; Main10 averaged it away, as 4:2:0 must.
+  - Main: within 3 codes (8-bit steps are 4 codes), black and white exact with a limited source,
+    159 ramp steps.
+  - Limited in and out carried sub-black (40) and super-white (980) through unchanged in all three
+    profiles. With a full-range source, black and white sit at the SDI limits 4 and 1019 and come
+    out at 67 and 936 on a limited output and within 1 code of 4 and 1019 on a full output.
+  The log reported `10-bit 4:2:2 YUV SDR, limited range` and `... full range`, and the Output range
+  dropdown showed the saved value. Not verified: HDR and other frame rates end to end, a monitor's
+  picture, production, the receiver's session fields typed by hand (a deep link filled them), and
+  the output dialog's Start/Stop button, which did not respond to the accessibility press used for
+  the test (the receiver was restarted to change the output range).
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
