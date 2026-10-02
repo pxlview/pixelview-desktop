@@ -98,6 +98,7 @@ using namespace std;
 #include "OBSBasic_PixelviewDeepLinks.inc"
 #include "OBSBasic_PixelviewControl.inc"
 #include "OBSBasic_PixelviewLogs.inc"
+#include "OBSBasic_PixelviewStats.inc"
 
 extern bool disable_3p_plugins;
 extern bool opt_studio_mode;

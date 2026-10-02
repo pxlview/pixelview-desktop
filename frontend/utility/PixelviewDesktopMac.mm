@@ -49,7 +49,8 @@
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didOpenWithProtocol:(NSString *)protocol {
  if(!owner) return; // A cancelled attempt must not arm a receive loop.
  __weak PVDesktopSocket *weakSelf=self;
- watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVDesktopSocket *s=weakSelf;if(s) [s failed:0];});
+ watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVDesktopSocket *s=weakSelf;if(s) [s failed:0];},
+  [weakSelf](int ms){PVDesktopSocket *s=weakSelf;if(s && s->owner) s->owner->controlRttMs=ms;});
  [self receive];
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didCloseWithCode:(NSURLSessionWebSocketCloseCode)code reason:(NSData *)reason { [self failed:code]; }
@@ -82,6 +83,7 @@ void DesktopConnection::sendSocket(QByteArray body) {
 void DesktopConnection::closeSocket(bool normal) {
  if(!socket) return;
  PVDesktopSocket *s=CFBridgingRelease(socket); socket=nullptr;
+ controlRttMs=-1;
  s->owner=nullptr;
  s->watchdog.reset();
  if(normal) [s.task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
