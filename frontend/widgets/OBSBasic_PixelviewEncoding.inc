@@ -77,7 +77,10 @@ OBSData PixelviewEncoderData(const std::filesystem::path &path, const char *id, 
 	}
 	for (const auto *key : {"bitrate", "keyint_sec", "bf"}) {
 		auto *p = obs_properties_get(props, key);
-		const int value = strcmp(key, "bitrate") == 0 ? 6000 : strcmp(key, "keyint_sec") == 0 ? 1 : 0;
+		// HEVC (Main, Main10 and Main 4:2:2 10 share one encoder configuration)
+		// defaults to two-second keyframes; H.264 keeps one second.
+		const int keyint = strcmp(obs_get_encoder_codec(id), "hevc") == 0 ? 2 : 1;
+		const int value = strcmp(key, "bitrate") == 0 ? 6000 : strcmp(key, "keyint_sec") == 0 ? keyint : 0;
 		if (p && obs_property_get_type(p) == OBS_PROPERTY_INT &&
 		    value >= obs_property_int_min(p) && value <= obs_property_int_max(p))
 			obs_data_set_int(data, key, value);

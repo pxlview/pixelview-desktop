@@ -167,14 +167,18 @@ int main(int argc,char **argv){
   assert(obs_data_get_int(data,"bitrate")==6000);
   assert(strcmp(obs_data_get_string(data,"profile"),strcmp(encoder,"obs_x264")==0?"baseline":"main")==0);
   assert(strcmp(obs_data_get_string(data,"rate_control"),"CBR")==0);
-  assert(obs_data_get_int(data,"keyint_sec")==1);
+  // HEVC (all three profiles use this one configuration): 2 s; H.264: 1 s.
+  assert(obs_data_get_int(data,"keyint_sec")==(strcmp(encoder,"obs_x264")==0?1:2));
   obs_data_set_int(data,"bitrate",9000);obs_data_set_string(data,"profile",strcmp(encoder,"obs_x264")==0?"high":"main10");
+  assert(obs_data_save_json_safe(data,saved.c_str(),"tmp","bak"));
+  obs_data_set_int(data,"keyint_sec",4);
   assert(obs_data_save_json_safe(data,saved.c_str(),"tmp","bak"));
   auto restored=PixelviewEncoderData(saved,encoder,false);
   assert(obs_data_get_int(restored,"bitrate")==9000);
+  assert(obs_data_get_int(restored,"keyint_sec")==4);
   assert(strcmp(obs_data_get_string(restored,"profile"),obs_data_get_string(data,"profile"))==0);
  }
- obs_shutdown();std::cout<<"PASS native Main/6000 CBR, x264 fallback defaults, saved profile/bitrate preserved\n";
+ obs_shutdown();std::cout<<"PASS native Main/6000 CBR/2 s keyframes, x264 fallback defaults, saved profile/bitrate/keyframes preserved\n";
 }'''.replace('ACTUAL', actual)
         deps=ROOT/'.deps/obs-deps-2026-08-26-universal'
         with tempfile.TemporaryDirectory(prefix='pixelview-first-launch-') as tmp:
