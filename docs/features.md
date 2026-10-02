@@ -785,8 +785,10 @@ gate) fail in the current environment regardless of changes.
   audio-buffering source name removed. The spool was cleared after upload. The run also showed
   that multi-line messages (the encoder, video and audio settings blocks, so bitrate, keyframe
   interval and profile) arrived as their first line only: the capture ran after the log-file
-  writer, which cuts the message at every newline in place. The capture now runs first; that fix
-  has offline tests only and has not been re-run against production.
+  writer, which cuts the message at every newline in place. The capture now runs first; a rebuilt
+  development build then delivered the video and audio settings blocks and the VideoToolbox
+  settings block of a WHIP send (bitrate, keyframe interval 2 s, profile, all sixteen lines) to
+  the AMS Loki whole.
 - Clean shutdown via SIGTERM on the signed bundle: log ends with `Shutting down`, zero leaks, sentinel
   removed, no crash report. With the stream-failure box still open after a WHIP 404 against the
   local backend (pentest mode, no engine), SIGTERM logged the dialog wait, then shut down with zero
