@@ -100,6 +100,7 @@ void PixelviewReceiver::loginFinished(int code,const QByteArray &body)
  // Preserve server-provided path, token and all existing query bytes.
  auto encoded=url.toEncoded(); if(!url.hasQuery()) encoded+='?'; else if(!url.query().isEmpty()) encoded+='&';
  encoded += "viewer_id="+QUrl::toPercentEncoding(viewerId); endpoint=QString::fromUtf8(encoded);
+ viewerToken=token;
  auto ws=origin; ws.setScheme(origin.scheme()=="https" ? "wss" : "ws"); ws.setPath("/wsocket");
  ws.setQuery("token="+QString::fromLatin1(QUrl::toPercentEncoding(token)));
  deadline.start(15000);
@@ -159,7 +160,7 @@ void PixelviewReceiver::clearAttempt(bool preserveMedia)
 }
 void PixelviewReceiver::stop()
 {
- intent=false; clearAttempt(); sessionId.clear(); password.clear(); name.clear(); viewerId.clear(); retryCount=0;
+ intent=false; clearAttempt(); sessionId.clear(); password.clear(); name.clear(); viewerId.clear(); viewerToken.clear(); retryCount=0;
  change(State::Idle,"Not receiving.");
 }
 void PixelviewReceiver::fail(const QString &reason)

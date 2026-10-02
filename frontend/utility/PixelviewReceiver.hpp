@@ -40,6 +40,10 @@ public:
  void stop();
  State state() const { return current; }
  QString status() const { return text; }
+ // Diagnostics context for log upload; empty when not receiving.
+ const QString &session() const { return sessionId; }
+ const QString &viewer() const { return viewerId; }
+ const QString &clientToken() const { return viewerToken; }
  std::function<void(const QString &)> onEndpoint;
  std::function<void()> onStopped;
  std::function<void()> onChanged;
@@ -62,7 +66,7 @@ private:
  quint64 generation = 0;
  State current = State::Idle;
  QString text{"Not receiving."};
- QString sessionId, password, name, viewerId, endpoint, deliveredEndpoint;
+ QString sessionId, password, name, viewerId, endpoint, deliveredEndpoint, viewerToken;
  QTimer deadline, retry, refresh, authorizationExpiry, controlGrace;
  QElapsedTimer controlLossClock;
  QDeadlineTimer authorizationDeadline, pendingAuthorizationDeadline;

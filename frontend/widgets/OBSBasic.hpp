@@ -55,6 +55,7 @@ class OBSAbout;
 #include <utility/PixelviewReceiver.hpp>
 #include <utility/PixelviewReceiveCredentialStore.hpp>
 #include <utility/PixelviewDeepLink.hpp>
+#include <utility/PixelviewLogShipper.hpp>
 class QTabBar;
 class QLineEdit;
 class QToolButton;
@@ -290,6 +291,17 @@ private:
 
 	void OnFirstLoad();
 	void InitPixelview();
+	// Pixelview modification, 2026-09-29: log upload (OBSBasic_PixelviewLogs.inc).
+	void InitPixelviewLogs();
+	void PixelviewLogsTick();
+	void SetPixelviewLogSharing(bool enabled);
+	std::unique_ptr<pixelview::LogShipper> pixelviewLogs;
+	QNetworkAccessManager *pixelviewLogHttp = nullptr;
+	QTimer *pixelviewLogTimer = nullptr;
+	QAction *pixelviewLogSharing = nullptr;
+	bool pixelviewLogSharingOn = false;
+	// Kept after receiving stops so its spooled lines still prove their session.
+	QString pixelviewLogViewerToken;
 	void ApplyPixelviewDeepLink(const std::optional<pixelview::DeepLink> &link);
 	void InitPixelviewReceive(QWidget *sidebar);
 	void RefreshPixelviewModes();
