@@ -221,7 +221,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	if (credential.state == pixelview::ReceiveCredentialStore::State::Found) pixelviewReceivePassword->setText(credential.password);
 	else if (credential.state == pixelview::ReceiveCredentialStore::State::Error) {
 		pixelviewReceiveCredentialUnavailable = true;
-		pixelviewReceiveStorageStatus->setText(QStringLiteral("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again."));
+		pixelviewReceiveStorageStatus->setText(PIXELVIEW_PLATFORM_TEXT("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again.", "The saved password could not be read from Windows Credential Manager. Type it again."));
 		pixelviewReceiveStorageStatus->show();
 	}
 	// Save edits without requiring Start. Deep links use a signal-blocked pair
@@ -447,7 +447,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					is("unsupported-colorimetry") ?
 					QStringLiteral("The sender's colour format is not supported. Use limited-range BT.709 SDR or limited-range BT.2020 PQ/HLG on the sender.") :
 					hevc422 ?
-					QStringLiteral("The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
+					PIXELVIEW_PLATFORM_TEXT("The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.", "The sender is streaming HEVC 4:2:2 10-bit, which this computer cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
@@ -628,7 +628,7 @@ bool OBSBasic::SavePixelviewReceive()
 		const bool saved = config_save_safe(config, "tmp", nullptr) == CONFIG_SUCCESS;
 		pixelviewReceiveCredentialsDirty = !saved;
 		pixelviewReceiveStorageStatus->setText(saved ?
-			QStringLiteral("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again.") :
+			PIXELVIEW_PLATFORM_TEXT("The saved password could not be read. Click Start receiving so macOS can ask for access, or type it again.", "The saved password could not be read from Windows Credential Manager. Type it again.") :
 			QStringLiteral("Changes could not be saved. Check the app's configuration folder permissions; the saved password is still unavailable."));
 		pixelviewReceiveStorageStatus->show();
 		return saved;
@@ -645,14 +645,25 @@ bool OBSBasic::SavePixelviewReceive()
 	pixelviewReceiveCredentialsDirty = !saved;
 	pixelviewReceiveStorageStatus->setText(saved ? QString() : !configSaved ?
 		QStringLiteral("Changes could not be saved. Check the app's configuration folder permissions; previous settings may return after reopening.") :
-		QStringLiteral("The password could not be saved to the Keychain. Click Start receiving so macOS can ask for access; it may need typing again after reopening."));
+		PIXELVIEW_PLATFORM_TEXT("The password could not be saved to the Keychain. Click Start receiving so macOS can ask for access; it may need typing again after reopening.", "The password could not be saved to Windows Credential Manager; it may need typing again after reopening."));
 	pixelviewReceiveStorageStatus->setVisible(!saved);
 	return saved;
+}
+
+// The WHEP receive module is built only on macOS so far; check before authenticating.
+static bool PixelviewReceiveAvailable()
+{
+	return obs_source_get_display_name("pixelview_whep_source") != nullptr;
 }
 
 void OBSBasic::StartPixelviewReceive()
 {
 	if (!pixelviewReceiving || !pixelviewReceiver || PixelviewModeBusy()) return;
+	if (!PixelviewReceiveAvailable()) {
+		pixelviewReceiveFrames = 0;
+		SetPixelviewReceiveStatus(QStringLiteral("Receiving is not available in this version of Pixelview Desktop yet."), ReceiveStatusTone::Error);
+		return;
+	}
 	const QString id = pixelviewReceiveId->text().trimmed(), name = pixelviewReceiveName->text().trimmed();
 	if (id.isEmpty() || name.isEmpty()) { pixelviewReceiveFrames = 0; SetPixelviewReceiveStatus(QStringLiteral("Enter a session ID and receiver name."), ReceiveStatusTone::Error); return; }
 	if (QString::fromUtf8(config_get_string(App()->GetUserConfig(), "PixelviewReceive", "BlockedSessions")).split(',', Qt::SkipEmptyParts).contains(id)) {
@@ -795,6 +806,11 @@ void OBSBasic::RefreshPixelviewModes()
 		QStringLiteral("Wait for the current operation to finish before switching modes.");
 	pixelviewModeTabs->setTabToolTip(0, lock);
 	pixelviewModeTabs->setTabToolTip(1, lock);
+	// Re-evaluated on every refresh: modules may load after the first call.
+	const bool receiveAvailable = pixelviewReceiving || PixelviewReceiveAvailable();
+	pixelviewModeTabs->setTabEnabled(1, receiveAvailable);
+	if (!receiveAvailable)
+		pixelviewModeTabs->setTabToolTip(1, QStringLiteral("Receiving is not available in this version of Pixelview Desktop yet."));
 	pixelviewSendingPanel->setVisible(!pixelviewReceiving);
 	pixelviewReceivingPanel->setVisible(pixelviewReceiving);
 	pixelviewReceiveId->setEnabled(!busy);

@@ -71,6 +71,7 @@ int main() {
 #include <QtWidgets/QPushButton>
 #include <cassert>
 #include "frontend/utility/PixelviewKeychainTask.hpp"
+#include "frontend/utility/PixelviewPlatformText.hpp"
 int main(int argc,char **argv) {
  QApplication app(argc,argv);
  // Yami maps both Mid and Window to grey7; Mid is not a text role.
@@ -230,6 +231,7 @@ int main(int argc,char **argv) {
 #include <cassert>
 #include "frontend/utility/PixelviewDesktop.hpp"
 #include "frontend/utility/PixelviewKeychainTask.hpp"
+#include "frontend/utility/PixelviewPlatformText.hpp"
 using pixelview::runKeychainUserAction;
 #define LOG_INFO 0
 static void blog(int,const char *,...) {}
@@ -325,6 +327,7 @@ int main(int argc,char **argv) {
 #include <QtWidgets/QLabel>
 #include <cassert>
 #include "frontend/utility/PixelviewKeychainTask.hpp"
+#include "frontend/utility/PixelviewPlatformText.hpp"
 int main(int argc,char **argv) {
  QApplication app(argc,argv);
  bool busy=false, pixelviewPairingDurable=true, pixelviewUnpairRetry=false;

@@ -41,6 +41,10 @@ inline int preferredEncoder(const std::vector<EncoderChoice> &encoders, bool app
 		const auto &e = encoders[i];
 		int rank = e.id == "obs_x264" ? 0 : -1;
 		if (e.hardware && e.codec == "hevc") rank = 20;
+		// Windows exposes several vendors on hybrid systems: prefer the discrete encoders.
+		if (rank == 20 && e.id.find("nvenc") != std::string::npos) rank = 23;
+		else if (rank == 20 && e.id.find("_amf") != std::string::npos) rank = 22;
+		else if (rank == 20 && e.id.find("qsv") != std::string::npos) rank = 21;
 		if (apple && e.hardware && e.codec == "hevc" && e.id.find("com.apple.videotoolbox.") == 0) rank = 30;
 		if (rank > score) { best = static_cast<int>(i); score = rank; }
 	}

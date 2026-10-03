@@ -10,6 +10,7 @@ struct QString : std::string {
 };
 inline QString operator+(const QString &a, const QString &b) { return QString((std::string(a) + std::string(b)).c_str()); }
 #define QStringLiteral(s) QString(s)
+#define PIXELVIEW_PLATFORM_TEXT(mac, other) QString(mac)
 namespace Qt { enum { ToolTipRole = 3 }; }
 /* PRODUCTION_PROFILE_LABELS */
 struct View { bool visible = false; bool isVisible() const { return visible; } };

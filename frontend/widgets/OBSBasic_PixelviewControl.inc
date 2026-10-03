@@ -204,8 +204,8 @@ QString OBSBasic::RunPixelviewControl(const QJsonObject &command)
 {
 	const QString action = command["action"].toString();
 	if (action == "get_state") return {};
-	if (!pixelviewPairingDurable) return QStringLiteral("This Mac is not paired.");
-	if (pixelviewReceiving) return QStringLiteral("This Mac is receiving. Stop receiving on the Mac first.");
+	if (!pixelviewPairingDurable) return PIXELVIEW_PLATFORM_TEXT("This Mac is not paired.", "This computer is not paired.");
+	if (pixelviewReceiving) return PIXELVIEW_PLATFORM_TEXT("This Mac is receiving. Stop receiving on the Mac first.", "This computer is receiving. Stop receiving on this computer first.");
 
 	if (action == "start") {
 		if (pixelviewLease.intent) return {};
@@ -238,7 +238,7 @@ QString OBSBasic::RunPixelviewControl(const QJsonObject &command)
 
 	// Everything else changes sender configuration: same lock as the sidebar.
 	if (PixelviewConfigurationLocked()) return QStringLiteral("Stop streaming before changing settings.");
-	if (properties) return QStringLiteral("Device settings are open on the Mac. Close them first.");
+	if (properties) return PIXELVIEW_PLATFORM_TEXT("Device settings are open on the Mac. Close them first.", "Device settings are open on this computer. Close them first.");
 
 	if (action == "select_device") {
 		const QString id = command["device"].toString();
@@ -300,7 +300,7 @@ QString OBSBasic::RunPixelviewControl(const QJsonObject &command)
 	if (action == "set_encoder") {
 		const QByteArray id = command["encoder"].toString().toUtf8();
 		if (!pixelviewEncoder || id.isEmpty() || pixelviewEncoder->findData(QString::fromUtf8(id)) < 0)
-			return QStringLiteral("That encoder is not available on this Mac.");
+			return PIXELVIEW_PLATFORM_TEXT("That encoder is not available on this Mac.", "That encoder is not available on this computer.");
 		if (id == config_get_string(activeConfiguration, "AdvOut", "Encoder")) return {};
 		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.constData(), true);
 		if (!SavePixelviewEncoding(id.constData(), data) && error.isEmpty()) error = QStringLiteral("The encoder could not be changed.");

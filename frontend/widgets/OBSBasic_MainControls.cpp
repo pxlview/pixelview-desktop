@@ -36,7 +36,7 @@
 #endif
 #include <dialogs/OBSRemux.hpp>
 #include <settings/OBSBasicSettings.hpp>
-#ifdef _WIN32
+#if defined(_WIN32) && defined(OBS_WINDOWS_UPDATER)
 #include <utility/AutoUpdateThread.hpp>
 #endif
 #include <utility/RemoteTextThread.hpp>
@@ -120,7 +120,8 @@ void OBSBasic::CreateFiltersWindow(obs_source_t *source)
 void OBSBasic::updateCheckFinished()
 {
 	ui->actionCheckForUpdates->setEnabled(true);
-	ui->actionRepair->setEnabled(true);
+	if (ui->actionRepair)
+		ui->actionRepair->setEnabled(true);
 }
 
 void OBSBasic::ResetUI()
@@ -335,7 +336,7 @@ void OBSBasic::on_actionCheckForUpdates_triggered()
 
 void OBSBasic::on_actionRepair_triggered()
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && defined(OBS_WINDOWS_UPDATER)
 	ui->actionCheckForUpdates->setEnabled(false);
 	ui->actionRepair->setEnabled(false);
 

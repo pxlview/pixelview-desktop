@@ -1,6 +1,7 @@
 #pragma once
 #include "PixelviewDesktop.hpp"
 #include "PixelviewKeychainTask.hpp"
+#include "PixelviewPlatformText.hpp"
 #include <QtCore/QObject>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -87,12 +88,12 @@ public:
    }
    log(QStringLiteral("pairing exchange succeeded: node %1, desktop %2").arg(object["node_id"].toString(),object["desktop_id"].toString()));
    exchanging=true; // Includes the native Keychain prompt, not just HTTP.
-   status("Allow Pixelview to save its credential in the macOS Keychain.");
+   status(PIXELVIEW_PLATFORM_TEXT("Allow Pixelview to save its credential in the macOS Keychain.", "Saving the device credential to Windows Credential Manager…"));
    const QString token=object["device_token"].toString();
    runKeychainUserAction(this,[requestOrigin,token]{return saveDevice(requestOrigin.toString(),token);},
     [this,object,token](bool saved){
      exchanging=false;
-     if(!saved) {log(QStringLiteral("pairing incomplete: the device credential could not be saved to the Keychain (see Pixelview Keychain lines)"));status("Pairing incomplete: Keychain access was canceled or failed. Saved credentials were not removed. Pair with a new admin code to retry.");return;}
+     if(!saved) {log(QStringLiteral("pairing incomplete: the device credential could not be saved to the Keychain (see Pixelview Keychain lines)"));status(PIXELVIEW_PLATFORM_TEXT("Pairing incomplete: Keychain access was canceled or failed. Saved credentials were not removed. Pair with a new admin code to retry.", "Pairing incomplete: the device credential could not be saved to Windows Credential Manager. Pair with a new admin code to retry."));return;}
      authorizedToken=token;
      identity.clear(); identity.accept(object);
      paired();

@@ -561,6 +561,13 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 		bool already_running = false;
 
 #ifdef _WIN32
+		// A link opened while Pixelview runs belongs to that instance.
+		if (pixelview::forwardWindowsDeepLink()) {
+			return 0;
+		}
+#endif
+
+#ifdef _WIN32
 		RunOnceMutex rom =
 #endif
 			CheckIfAlreadyRunning(already_running);
@@ -609,6 +616,9 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 
 		/* --------------------------------------- */
 	run:
+#ifdef _WIN32
+		pixelview::installWindowsDeepLinks();
+#endif
 
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__)
 		// Mounted by termina during chromeOS linux container startup
@@ -924,6 +934,19 @@ int main(int argc, char *argv[])
 	SetSearchPathMode(BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT);
 	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 	SetDllDirectoryW(L"");
+
+	/* Pixelview: pixelview:// links launch with the browser's working
+	 * directory; data and plugins resolve relative to bin\64bit. */
+	wchar_t exe_path[MAX_PATH];
+	const DWORD exe_len = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+	if (exe_len > 0 && exe_len < MAX_PATH) {
+		std::wstring exe_dir(exe_path, exe_len);
+		const size_t slash = exe_dir.find_last_of(L"\\/");
+		if (slash != std::wstring::npos) {
+			exe_dir.resize(slash);
+			SetCurrentDirectoryW(exe_dir.c_str());
+		}
+	}
 	load_debug_privilege();
 	base_set_crash_handler(main_crash_handler, nullptr);
 

@@ -19,7 +19,7 @@ class DiagnosticsMenu(unittest.TestCase):
         source = (ROOT / 'frontend/widgets/OBSBasic.cpp').read_text()
         menu = source.split('void OBSBasic::InitPixelview()', 1)[1]
         menu = menu[menu.index('\tfor (auto *action : menuBar()->actions())'):menu.index('\tSystemTray(false);')]
-        gate = source[source.index('#if !defined(_WIN32)\n\tdelete ui->actionRepair;'):]
+        gate = source[source.index('#if !defined(_WIN32) || !defined(OBS_WINDOWS_UPDATER)\n\tdelete ui->actionRepair;'):]
         gate = gate[:gate.index('\n#endif\n#endif') + len('\n#endif\n#endif')]
         # Only switch production platform directives, never Qt's platform headers.
         production = (gate + '\n' + menu).replace('__APPLE__', 'TEST_APPLE').replace('_WIN32', 'TEST_WINDOWS')
@@ -38,6 +38,11 @@ class DiagnosticsMenu(unittest.TestCase):
 #include <cassert>
 #include <iostream>
 #include "menu.h"
+#ifdef TEST_APPLE
+#define PIXELVIEW_PLATFORM_TEXT(mac, other) QStringLiteral(mac)
+#else
+#define PIXELVIEW_PLATFORM_TEXT(mac, other) QStringLiteral(other)
+#endif
 class OBSBasic : public QMainWindow {
  Q_OBJECT
 public:
@@ -121,7 +126,7 @@ int main(int argc, char **argv) {
             subprocess.run([str(qt.parent / 'libexec/uic'), str(temp / 'menu.ui'), '-o', str(temp / 'menu.h')], check=True)
             (temp / 'menu-test.cpp').write_text(code)
             subprocess.run([str(qt.parent / 'libexec/moc'), str(temp / 'menu-test.cpp'), '-o', str(temp / 'menu-test.moc')], check=True)
-            for platform, defines in [('mac', ['TEST_APPLE']), ('mac-sparkle', ['TEST_APPLE', 'ENABLE_SPARKLE_UPDATER']), ('linux-gate', []), ('windows-gate', ['TEST_WINDOWS'])]:
+            for platform, defines in [('mac', ['TEST_APPLE']), ('mac-sparkle', ['TEST_APPLE', 'ENABLE_SPARKLE_UPDATER']), ('linux-gate', []), ('windows-gate', ['TEST_WINDOWS']), ('windows-winsparkle', ['TEST_WINDOWS', 'ENABLE_SPARKLE_UPDATER'])]:
                 with self.subTest(platform=platform):
                     exe = temp / platform
                     subprocess.run(['clang++', '-std=c++17', '-fPIC', '-F' + str(qt),

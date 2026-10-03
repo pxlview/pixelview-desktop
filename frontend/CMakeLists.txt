@@ -85,6 +85,22 @@ target_sources(
 
 if(OS_WINDOWS)
   include(cmake/os-windows.cmake)
+  # Pixelview native layer: Qt WebSocket transport, Credential Manager and pixelview:// links.
+  target_sources(
+    obs-studio
+    PRIVATE
+      utility/PixelviewCredentialsWindows.cpp
+      utility/PixelviewDeepLinkWindows.cpp
+      utility/PixelviewDesktopQt.cpp
+      utility/PixelviewPlatformText.hpp
+      utility/PixelviewReceiveCredentialStore.hpp
+      utility/PixelviewReceiver.cpp
+      utility/PixelviewReceiver.hpp
+      utility/PixelviewReceiverQt.cpp
+      utility/PixelviewWebSocket.cpp
+      utility/PixelviewWebSocket.hpp
+  )
+  target_link_libraries(obs-studio PRIVATE Advapi32)
 elseif(OS_MACOS)
   include(cmake/os-macos.cmake)
   target_sources(obs-studio PRIVATE utility/PixelviewDesktopMac.mm utility/PixelviewReceiver.cpp utility/PixelviewReceiverMac.mm utility/PixelviewReceiver.hpp)

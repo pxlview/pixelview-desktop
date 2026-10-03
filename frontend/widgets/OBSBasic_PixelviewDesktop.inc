@@ -156,7 +156,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
    RefreshPixelviewReconnect();
    return;
   }
-  pixelviewLease.fail(code==4401 ? "This Mac was unpaired from your Pixelview account." :
+  pixelviewLease.fail(code==4401 ? PIXELVIEW_PLATFORM_TEXT("This Mac was unpaired from your Pixelview account.", "This computer was unpaired from your Pixelview account.") :
    code==4403 ? "Pixelview refused the control connection. If this device was revoked, unpair and pair again." :
    "Pixelview control disconnected. Stream stopped.",transient);
   if(code==4401) PixelviewDeviceRevoked();
@@ -229,7 +229,7 @@ void OBSBasic::RefreshPixelviewPairing()
  const bool busy=PixelviewPairingBusy();
  pixelviewPairingHeading->setVisible(!paired);
  pixelviewPair->setText(QStringLiteral("Pair with Pixelview"));
- pixelviewPair->setToolTip(paired ? QStringLiteral("Reconnect this saved pairing. macOS may request authorization; no new pairing code is needed.") : QString());
+ pixelviewPair->setToolTip(paired ? PIXELVIEW_PLATFORM_TEXT("Reconnect this saved pairing. macOS may request authorization; no new pairing code is needed.", "Reconnect this saved pairing. No new pairing code is needed.") : QString());
  pixelviewPair->setVisible((!paired && !pixelviewUnpairRetry) ||
   (paired && !pixelviewLease.ready && pixelviewDesktop && pixelviewDesktop->authorizedToken.isEmpty()));
  pixelviewPair->setEnabled(!busy && !pixelviewUnpairRetry);
@@ -257,7 +257,7 @@ void OBSBasic::PairPixelviewDesktop()
   pixelview::runKeychainUserAction(this,[origin]{return pixelview::loadDevice(origin.toString());},[this,origin](QString token){
    pixelviewDesktop->exchanging=false;
    if(isClosing() || pixelviewShutdownPending || origin!=pixelviewOrigin) return;
-   if(token.isEmpty()) {pixelviewConnectionStatus->setText(QStringLiteral("Keychain access was canceled or failed. Saved pairing has not been removed. Click Pair with Pixelview to reconnect without a new code."));RefreshPixelviewPairing();return;}
+   if(token.isEmpty()) {pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Keychain access was canceled or failed. Saved pairing has not been removed. Click Pair with Pixelview to reconnect without a new code.", "The saved pairing could not be read from Windows Credential Manager. It has not been removed. Click Pair with Pixelview to try again."));RefreshPixelviewPairing();return;}
    pixelviewDesktop->authorizedToken=token;
    ConnectPixelviewDesktop(); RefreshPixelviewPairing();
   });
@@ -430,7 +430,7 @@ void OBSBasic::UnregisterPixelviewDesktop()
  // Quitting mid-request must still leave the installation unpaired locally.
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
  if(token.isEmpty() || !validOrigin) {FinishPixelviewUnpair(PixelviewAccountRemoval::NoCredential);return;}
- pixelviewConnectionStatus->setText(QStringLiteral("Removing this Mac from your Pixelview account…"));
+ pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Removing this Mac from your Pixelview account…", "Removing this computer from your Pixelview account…"));
  pixelviewDesktop->unregister(pixelviewOrigin,token,[this](bool removed){
   if(isClosing() || pixelviewShutdownPending) return;
   FinishPixelviewUnpair(removed ? PixelviewAccountRemoval::Removed : PixelviewAccountRemoval::Unreachable);
@@ -455,12 +455,12 @@ void OBSBasic::FinishPixelviewUnpair(PixelviewAccountRemoval account)
  if(!saved) {
   pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: identity could not be saved. Do not restart; retry Unpair."));
  } else if(!removed) {
-  pixelviewConnectionStatus->setText(QStringLiteral("Unpair incomplete: Keychain removal failed. Check Keychain access, then click Unpair again. Connection remains disabled."));
+  pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Unpair incomplete: Keychain removal failed. Check Keychain access, then click Unpair again. Connection remains disabled.", "Unpair incomplete: the saved credential could not be removed from Windows Credential Manager. Click Unpair again. Connection remains disabled."));
  } else if(account==PixelviewAccountRemoval::Removed) {
-  pixelviewConnectionStatus->setText(QStringLiteral("Unpaired. This Mac was removed from your Pixelview account."));
+  pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Unpaired. This Mac was removed from your Pixelview account.", "Unpaired. This computer was removed from your Pixelview account."));
  } else if(account==PixelviewAccountRemoval::Unreachable) {
-  pixelviewConnectionStatus->setText(QStringLiteral("Unpaired on this Mac, but Pixelview could not be reached to remove it from your account. Remove it in Pixelview admin."));
- } else pixelviewConnectionStatus->setText(QStringLiteral("Unpaired on this Mac. If it is still listed in your Pixelview account, remove it in Pixelview admin."));
+  pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Unpaired on this Mac, but Pixelview could not be reached to remove it from your account. Remove it in Pixelview admin.", "Unpaired on this computer, but Pixelview could not be reached to remove it from your account. Remove it in Pixelview admin."));
+ } else pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("Unpaired on this Mac. If it is still listed in your Pixelview account, remove it in Pixelview admin.", "Unpaired on this computer. If it is still listed in your Pixelview account, remove it in Pixelview admin."));
  pixelviewUnpairPending=false;
  RefreshPixelviewPairing();
  });
@@ -471,14 +471,14 @@ void OBSBasic::CompletePixelviewRevocation()
  // longer accepts). Finish the local Unpair without any prompt; if the Keychain
  // would need one, leave Unpair in place for the user to finish it.
  if(!pixelview::removeDevice(pixelviewOrigin.toString())) {
-  pixelviewConnectionStatus->setText(QStringLiteral("This Mac was unpaired from your Pixelview account. Click Unpair to finish removing it from this Mac."));
+  pixelviewConnectionStatus->setText(PIXELVIEW_PLATFORM_TEXT("This Mac was unpaired from your Pixelview account. Click Unpair to finish removing it from this Mac.", "This computer was unpaired from your Pixelview account. Click Unpair to finish removing it from this computer."));
   RefreshPixelviewPairing();return;
  }
  pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",true);
  pixelviewUnpairRetry=!SavePixelviewIdentity();
  pixelviewConnectionStatus->setText(pixelviewUnpairRetry ?
-  QStringLiteral("This Mac was unpaired from your Pixelview account, but its settings could not be saved. Click Unpair to finish.") :
+  PIXELVIEW_PLATFORM_TEXT("This Mac was unpaired from your Pixelview account, but its settings could not be saved. Click Unpair to finish.", "This computer was unpaired from your Pixelview account, but its settings could not be saved. Click Unpair to finish.") :
   QString()); // The unpaired sidebar (Pair button and hint) already says it all.
  RefreshPixelviewPairing();
 }

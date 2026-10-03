@@ -20,7 +20,29 @@ jobs:
         run: python3 test/pixelview/test_pixelview_release.py -v
       - name: Validate bundled license
         run: python3 test/pixelview/test_pixelview_license.py -v
+      - name: Validate Windows build and release tooling
+        run: python3 test/pixelview/test_windows_release.py -v
       - name: Validate shell syntax
         run: |
           bash -n cmake/macos/pixelview-build.sh
           bash -n cmake/macos/pixelview-release.sh
+
+  windows-build:
+    # Compile check only: unsigned development build without the updater.
+    # Nothing is signed, packaged or uploaded, and no secrets are used.
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Build Pixelview Desktop (x64, RelWithDebInfo)
+        run: python cmake/windows/pixelview-build.py
+      - name: Check the built executable
+        run: |
+          $exe = 'build_x64/rundir/RelWithDebInfo/bin/64bit/Pixelview.exe'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          if (Select-String -Path $exe -Pattern 'update_studio' -SimpleMatch -Quiet) { throw 'OBS updater endpoint embedded' }

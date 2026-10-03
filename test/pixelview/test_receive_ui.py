@@ -164,6 +164,8 @@ int main() {
         qt = next((ROOT / '.deps').glob('obs-deps-qt*/lib/QtWidgets.framework')).parent
         code = '''#include <QtWidgets/QtWidgets>
 #include <cassert>
+static bool receiveModule=true;
+static bool PixelviewReceiveAvailable() { return receiveModule; }
 class OBSBasic { public:
 bool receive=false, busy=false, closing=false;
 QTabBar tabs; QWidget sending, receiving; QLineEdit id, password, name; QPushButton start; QToolButton buffer;
@@ -194,6 +196,12 @@ w.closing=false; w.busy=false; w.pixelviewReceiveIntent=false; w.RefreshPixelvie
 assert(w.start.text()=="Start receiving" && w.id.isEnabled());
 assert(w.hdr.isEnabled() && !w.transfer.isEnabled() && !w.nits.isEnabled()); // Transfer and nits only with HDR ticked.
 w.hdr.setChecked(true); w.RefreshPixelviewModes(); assert(w.transfer.isEnabled() && w.nits.isEnabled());
+assert(w.tabs.isTabEnabled(1));
+// Without the WHEP module (Windows today) Receiving stays disabled, unless already in it.
+receiveModule=false; w.pixelviewReceiving=false; w.RefreshPixelviewModes();
+assert(!w.tabs.isTabEnabled(1) && !w.tabs.tabToolTip(1).isEmpty());
+w.pixelviewReceiving=true; w.RefreshPixelviewModes(); assert(w.tabs.isTabEnabled(1));
+receiveModule=true; w.pixelviewReceiving=false; w.RefreshPixelviewModes(); assert(w.tabs.isTabEnabled(1));
 }'''.replace('BODY', refresh)
         with tempfile.TemporaryDirectory() as td:
             src=pathlib.Path(td)/'ui.cpp'; src.write_text(code); binary=pathlib.Path(td)/'ui'

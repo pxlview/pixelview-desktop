@@ -59,5 +59,10 @@ inline DeepLinkInbox &deepLinkInbox()
 }
 #ifdef __APPLE__
 void installMacDeepLinks();
+#elif defined(_WIN32)
+// True when a running instance took this launch's pixelview:// link; exit then.
+bool forwardWindowsDeepLink();
+// Claims pixelview:// if unregistered, accepts forwarded links, queues argv's link.
+void installWindowsDeepLinks();
 #endif
 } // namespace pixelview

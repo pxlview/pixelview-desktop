@@ -224,6 +224,11 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   decoded password), switch to Receiving when idle, and never start a session. A missing token
   clears the stored password for that session. Busy states reject the link without side effects; one
   pending link is held in memory during startup.
+- Windows (source only, see "Windows port"): only `pixelview://` is handled. The installer registers
+  it for the user; a development build claims it only when no usable registration exists. A link
+  opened while the app runs is handed to that instance over a per-user local socket and the new
+  process exits. `https://play.pixelview.io` links are never claimed, so they keep opening in the
+  browser.
 - The custom scheme is registered in `Info.plist`. Universal Links require
   `PIXELVIEW_ENABLE_UNIVERSAL_LINKS=ON` plus an operator-provided Associated Domains profile at
   signing time, and a matching AASA served from `play.pixelview.io`; neither is deployed.
@@ -565,6 +570,38 @@ configuration.
 - Qt is pinned to the OBS 6.10.3 package on macOS because 6.11.1 crashes in `QImage::toCGImage`
   during scene activation.
 
+## Windows port (in progress, not yet built)
+
+The tree contains the Windows x64 native layer, but no Windows build has been compiled or run yet.
+Treat everything below as source-level work until the "Verified live" section says otherwise.
+
+- **Control socket and receiver transport.** `PixelviewWebSocket.cpp` is an RFC 6455 client on
+  `QSslSocket` (text frames only, no extensions/redirects/cookies, size limits, RFC ping/pong
+  liveness with the same `ControlPing` policy as macOS). `PixelviewDesktopQt.cpp` and
+  `PixelviewReceiverQt.cpp` map closes exactly like the macOS files (401 → 4401, 403/3xx/TLS →
+  4403 for the control socket; 401/403/3xx → 1008 and TLS → 4403/495 for the receiver). The
+  receiver logs in with `platform: WINDOWS`.
+- **Credentials.** Windows Credential Manager generic credentials (`CRED_PERSIST_LOCAL_MACHINE`,
+  never roaming): `com.pixelview.desktop.device:<origin>` and
+  `com.pixelview.desktop.receiver:latest-session`, with the same verify-after-write/delete rules
+  and log categories as the Keychain. There are no prompts. Blobs are limited to 2,560 bytes, so an
+  oversized receive password is not saved.
+- **Isolation.** The single-instance mutex is `PixelviewDesktopCore`, settings live under
+  `%APPDATA%\pixelview\obs-studio`, and third-party plugins are loaded only from that per-user
+  tree (never from `C:\ProgramData\obs-studio`). The app switches to its own `bin\64bit`
+  directory at startup so link launches resolve data correctly.
+- **Updates.** The OBS Windows updater, What's New and their obsproject.com endpoints are not
+  compiled (`OBS_WINDOWS_UPDATER` is never defined). Release builds use WinSparkle 0.9.4 with the
+  Pixelview appcast and an EdDSA key (`frontend/cmake/feature-winsparkle.cmake`,
+  `PixelviewWinSparkle.cpp`). Development builds have no updater.
+- **Encoders.** Hardware HEVC is preferred in the order NVENC, AMF, then QSV; x264 is the fallback.
+  The Windows encoder log lines are on the log-upload allowlist, and Windows home paths are
+  redacted in both separator forms.
+- **Receiving is not available on Windows.** `pixelview-whep` is macOS-only (GStreamer plus
+  VideoToolbox). The Receive tab is disabled when the module is absent, and Start explains why.
+- **Not ported yet:** Linux; the WHEP receiver; Windows-specific capture checks; the D3D11 compile
+  of the Pixelview canvas/format-conversion shaders (written and checked only as GLSL/Metal so far).
+
 ## Verification status
 
 ### Compiled and offline tests (`test/pixelview`, `plugins/*/tests`)
@@ -822,6 +859,10 @@ gate) fail in the current environment regardless of changes.
   clicking the red close button (SIGTERM shares the path).
 - Long hardware soak, Internet loss/recovery, glass-to-glass latency, 4K/interlaced/HDR inputs, hot
   unplug, multiple capture devices, NVENC/QSV/AMF/VAAPI hardware, Windows/Linux runtime.
+- Windows: no compile, launch, pairing, streaming, DeckLink, Credential Manager, link hand-off,
+  installer, Authenticode or WinSparkle run yet. Offline only: the portable WebSocket/control
+  socket/receiver transport (`test_websocket_qt.py`, run on macOS against the same Qt code), log
+  redaction and encoder order, and the build/release tooling logic (`test_windows_release.py`).
 - A live HEVC 4:2:2 10 sender against the refusal path (offline suites only). The operator's Main10
   glitch report has not been reproduced or root-caused; the stock-path simplification and the
   100 ms buffer are mitigations.

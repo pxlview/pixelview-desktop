@@ -56,6 +56,11 @@ int main() {
  add("com.apple.videotoolbox.videoencoder.ave.hevc", "hevc");
  assert(preferredEncoder(registered, true) == 3);
  registered.clear(); assert(preferredEncoder(registered, true) == -1);
+ // Windows hybrid systems: NVENC, then AMF, then QSV, regardless of enumeration order.
+ add("obs_x264", "h264"); add("obs_qsv11_hevc", "hevc"); add("h265_texture_amf", "hevc");
+ assert(preferredEncoder(registered, false) == 2);
+ add("obs_nvenc_hevc_tex", "hevc");
+ assert(preferredEncoder(registered, false) == 3);
 }''')
             binary = pathlib.Path(tmp) / 'test'
             subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT), str(src), '-o', str(binary)], check=True)
