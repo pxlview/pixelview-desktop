@@ -144,7 +144,7 @@ def main():
         return 0
 
     # win-dshow builds from the pinned libdshowcapture submodule.
-    subprocess.run(['git', 'submodule', 'update', '--init', 'deps/libdshowcapture/src'], cwd=ROOT, check=True)
+    subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', 'deps/libdshowcapture/src'], cwd=ROOT, check=True)
     if args.release:
         winsparkle = stage_winsparkle(config)
     subprocess.run(configure_command(args, versions, config, winsparkle), cwd=ROOT, check=True)

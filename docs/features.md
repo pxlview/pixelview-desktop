@@ -603,10 +603,10 @@ configuration.
 - Qt is pinned to the OBS 6.10.3 package on macOS because 6.11.1 crashes in `QImage::toCGImage`
   during scene activation.
 
-## Windows port (in progress, not yet built)
+## Windows port (in progress, development build only)
 
-The tree contains the Windows x64 native layer, but no Windows build has been compiled or run yet.
-Treat everything below as source-level work until the "Verified live" section says otherwise.
+The Windows x64 development build compiles and runs (2026-10-03, see "Verified live"). Apart from
+what that section lists, treat everything below as source-level work.
 
 - **Control socket and receiver transport.** `PixelviewWebSocket.cpp` is an RFC 6455 client on
   `QSslSocket` (text frames only, no extensions/redirects/cookies, size limits, RFC ping/pong
@@ -706,6 +706,14 @@ gate) fail in the current environment regardless of changes.
   identified. Not verified: choosing a pattern from the dropdown or **Settings...** in the running
   app (both need pairing; covered only by `test_capture_startup.py`), streaming a pattern over WHIP
   to a receiver, the beep/flash alignment as received, and selecting a pattern from the admin.
+- Windows x64 development build (2026-10-03, `windows-port`, Windows Server 2025 EC2 VM without a
+  GPU driver or DeckLink card, so D3D11 ran on the Microsoft Basic Render Driver and x264 was the
+  only video encoder): `cmake/windows/pixelview-build.py` built `Pixelview.exe`; the app started
+  cleanly and, with `PIXELVIEW_LOCAL_DEVELOPMENT=1`, paired through the Pair dialog against the local
+  backend in pentest mode (pairing exchange, Credential Manager save under
+  `com.pixelview.desktop.device:http://localhost:8000`, control socket `DESKTOP_READY`; the backend
+  registered the desktop for node 707880). Not run on Windows: the test suites, capture, streaming
+  (no engine), Unpair, revocation, links, the installer and release.
 - Control socket against the local backend (`dev.sh --k8s`, backend commit ab4aa77) with the rebuilt
   signed bundle: pairing exchange and `DESKTOP_READY`; pongs recorded in Redis presence with parsed
   settings; backend reload (close 1005) followed by automatic reconnect; admin revocation via
