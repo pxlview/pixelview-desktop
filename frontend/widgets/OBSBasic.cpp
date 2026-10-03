@@ -68,6 +68,7 @@
 #include <QVBoxLayout>
 #include <properties-view.hpp>
 #include <utility/PixelviewEncoding.hpp>
+#include <utility/PixelviewPlatformText.hpp>
 #include <QLabel>
 #include <QPushButton>
 #include <QMenuBar>
@@ -168,7 +169,9 @@ static void AddExtraModulePaths()
 
 	char base_module_dir[512];
 #if defined(_WIN32)
-	int ret = GetProgramDataPath(base_module_dir, sizeof(base_module_dir), "obs-studio/plugins/%module%");
+	// Pixelview: per-user and isolated like the app config; never load plugins
+	// installed for a stock OBS in C:\ProgramData\obs-studio.
+	int ret = GetAppConfigPath(base_module_dir, sizeof(base_module_dir), "obs-studio/plugins/%module%");
 #elif defined(__APPLE__)
 	int ret = GetAppConfigPath(base_module_dir, sizeof(base_module_dir), "obs-studio/plugins/%module%.plugin");
 #else
@@ -1360,9 +1363,11 @@ void OBSBasic::OBSInit()
 
 	ui->sources->UpdateIcons();
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) || !defined(OBS_WINDOWS_UPDATER)
 	delete ui->actionRepair;
 	ui->actionRepair = nullptr;
+#endif
+#if !defined(_WIN32)
 #if !defined(__APPLE__)
 	delete ui->actionShowCrashLogs;
 	delete ui->actionUploadLastCrashLog;
@@ -1388,7 +1393,7 @@ void OBSBasic::OBSInit()
 #if defined(_WIN32) || defined(__APPLE__)
 	if (App()->IsUpdaterDisabled()) {
 		ui->actionCheckForUpdates->setEnabled(false);
-#if defined(_WIN32)
+#if defined(_WIN32) && defined(OBS_WINDOWS_UPDATER)
 		ui->actionRepair->setEnabled(false);
 #endif
 	}
@@ -1585,8 +1590,8 @@ void OBSBasic::InitPixelview()
 	pixelviewLogSharing = ui->menuLogFiles->addAction(QStringLiteral("Share Logs with Pixelview Support"));
 	pixelviewLogSharing->setCheckable(true);
 	pixelviewLogSharing->setChecked(pixelviewLogSharingOn);
-	pixelviewLogSharing->setToolTip(QStringLiteral(
-		"Sends stream diagnostics (encoder and stream settings, sending, receiving, DeckLink and pairing events, and which Mac this is) to Pixelview so support can investigate problems. Scene, source and file names are not sent."));
+	pixelviewLogSharing->setToolTip(
+		PIXELVIEW_PLATFORM_TEXT("Sends stream diagnostics (encoder and stream settings, sending, receiving, DeckLink and pairing events, and which Mac this is) to Pixelview so support can investigate problems. Scene, source and file names are not sent.", "Sends stream diagnostics (encoder and stream settings, sending, receiving, DeckLink and pairing events, and which computer this is) to Pixelview so support can investigate problems. Scene, source and file names are not sent."));
 	connect(pixelviewLogSharing, &QAction::toggled, this, &OBSBasic::SetPixelviewLogSharing);
 	appMenu->addMenu(ui->menuLogFiles);
 	if (ui->menuCrashLogs) {

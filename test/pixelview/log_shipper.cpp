@@ -96,6 +96,14 @@ static void roles_and_redaction()
 	assert(text.contains("~/Library/foo"));
 	assert(text.contains("https://api4.pixelview.io/707880/whep/1?[REDACTED]"));
 	assert(LogShipper::redact(text, "/Users/alice") == text);
+
+	// Windows: QDir::homePath() uses '/', log lines use '\\' in any case.
+	const QString windows = LogShipper::redact("loaded C:\\users\\Alice\\AppData\\x and C:/Users/Alice/y", "C:/Users/Alice");
+	assert(!windows.contains(QLatin1String("Alice"), Qt::CaseInsensitive));
+	assert(windows == "loaded ~\\AppData\\x and ~/y");
+	for (const char *line : {"[obs-nvenc: 'advanced_video_stream'] settings:\n\tcodec: HEVC", "[texture-amf-h265] Encoder: AMD",
+				 "[qsv encoder: 'advanced_video_stream'] settings:", "[qsv encoder] Forcing main10 for P010"})
+		assert(LogShipper::role(QString::fromUtf8(line)) == "send");
 }
 
 static void capture_is_thread_safe_bounded_and_switchable()

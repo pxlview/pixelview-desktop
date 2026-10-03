@@ -18,6 +18,7 @@
 #include "CrashHandler.hpp"
 #include <OBSApp.hpp>
 #include <qt-wrappers.hpp>
+#include <utility/PixelviewPlatformText.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -232,7 +233,7 @@ void CrashHandler::saveCrashLogToConfig()
 void CrashHandler::uploadCrashLogToServer()
 {
 	emit crashLogUploadFailed(
-		QStringLiteral("Pixelview crash upload is not configured. The crash report remains on this Mac."));
+		PIXELVIEW_PLATFORM_TEXT("Pixelview crash upload is not configured. The crash report remains on this Mac.", "Pixelview crash upload is not configured. The crash report remains on this computer."));
 }
 
 void CrashHandler::handleExistingCrashLogUpload()

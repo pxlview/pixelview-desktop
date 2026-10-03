@@ -143,7 +143,7 @@ static QString PixelviewProfileTip(const QString &value)
 	if (value == QStringLiteral("main10"))
 		return QStringLiteral("Recommended. Plays directly everywhere.");
 	if (value == QStringLiteral("main42210"))
-		return QStringLiteral("Native in the Pixelview Player iOS app and in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, lower quality.");
+		return PIXELVIEW_PLATFORM_TEXT("Native in the Pixelview Player iOS app and in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, lower quality.", "Native in the Pixelview Player iOS app and in Pixelview Desktop on a Mac with Apple silicon. Transcoded for browsers: more latency, lower quality.");
 	return QString();
 }
 // END PROFILE LABELS

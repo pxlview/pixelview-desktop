@@ -137,7 +137,7 @@ public:
   static const char *receive[]={"[pixelview-whep]","[pixelview-receive]","Pixelview receive","[decklink-output-ui]",
    "[decklink] ","failed to create video frame","failed to schedule video frame","No active audio"};
   static const char *send[]={"[obs-webrtc]","==== Streaming","Pixelview remote control","[pixelview-send]",
-   "[VideoToolbox ","[CoreAudio ","Output '","obs-output '","Stream output type ","Error encoding with encoder '",
+   "[VideoToolbox ","[CoreAudio ","[obs-nvenc","[texture-amf-","[qsv encoder","Output '","obs-output '","Stream output type ","Error encoding with encoder '",
    "creating encoder '","Video stopped, number of skipped frames","video_thread("};
   static const char *app[]={"Pixelview","[pixelview-","video settings reset:","audio settings reset:","decklink:",
    "Decklink API","A DeckLink iterator could not be created","Max audio buffering reached","Crash or unclean shutdown detected"};
@@ -166,7 +166,12 @@ public:
   static const QRegularExpression source(QStringLiteral("\\(source: [^\\n]*\\)"));
   // "Source <name> audio is lagging (over by N ms) at max audio buffering..."
   static const QRegularExpression lagging(QStringLiteral("^Source .* audio is lagging \\(over by "));
-  if(home.size()>1) text.replace(home,QStringLiteral("~"));
+  if(home.size()>1) {
+   text.replace(home,QStringLiteral("~"));
+   // Windows log lines use backslashes and may differ in case ("C:\\Users\\Name").
+   QString native=home; native.replace('/','\\');
+   if(native!=home) text.replace(native,QStringLiteral("~"),Qt::CaseInsensitive);
+  }
   text.replace(source,QStringLiteral("(source)"));
   text.replace(lagging,QStringLiteral("Source audio is lagging (over by "));
   text.replace(device,QStringLiteral("[REDACTED]"));

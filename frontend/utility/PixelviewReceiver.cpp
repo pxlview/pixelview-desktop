@@ -1,4 +1,11 @@
 #include "PixelviewReceiver.hpp"
+#if defined(__APPLE__)
+#define PIXELVIEW_RECEIVER_PLATFORM "MAC"
+#elif defined(_WIN32)
+#define PIXELVIEW_RECEIVER_PLATFORM "WINDOWS"
+#else
+#define PIXELVIEW_RECEIVER_PLATFORM "LINUX"
+#endif
 #include <QtCore/QJsonDocument>
 #include <QtCore/QPointer>
 #include <QtCore/QUuid>
@@ -69,7 +76,7 @@ void PixelviewReceiver::authenticate()
  e.message=[self,g](QByteArray body){if(self && self->intent && self->generation==g) self->message(body);};
  e.closed=[self,g](int code){if(self && self->intent && self->generation==g) self->disconnected(code);};
  auto url=origin; url.setPath("/login/player");
- auto body=QJsonDocument(QJsonObject{{"session_id",sessionId},{"password",password},{"name",name},{"device_type","WEB"},{"platform","MAC"},{"browser","GSTREAMER"},{"mobile",false},{"client_type","pixelview-desktop"}}).toJson(QJsonDocument::Compact);
+ auto body=QJsonDocument(QJsonObject{{"session_id",sessionId},{"password",password},{"name",name},{"device_type","WEB"},{"platform",PIXELVIEW_RECEIVER_PLATFORM},{"browser","GSTREAMER"},{"mobile",false},{"client_type","pixelview-desktop"}}).toJson(QJsonDocument::Compact);
  transport->login(url,body,std::move(e));
 }
 void PixelviewReceiver::loginFinished(int code,const QByteArray &body)

@@ -5,15 +5,24 @@
 #include <QtCore/QSysInfo>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
+#elif defined(_WIN32)
+#include <QtCore/QSettings>
 #endif
 
-// Which Mac this is ("Apple M1 Pro", "MacBookPro18,1"); empty when unknown.
+// Which computer this is ("Apple M1 Pro", "MacBookPro18,1"; on Windows the CPU
+// brand and the BIOS product name); empty when unknown.
 static QString PixelviewLogSysctl(const char *name)
 {
 #ifdef __APPLE__
 	char value[128] = {};
 	size_t size = sizeof(value) - 1;
 	if (sysctlbyname(name, value, &size, nullptr, 0) == 0) return QString::fromUtf8(value).trimmed();
+#elif defined(_WIN32)
+	const bool cpu = qstrcmp(name, "machdep.cpu.brand_string") == 0;
+	QSettings key(cpu ? QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0")
+			  : QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\BIOS"),
+		      QSettings::NativeFormat);
+	return key.value(cpu ? QStringLiteral("ProcessorNameString") : QStringLiteral("SystemProductName")).toString().trimmed().left(128);
 #else
 	(void)name;
 #endif

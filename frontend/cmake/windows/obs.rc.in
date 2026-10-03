@@ -13,8 +13,8 @@ BEGIN
       VALUE "InternalName", "Pixelview"
       VALUE "OriginalFilename", "Pixelview.exe"
       VALUE "ProductName", "Pixelview Desktop"
-      VALUE "ProductVersion", "${OBS_VERSION_CANONICAL}"
-      VALUE "Comments", "Free and open source software for video recording and live streaming"
+      VALUE "ProductVersion", "${PIXELVIEW_VERSION}"
+      VALUE "Comments", "Pixelview Desktop, based on OBS Studio ${OBS_VERSION_CANONICAL}"
       VALUE "LegalCopyright", "${OBS_LEGAL_COPYRIGHT}"
     END
   END

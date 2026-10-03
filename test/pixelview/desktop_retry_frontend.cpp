@@ -1,5 +1,6 @@
 // Compiles extracted, unmodified production frontend methods against offline boundaries.
 #include "frontend/utility/PixelviewDesktop.hpp"
+#include "frontend/utility/PixelviewPlatformText.hpp"
 #include <QtCore/QJsonDocument>
 #include <QtCore/QStringList>
 #include <cassert>

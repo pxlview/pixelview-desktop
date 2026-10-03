@@ -84,6 +84,13 @@ bash -n cmake/macos/pixelview-build.sh cmake/macos/pixelview-release.sh
 bash cmake/macos/pixelview-release.sh --validate-config
 ```
 
+Windows port checks that run on macOS (section 6):
+
+```sh
+python3 -m unittest discover -s test/pixelview -p test_websocket_qt.py      # portable Qt WebSocket/control socket/receiver transport vs loopback; PIXELVIEW_SLOW_TESTS=1 adds the 40 s keepalive timeout
+python3 -m unittest discover -s test/pixelview -p test_windows_release.py   # build flags, appcast, EdDSA verification, installer contract
+```
+
 ### 3.2 Plugin offline suites
 
 ```sh
@@ -115,7 +122,7 @@ Use a disposable node device and a mode-0600 input file. The harness deletes the
 
 ### 3.4 CI
 
-`.github/workflows/ci.yaml` (`contents: read`, `fetch-depth: 0` so `git describe` can check the pinned OBS commit) runs only `python3 test/pixelview/test_pixelview_release.py -v`, `python3 test/pixelview/test_pixelview_license.py -v`, and `bash -n` on `cmake/macos/pixelview-build.sh` and `cmake/macos/pixelview-release.sh`. CI cannot sign, notarize, upload or publish; the contract test asserts `ci.yaml` is the only workflow.
+`.github/workflows/ci.yaml` (`contents: read`, `fetch-depth: 0` so `git describe` can check the pinned OBS commit) runs `python3 test/pixelview/test_pixelview_release.py -v`, `python3 test/pixelview/test_pixelview_license.py -v`, `python3 test/pixelview/test_windows_release.py -v`, and `bash -n` on `cmake/macos/pixelview-build.sh` and `cmake/macos/pixelview-release.sh`. A second job, `windows-build` (`windows-2025-vs2026`), runs `python cmake/windows/pixelview-build.py` as an unsigned development build without the updater and checks that `Pixelview.exe` exists and embeds no OBS update endpoint. CI cannot sign, notarize, upload or publish; the contract test asserts `ci.yaml` is the only workflow.
 
 ## 4. Release
 
@@ -229,3 +236,63 @@ python3 cmake/macos/pixelview_sources.py \
 - **Branding**: "OBS", "OBS Studio", "Open Broadcaster Software" and the logo are registered trademarks of Wizards of OBS LLC. Use Pixelview branding and state that the app is a modified distribution based on OBS Studio, not an official OBS Project release; GPL permission is not trademark clearance.
 - **Proprietary SDKs/drivers** (DeckLink and similar): check vendor redistribution rights and the narrow §3 system-component exception per component; nothing is assumed exempt or prohibited. Codec/patent terms may need specialist review.
 - Before shipping: anonymously retrieve and rebuild the release source, inspect the final DMG for full license and notice files, verify the offline license UI (Help → About → License) and attribution, and audit enabled dependencies. This is an engineering checklist, not legal advice.
+
+## 6. Windows (x64): in progress, not yet exercised
+
+None of the commands in this section have been run on Windows yet. They are written against the upstream `windows-x64` preset and the macOS pipeline, and their logic is covered offline by `test/pixelview/test_windows_release.py`. See `docs/features.md`, "Windows port".
+
+### 6.1 Toolchain and build
+
+- **Toolchain:**
+  - Windows 10 22H2 or 11, x64 or ARM64; ARM64 hosts cross-compile x64, e.g. Windows 11 in Parallels.
+  - Visual Studio 2026 with the C++ desktop workload and Windows SDK 10.0.26100 (the preset's `Visual Studio 18 2026` generator).
+  - CMake 3.28 or newer, Git and Python 3.12 or newer.
+  - At least 30 GiB of free disk.
+- **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule, which the helper initializes.
+- **Development build:** `python cmake/windows/pixelview-build.py` (or `--print` to see the configure command, `--check-only` for preflight).
+  - Mirrors the macOS feature flags: no browser, What's New, obs-websocket, scripting, virtual camera, AJA, VST or VLC; DeckLink and WebRTC on.
+  - Passes `OBS_VERSION_OVERRIDE` from `version.json`.
+  - Output is `build_x64/rundir/RelWithDebInfo/bin/64bit/Pixelview.exe`.
+  - Development builds are unsigned and have no updater. Run the app from that directory or open `build_x64/obs-studio.sln` and debug `obs-studio`.
+- **Release builds** (`PIXELVIEW_RELEASE_BUILD=ON`, set only by the release script):
+  - Stage WinSparkle 0.9.4 from the URL and SHA-256 in `release/windows.json` into `.deps/winsparkle-0.9.4`.
+  - Compile in the production appcast and `winsparkle_public_key`.
+  - `frontend/cmake/feature-winsparkle.cmake` fails closed on any other appcast, a missing key or an obsproject.com URL.
+
+### 6.2 Release
+
+`powershell -File release\pixelview-windows.ps1 --validate-config|--prepare|--publish|--publish-latest` wraps `cmake/windows/pixelview-release.py` with `op run`:
+
+- `--prepare` resolves only the WinSparkle EdDSA private key (`release/windows-update-key.1password.env`).
+- `--publish` resolves only the R2 credentials (`release/windows-r2.1password.env`, the same bucket as macOS under the `desktop/windows` prefix).
+
+**One-time operator setup** (`--validate-config` refuses to run until it is done):
+
+1. Generate the update key with `.deps\winsparkle-0.9.4\bin\winsparkle-tool.exe generate-key`. Store the private key PEM in 1Password as `pixelview-desktop-winsparkle/private_key`, and put the public key in `release/windows.json` (`winsparkle_public_key`).
+2. Choose Authenticode signing in `release/windows.json` `signing`:
+   - `certificate`: a SHA-1 thumbprint of a certificate in the Windows store, e.g. on a hardware token.
+   - `trusted-signing`: Azure Trusted Signing metadata JSON, with `PIXELVIEW_TRUSTED_SIGNING_DLIB` pointing at `Azure.CodeSigning.Dlib.dll`.
+3. Install Inno Setup 6, and make sure `openssl` and `curl` are on `PATH`.
+4. Review and commit `release/source-inventory-windows.json`, the Windows corresponding-source inventory (see 4.7). It does not exist yet, so `--prepare` stops at the compliance step.
+
+**`--prepare`, in order:**
+
+1. Take `dist/windows/.release.lock`.
+2. Require a clean tree, `v<version>` at `HEAD` and the OBS base as an ancestor.
+3. Build the compliance stage.
+4. Build Release into `build_x64_release_<version>_<build>`.
+5. Authenticode-sign every `.exe`/`.dll` that is not already validly signed, then verify all of them and refuse any that embeds `obsproject.com/update_studio`.
+6. Build the per-user Inno Setup installer `Pixelview-Desktop-<version>-build<n>-x64-setup.exe` (`cmake/windows/pixelview-installer.iss`, which signs itself and its uninstaller). It registers `pixelview://` for the user and relaunches the app after silent updates.
+7. EdDSA-sign the installer with `winsparkle-tool`. The key exists only in a private temporary directory for that call. Verify the signature independently with OpenSSL against the public key.
+8. Fetch the published appcast and refuse a build number that does not advance it. Then write `dist/windows/appcast-x64.xml` with the new item first (`sparkle:version` = build number, `sparkle:os="windows-x64"`, `sparkle:installerArguments="/SILENT /SP- /NOCANCEL /NORESTART"`), keeping up to 10 items.
+9. Write the `.sha256`, notes, compliance artifacts and `release-manifest.json`, then re-verify.
+
+**`--publish`, in order:**
+
+1. Require the tag on the public repository.
+2. Preflight every immutable key (identical objects make it retryable; a conflict aborts before any write).
+3. Establish the appcast `If-Match`/`If-None-Match` precondition and re-check build progression.
+4. Upload the release assets, then the appcast last.
+5. Re-point `desktop/windows/latest/` (installer copy plus `latest.json`).
+
+Every public object is compared byte for byte after upload, and credentials reach `curl` only through stdin.
