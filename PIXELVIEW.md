@@ -20,8 +20,9 @@ its own settings root under `~/Library/Application Support/pixelview/obs-studio`
 so it never touches a stock OBS installation.
 
 A Windows x64 port is in progress (sending, pairing, control socket,
-credentials, links and WinSparkle updates in source; receiving not yet). It
-has not been built on Windows yet; see "Windows port" in `docs/features.md`.
+credentials, links and WinSparkle updates; receiving not yet). A development
+build has been compiled and paired against a local backend on Windows; see
+"Windows port" in `docs/features.md`.
 
 What is implemented, how it behaves and what has been verified is kept in
 [`docs/features.md`](docs/features.md). Building, testing, signing and

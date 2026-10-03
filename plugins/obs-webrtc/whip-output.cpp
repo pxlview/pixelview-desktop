@@ -396,7 +396,7 @@ void WHIPOutput::ParseLinkHeader(std::string val, std::vector<rtc::IceServer> &i
 		iceServer.username = username;
 		iceServer.password = password;
 		iceServers.push_back(iceServer);
-	} catch (const std::invalid_argument &err) {
+	} catch (const std::invalid_argument &) {
 		do_log(LOG_WARNING, "Failed to construct ICE Server (details redacted)");
 	}
 }
@@ -580,7 +580,7 @@ bool WHIPOutput::Connect()
 	rtc::Description answer(response, "answer");
 	try {
 		peer_connection->setRemoteDescription(answer);
-	} catch (const std::invalid_argument &err) {
+	} catch (const std::invalid_argument &) {
 		do_log(LOG_ERROR, "WHIP server responded with invalid SDP: %s", "Details redacted");
 		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		struct dstr error_message;
@@ -589,7 +589,7 @@ bool WHIPOutput::Connect()
 		obs_output_set_last_error(output, error_message.array);
 		dstr_free(&error_message);
 		return false;
-	} catch (const std::exception &err) {
+	} catch (const std::exception &) {
 		do_log(LOG_ERROR, "Failed to set remote description: %s", "Details redacted");
 		doCleanup(OBS_OUTPUT_INVALID_STREAM);
 		struct dstr error_message;
@@ -753,7 +753,7 @@ void WHIPOutput::Send(void *data, uintptr_t size, uint64_t duration, std::shared
 	try {
 		track->send(sample);
 		total_bytes_sent += sample.size();
-	} catch (const std::exception &e) {
+	} catch (const std::exception &) {
 		do_log(LOG_ERROR, "WHIP packet processing failed (details redacted)");
 	}
 }

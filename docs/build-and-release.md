@@ -236,18 +236,18 @@ python3 cmake/macos/pixelview_sources.py \
 - **Proprietary SDKs/drivers** (DeckLink and similar): check vendor redistribution rights and the narrow §3 system-component exception per component; nothing is assumed exempt or prohibited. Codec/patent terms may need specialist review.
 - Before shipping: anonymously retrieve and rebuild the release source, inspect the final DMG for full license and notice files, verify the offline license UI (Help → About → License) and attribution, and audit enabled dependencies. This is an engineering checklist, not legal advice.
 
-## 6. Windows (x64): in progress, not yet exercised
+## 6. Windows (x64): in progress, development build only
 
-None of the commands in this section have been run on Windows yet. They are written against the upstream `windows-x64` preset and the macOS pipeline, and their logic is covered offline by `test/pixelview/test_windows_release.py`. See `docs/features.md`, "Windows port".
+Only the development build (6.1) has been run on Windows (2026-10-03, Windows Server 2025 x64, Visual Studio Build Tools 2026 18.10, CMake 4.4.3, Python 3.13). The release commands (6.2) have not. They are written against the upstream `windows-x64` preset and the macOS pipeline, and their logic is covered offline by `test/pixelview/test_windows_release.py`. See `docs/features.md`, "Windows port".
 
 ### 6.1 Toolchain and build
 
 - **Toolchain:**
   - Windows 10 22H2 or 11, x64 or ARM64; ARM64 hosts cross-compile x64, e.g. Windows 11 in Parallels.
   - Visual Studio 2026 with the C++ desktop workload and Windows SDK 10.0.26100 (the preset's `Visual Studio 18 2026` generator).
-  - CMake 3.28 or newer, Git and Python 3.12 or newer.
+  - CMake 4.2 or newer (the first release with the `Visual Studio 18 2026` generator), Git and Python 3.12 or newer. Visual Studio Build Tools 2026 is enough; the full IDE is not needed.
   - At least 30 GiB of free disk.
-- **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule, which the helper initializes.
+- **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule and its nested `capture-device-support` submodule, which the helper initializes recursively. On x64 the configure also generates a Win32 child build in `build_x86` (32-bit capture helpers); it receives the same `OBS_VERSION_OVERRIDE`.
 - **Development build:** `python cmake/windows/pixelview-build.py` (or `--print` to see the configure command, `--check-only` for preflight).
   - Mirrors the macOS feature flags: no browser, What's New, obs-websocket, scripting, virtual camera, AJA, VST or VLC; DeckLink and WebRTC on.
   - Passes `OBS_VERSION_OVERRIDE` from `version.json`.
