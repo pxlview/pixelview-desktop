@@ -116,7 +116,8 @@ public:
  // Returns whether the list changed (and the policy callback ran).
  bool acceptPolicy(const QJsonObject &data) {
   QStringList next;
-  for(const auto &value : data["blocked_profiles"].toArray())
+  const QJsonArray values=data["blocked_profiles"].toArray();
+  for(const QJsonValue value : values)
    if(value.isString() && !value.toString().isEmpty()) next.append(value.toString());
   next.sort(); next.removeDuplicates();
   if(next==blockedProfiles) return false;
