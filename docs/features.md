@@ -233,8 +233,9 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   browsers that joined later (the engine passes H.264/HEVC through) decoded nothing. x264 repeats
   them by default (it now also emits AUDs, as OBS's WHIP setup does); VideoToolbox ignores the key.
   Measured on the T4 (25 fps, 2 s keyframes, 7 s): NVENC HEVC and H.264 carried SPS in 1 of 4
-  keyframes before and 4 of 4 after; x264 4 of 4 either way. Browser playback after the fix is not
-  yet verified.
+  keyframes before and 4 of 4 after; x264 4 of 4 either way. Verified live on 2026-10-04: NVENC
+  HEVC and NVENC H.264 streams from the Windows T4 to the dev backend now play in a browser (both
+  were black before the fix).
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
