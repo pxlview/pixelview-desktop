@@ -97,4 +97,27 @@ int main() {
  assert(!identity.accept({{"desktop_id", "desktop-b"}, {"node_id", "node-b"}}));
  identity.clear(); assert(identity.nodeId.isEmpty() && identity.desktopId.isEmpty());
  assert(identity.label(false, false) == "Not paired");
+ // Region profile policy.
+ {
+  Fixture p; int policies = 0; QJsonObject start;
+  p.d.policy = [&] { ++policies; };
+  p.d.profile = [] { return QStringLiteral("main42210"); };
+  const auto send = p.d.send;
+  p.d.send = [&](QJsonObject o) { if (o["message"] == "DESKTOP_START") start = o["data"].toObject(); send(o); };
+  const QJsonArray blocked{"main44410", "main42210", "main42210", 7};
+  p.d.receive(mutation("DESKTOP_READY", {{"desktop_id", "desktop-a"}, {"node_id", "node-a"}, {"blocked_profiles", blocked}}), 0);
+  assert(p.d.ready && policies == 1 && p.d.blockedProfiles == QStringList({"main42210", "main44410"}));
+  // The start names the profile; a refusal keeps the socket ready and re-applies the known list.
+  assert(p.d.requestStart(1) && start["encoder_profile"] == "main42210");
+  p.d.receive(mutation("DESKTOP_ERROR", {{"code", "profile_blocked"}, {"profile", "main42210"}, {"blocked_profiles", blocked}}), 2);
+  assert(p.d.ready && !p.d.intent && !p.d.pending && p.halts == 1 && policies == 2);
+  // DESKTOP_STARTED refreshes the list (here: region moved, nothing blocked).
+  p.d.profile = [] { return QString(); };
+  assert(p.d.requestStart(3) && !start.contains("encoder_profile"));
+  p.d.receive(mutation("DESKTOP_STARTED", {{"config", QJsonObject{{"whip", QJsonObject{{"endpoint", "https://example.com/whip"}, {"bearer_token", "secret"}}}}}, {"blocked_profiles", QJsonArray{}}}), 4);
+  assert(p.d.started && p.d.blockedProfiles.isEmpty() && policies == 3);
+  // A backend without the policy sends nothing: nothing is blocked, no callback.
+  Fixture old; int oldPolicies = 0; old.d.policy = [&] { ++oldPolicies; };
+  old.stream(); assert(old.d.blockedProfiles.isEmpty() && oldPolicies == 0);
+ }
 }

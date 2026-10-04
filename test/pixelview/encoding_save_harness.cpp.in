@@ -81,6 +81,8 @@ struct OBSBasic {
  /* PRODUCTION_BUSY */
  bool paired = true;
  bool PixelviewConfigurationLocked() const {return !paired || PixelviewSettingsBusy();}
+ std::string blockedProfile;
+ bool PixelviewProfileBlocked(const std::string &p) const {return !p.empty() && p == blockedProfile;}
  Tray *sysTrayReplayBuffer = nullptr;
  struct Profile { std::filesystem::path path; } profile;
  Profile &GetCurrentProfile() { return profile; }
@@ -117,6 +119,7 @@ int main(int argc, char **argv) {
  obs_data_t settings{"main10"};
  if (test == "rescale-main") settings.profile = "main";
  if (test == "rescale-main42210") settings.profile = "main42210";
+ if (test == "region-blocked") { settings.profile = "main42210"; app.blockedProfile = "main42210"; }
  std::promise<void> pending;
  if (test == "pending") app.setupStreamingGuard = pending.get_future().share();
  if (test == "lifecycle") app.pixelviewStreamingBusy = true;
@@ -154,7 +157,8 @@ int main(int argc, char **argv) {
    }
    assert(jsonWrites == 2);
   }
-  if (test == "pending" || test == "lifecycle" || test == "unpaired") assert(jsonWrites == 0 && videoResets == 0 && configWrites == 0 && constructions == 0);
+  if (test == "pending" || test == "lifecycle" || test == "unpaired" || test == "region-blocked") assert(jsonWrites == 0 && videoResets == 0 && configWrites == 0 && constructions == 0);
+  if (test == "region-blocked") assert(warning.find("region") != std::string::npos);
   if (test == "json-video-rollback" || test == "config-delete-rollback" || test == "construct-rollback")
    assert(warning.find("rollback failed") != std::string::npos);
   if (test == "construct" || test == "config") { assert(liveFormat == "NV12"); assert(jsonWrites == 2); }
