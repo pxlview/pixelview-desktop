@@ -125,4 +125,10 @@ inline std::string profileFormat(const std::string &profile)
 	if (profile == "main42210") return "P216";
 	return {};
 }
+// HEVC encoders without a profile property (AMD AMF) derive Main or Main10 from
+// the input format: keep a format they accept, otherwise fall back to 8-bit NV12.
+inline std::string implicitProfileFormat(const std::string &current)
+{
+	return current == "P010" ? current : "NV12";
+}
 } // namespace pixelview

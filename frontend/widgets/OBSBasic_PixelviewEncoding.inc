@@ -365,7 +365,9 @@ bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool 
 		return fail(QStringLiteral("This profile is not enabled in the native encoder properties."));
 	std::string format;
 	if (strcmp(obs_get_encoder_codec(id), "hevc") == 0) {
-		format = pixelview::profileFormat(profile);
+		format = profile.empty() && !obs_properties_get(props, "profile")
+				 ? pixelview::implicitProfileFormat(config_get_string(activeConfiguration, "Video", "ColorFormat"))
+				 : pixelview::profileFormat(profile);
 		if (!pixelview::profileRangeSupported(profile, config_get_string(activeConfiguration, "Video", "ColorRange")))
 			return fail(QStringLiteral("Main 4:2:2 10 requires limited-range P216. The current full-range video setting is incompatible; preferences were not changed."));
 		if (format.empty()) return fail(QStringLiteral("This HEVC profile has no verified input-format mapping in Pixelview; select Main, Main10 or Main 4:2:2 10."));

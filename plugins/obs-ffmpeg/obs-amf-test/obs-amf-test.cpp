@@ -27,6 +27,7 @@ struct adapter_caps {
 	bool supports_avc = false;
 	bool supports_hevc = false;
 	bool supports_av1 = false;
+	bool supports_hevc_10bit = false;
 };
 
 static AMFFactory *amf_factory = nullptr;
@@ -38,6 +39,37 @@ static bool has_encoder(AMFContextPtr &amf_context, const wchar_t *encoder_name)
 	AMFComponentPtr encoder;
 	AMF_RESULT res = amf_factory->CreateComponent(amf_context, encoder_name, &encoder);
 	return res == AMF_OK;
+}
+
+/* Pixelview: report HEVC Main10 support so the encoder only offers profiles the
+ * hardware can encode. Prefer the reported maximum profile; drivers that do not
+ * report it are checked for P010 among the native input formats. */
+static bool has_hevc_10bit(AMFContextPtr &amf_context)
+{
+	AMFComponentPtr encoder;
+	if (amf_factory->CreateComponent(amf_context, AMFVideoEncoder_HEVC, &encoder) != AMF_OK)
+		return false;
+
+	AMFCapsPtr encoder_caps;
+	if (encoder->GetCaps(&encoder_caps) != AMF_OK)
+		return false;
+
+	amf_int64 max_profile = 0;
+	if (encoder_caps->GetProperty(AMF_VIDEO_ENCODER_HEVC_CAP_MAX_PROFILE, &max_profile) == AMF_OK)
+		return max_profile >= AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN_10;
+
+	AMFIOCapsPtr input_caps;
+	if (encoder_caps->GetInputCaps(&input_caps) != AMF_OK)
+		return false;
+
+	for (amf_int32 i = 0; i < input_caps->GetNumOfFormats(); i++) {
+		AMF_SURFACE_FORMAT format;
+		amf_bool native = false;
+		if (input_caps->GetFormatAt(i, &format, &native) == AMF_OK && format == AMF_SURFACE_P010 && native)
+			return true;
+	}
+
+	return false;
 }
 
 static inline uint32_t get_adapter_idx(uint32_t adapter_idx, LUID luid)
@@ -96,6 +128,7 @@ static bool get_adapter_caps(IDXGIFactory *factory, uint32_t adapter_idx)
 	caps.supports_avc = has_encoder(amf_context, AMFVideoEncoderVCE_AVC);
 	caps.supports_hevc = has_encoder(amf_context, AMFVideoEncoder_HEVC);
 	caps.supports_av1 = has_encoder(amf_context, AMFVideoEncoder_AV1);
+	caps.supports_hevc_10bit = caps.supports_hevc && has_hevc_10bit(amf_context);
 
 	return true;
 }
@@ -171,6 +204,7 @@ try {
 		printf("supports_avc=%s\n", caps.supports_avc ? "true" : "false");
 		printf("supports_hevc=%s\n", caps.supports_hevc ? "true" : "false");
 		printf("supports_av1=%s\n", caps.supports_av1 ? "true" : "false");
+		printf("supports_hevc_10bit=%s\n", caps.supports_hevc_10bit ? "true" : "false");
 	}
 
 	return 0;

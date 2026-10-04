@@ -185,6 +185,10 @@ int main() {
  assert(profileFormat("main10") == "P010");
  assert(profileFormat("main42210") == "P216");
  assert(profileFormat("unknown").empty());
+ assert(implicitProfileFormat("NV12") == "NV12");
+ assert(implicitProfileFormat("P010") == "P010");
+ assert(implicitProfileFormat("P216") == "NV12");
+ assert(implicitProfileFormat("I444") == "NV12");
  assert(profileRangeSupported("main42210", "Partial"));
  assert(!profileRangeSupported("main42210", "Full"));
  assert(profileRangeSupported("main10", "Full"));

@@ -243,7 +243,11 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   browsers)", each with a tooltip (the Pixelview Player iOS app and Pixelview Desktop on Apple
   silicon play 4:2:2 natively; browsers get a server transcode). The saved profile value is unchanged.
 - HEVC profile maps the canvas format: Main to NV12, Main10 to P010, Main 4:2:2 10 to P216 (limited
-  range only). Main/Main10 default to limited range but honor a saved Full setting. Saves are
+  range only). AMD AMF HEVC lists Main (default) and, only when `obs-amf-test` reports
+  `supports_hevc_10bit` for the render adapter (HEVC max profile Main10, else native P010 input),
+  Main10; it codes the profile matching that input format and refuses P010 input on adapters
+  without 10-bit HEVC. An HEVC encoder without a profile property keeps a P010 canvas and otherwise
+  uses NV12 (Windows 2026-10-04: first launch selects `h265_texture_amf` Main/NV12). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
 - Every profile encodes the same 10-bit 4:2:2 capture; only the stream format differs. The canvas
   is a linear float texture for all SDR outputs (a Pixelview change in `obs_init_textures`: upstream

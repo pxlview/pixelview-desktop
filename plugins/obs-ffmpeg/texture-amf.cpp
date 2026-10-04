@@ -61,6 +61,7 @@ struct adapter_caps {
 	bool supports_avc = false;
 	bool supports_hevc = false;
 	bool supports_av1 = false;
+	bool supports_hevc_10bit = false;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -1217,6 +1218,16 @@ static void check_texture_encode_capability(obs_encoder_t *encoder, amf_codec_ty
 	}
 }
 
+/* Pixelview: HEVC Main10 support of the adapter OBS renders on, from obs-amf-test. */
+static bool hevc_10bit_supported()
+{
+	obs_video_info ovi;
+	if (!obs_get_video_info(&ovi))
+		return false;
+	auto it = caps.find(ovi.adapter);
+	return it != caps.end() && it->second.supports_hevc_10bit;
+}
+
 #include "texture-amf-opts.hpp"
 
 /* These are initial recommended settings that may be lowered later once we know more info such as the resolution and
@@ -1295,6 +1306,15 @@ static obs_properties_t *amf_properties_internal(amf_codec_type codec)
 			add_profile("baseline");
 		}
 #undef add_profile
+	} else if (amf_codec_type::HEVC == codec) {
+		/* Pixelview: expose Main (and Main10 where the adapter reports it) so the frontend
+		 * can select the matching NV12/P010 input. The encoder still derives the coded
+		 * profile from that input format. */
+		p = obs_properties_add_list(props, "profile", obs_module_text("Profile"), OBS_COMBO_TYPE_LIST,
+					    OBS_COMBO_FORMAT_STRING);
+		obs_property_list_add_string(p, "Main", "main");
+		if (hevc_10bit_supported())
+			obs_property_list_add_string(p, "Main10", "main10");
 	}
 
 	p = obs_properties_add_bool(props, "pre_analysis", obs_module_text("AMF.PreAnalysis"));
@@ -2079,6 +2099,12 @@ static void amf_hevc_create_internal(amf_base *enc, obs_data_t *settings)
 	}
 
 	const bool is10bit = enc->amf_format == AMF_SURFACE_P010;
+	if (is10bit && !hevc_10bit_supported()) {
+		/* Pixelview: fail clearly instead of letting the driver reject 10-bit input. */
+		const char *const text = "This AMD GPU cannot encode HEVC Main10; select Main.";
+		obs_encoder_set_last_error(enc->encoder, text);
+		throw text;
+	}
 	const bool pq = is_pq(enc);
 	const bool hlg = is_hlg(enc);
 	const bool is_hdr = pq || hlg;
@@ -2205,6 +2231,7 @@ static void amf_hevc_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "bitrate", 6000);
 	obs_data_set_default_int(settings, "cqp", 20);
 	obs_data_set_default_string(settings, "preset", "quality");
+	obs_data_set_default_string(settings, "profile", "main");
 }
 
 static void register_hevc()
@@ -2734,6 +2761,7 @@ try {
 		info.supports_avc = config_get_bool(config, section.c_str(), "supports_avc");
 		info.supports_hevc = config_get_bool(config, section.c_str(), "supports_hevc");
 		info.supports_av1 = config_get_bool(config, section.c_str(), "supports_av1");
+		info.supports_hevc_10bit = config_get_bool(config, section.c_str(), "supports_hevc_10bit");
 
 		avc_supported |= info.supports_avc;
 		hevc_supported |= info.supports_hevc;
