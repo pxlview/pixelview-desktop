@@ -26,12 +26,19 @@ namespace fixture {
 struct Entry {const char *id,*name; bool disabled;};
 std::vector<Entry> entries; bool available=true, saved=false; int storage=0, selections=0;
 std::string selected;
+// Test pattern generator list: values and names, as the plugin registers them.
+std::vector<std::pair<long long,const char*>> patterns; int patternStorage=0, deckLinkProps=0;
 using OBSProperties=int*; using OBSSourceAutoRelease=int*; using OBSDataAutoRelease=int*;
-int *obs_get_source_properties(const char *id){assert(!strcmp(id,"decklink-input"));return available?&storage:nullptr;}
-int *obs_properties_get(int*,const char *key){assert(!strcmp(key,"device_hash"));return &storage;}
-size_t obs_property_list_item_count(int*){return entries.size();}
+int *obs_get_source_properties(const char *id){
+ if(!strcmp(id,pixelview::TestPatternSourceId)) return patterns.empty()?nullptr:&patternStorage;
+ assert(!strcmp(id,"decklink-input"));return available?&deckLinkProps:nullptr;}
+int *obs_properties_get(int *props,const char *key){
+ if(props==&patternStorage){assert(!strcmp(key,"pattern"));return &patternStorage;}
+ assert(!strcmp(key,"device_hash"));return &storage;}
+size_t obs_property_list_item_count(int *list){return list==&patternStorage?patterns.size():entries.size();}
 const char *obs_property_list_item_string(int*,size_t i){return entries[i].id;}
-const char *obs_property_list_item_name(int*,size_t i){return entries[i].name;}
+long long obs_property_list_item_int(int *list,size_t i){assert(list==&patternStorage);return patterns[i].first;}
+const char *obs_property_list_item_name(int *list,size_t i){return list==&patternStorage?patterns[i].second:entries[i].name;}
 bool obs_property_list_item_disabled(int*,size_t i){return entries[i].disabled;}
 int *obs_get_source_by_name(const char*){return saved?&storage:nullptr;}
 int *obs_source_get_settings(int*){return &storage;}
@@ -40,6 +47,11 @@ int *obs_scene_find_source(int,const char*){return saved?&storage:nullptr;}
 void obs_sceneitem_select(int*,bool){} void obs_sceneitem_set_locked(int*,bool){}
 struct OBSBasic {
  bool pixelviewCaptureAutoSelectPending=false;
+ bool testPatternActive=false; long long pattern=0; int patternSelections=0;
+ int *PixelviewTestPatternItem(){return testPatternActive?&storage:nullptr;}
+ bool PixelviewTestPatternActive(){return testPatternActive;}
+ std::string PixelviewSelectedCaptureId(){return testPatternActive?pixelview::testPatternId(pattern):saved?selected:std::string();}
+ void SelectPixelviewTestPattern(long long value){++patternSelections;testPatternActive=true;pattern=value;RefreshPixelviewDevices();}
  bool pixelviewReceiving=false,busy=false,paired=false,closing=false;
  QComboBox combo; QComboBox *pixelviewDevices=&combo;
  QWidget settings, fit, preview, x, y;
@@ -59,7 +71,7 @@ struct OBSBasic {
  }
  void startup(){STARTUP}
 };
-void reset(){entries.clear();selected.clear();saved=false;selections=0;available=true;}
+void reset(){entries.clear();patterns.clear();selected.clear();saved=false;selections=0;available=true;}
 }
 int main(int argc,char **argv){QApplication app(argc,argv);using namespace fixture;
  reset(); OBSBasic w; w.startup();assert(selected.empty());
@@ -86,6 +98,22 @@ int main(int argc,char **argv){QApplication app(argc,argv);using namespace fixtu
  // An explicit selection before discovery settles takes precedence.
  reset();OBSBasic explicitChoice;explicitChoice.startup();saved=true;selected="explicit";
  entries={{"capture","4K Mini",false}};explicitChoice.RefreshPixelviewDevices();assert(selected=="explicit" && selections==0);
+ // Test patterns follow the devices after a separator, and are never auto-selected.
+ reset();patterns={{0,"SMPTE color bars"},{3,"Gray ramp (10-bit)"}};available=false;
+ OBSBasic generated;generated.paired=true;generated.startup();
+ assert(generated.combo.count()==4 && generated.combo.itemData(1).toString().isEmpty());
+ assert(generated.combo.itemData(3).toString()=="test-pattern:3" && generated.combo.itemText(3)=="Test pattern: Gray ramp (10-bit)");
+ assert(generated.combo.currentIndex()==0 && generated.patternSelections==0 && generated.pixelviewDevices->isEnabled());
+ generated.SelectPixelviewDevice(1);assert(generated.patternSelections==0); // separator
+ generated.SelectPixelviewDevice(3);assert(generated.patternSelections==1 && generated.pattern==3 && selections==0);
+ assert(generated.combo.currentIndex()==3);
+ // A saved, visible test pattern is a choice: a card appearing later must not replace it.
+ available=true;entries={{"capture","4K Mini",false}};generated.RefreshPixelviewDevices();
+ assert(selections==0 && generated.combo.currentData().toString()=="test-pattern:3");
+ assert(generated.combo.itemData(1).toString()=="capture" && generated.combo.itemData(2).toString().isEmpty());
+ reset();patterns={{0,"SMPTE color bars"}};OBSBasic restored;restored.testPatternActive=true;restored.startup();
+ entries={{"capture","4K Mini",false}};restored.RefreshPixelviewDevices();
+ assert(selections==0 && restored.combo.currentData().toString()=="test-pattern:0");
 }
 '''.replace('REFRESH', refresh).replace('SELECTION', selection).replace('STARTUP', startup)
         with tempfile.TemporaryDirectory(prefix='pixelview-capture-startup-') as tmp:

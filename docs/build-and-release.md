@@ -88,6 +88,7 @@ bash cmake/macos/pixelview-release.sh --validate-config
 
 ```sh
 python3 plugins/decklink/tests/run-receive.py          # rendered owner with SDK fakes; needs the build_macos app
+python3 plugins/pixelview-test-pattern/tests/run-generator.py   # test pattern generator, no libobs
 python3 plugins/pixelview-whep/tests/test_packaging.py
 python3 plugins/pixelview-whep/tests/run-native.py
 python3 plugins/pixelview-whep/tests/run-codecs.py

@@ -1712,7 +1712,7 @@ void OBSBasic::InitPixelview()
 	});
 	connect(pixelviewSettings, &QPushButton::clicked, this, [this] {
 		if (PixelviewConfigurationLocked()) return;
-		OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+		OBSSource source = PixelviewCaptureSource();
 		if (source) {
 			// Upstream dialog exposes every native property and runs all modified callbacks.
 			CreatePropertiesWindow(source);
@@ -1742,7 +1742,8 @@ void OBSBasic::InitPixelview()
 	pixelviewRefreshTimer = new QTimer(this);
 	connect(pixelviewRefreshTimer, &QTimer::timeout, this, &OBSBasic::RefreshPixelviewDevices);
 	pixelviewRefreshTimer->start(2000);
-	if (auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture")) {
+	for (auto *item : {obs_scene_find_source(GetCurrentScene(), "Pixelview Capture"), PixelviewTestPatternItem()}) {
+		if (!item) continue;
 		// Editable, but no drag handles until the operator clicks the preview or
 		// uses Fit: a red outline on an empty canvas reads as an error.
 		obs_sceneitem_select(item, false);
@@ -1750,8 +1751,9 @@ void OBSBasic::InitPixelview()
 	}
 	// Device notifications can arrive after this first refresh. Keep the initial
 	// selection pending until discovery has an input and native state is idle.
+	// A saved test pattern is a choice too: a card appearing must not replace it.
 	OBSSourceAutoRelease savedCapture = obs_get_source_by_name("Pixelview Capture");
-	pixelviewCaptureAutoSelectPending = !savedCapture;
+	pixelviewCaptureAutoSelectPending = !savedCapture && !PixelviewTestPatternActive();
 	RefreshPixelviewDevices();
 }
 
@@ -1928,31 +1930,46 @@ void OBSBasic::RefreshPixelviewDevices()
 		}
 	}
 	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
-	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : nullptr;
-	const std::string selected = settings ? obs_data_get_string(settings, "device_hash") : "";
+	// Test patterns come from the generator's own list, after the devices and a
+	// separator (an entry with an empty id). They need no hardware.
+	std::vector<pixelview::Device> entries = devices;
+	OBSProperties patternProps = obs_get_source_properties(pixelview::TestPatternSourceId);
+	if (auto *patterns = patternProps ? obs_properties_get(patternProps, "pattern") : nullptr) {
+		if (obs_property_list_item_count(patterns)) entries.push_back({});
+		for (size_t i = 0; i < obs_property_list_item_count(patterns); ++i)
+			entries.push_back({pixelview::testPatternId(obs_property_list_item_int(patterns, i)),
+					   std::string("Test pattern: ") + obs_property_list_item_name(patterns, i)});
+	}
+	const bool testPattern = PixelviewTestPatternActive();
+	const std::string selected = PixelviewSelectedCaptureId();
 	const auto status = pixelview::captureStatus(list != nullptr, devices, selected);
 
 	// Do not tear down an open dropdown on every poll. Rebuild only on changes.
-	bool changed = pixelviewDevices->count() != int(devices.size()) + 1;
-	for (size_t i = 0; !changed && i < devices.size(); ++i) {
-		changed = pixelviewDevices->itemData(int(i) + 1).toString() != QString::fromStdString(devices[i].id) ||
-			  pixelviewDevices->itemText(int(i) + 1) != QString::fromStdString(devices[i].name);
+	bool changed = pixelviewDevices->count() != int(entries.size()) + 1;
+	for (size_t i = 0; !changed && i < entries.size(); ++i) {
+		changed = pixelviewDevices->itemData(int(i) + 1).toString() != QString::fromStdString(entries[i].id) ||
+			  pixelviewDevices->itemText(int(i) + 1) != QString::fromStdString(entries[i].name);
 	}
 	{
 		QSignalBlocker blocker(pixelviewDevices);
 		if (changed) {
 			pixelviewDevices->clear();
 			pixelviewDevices->addItem(QStringLiteral("Choose a device…"), QString());
-			for (const auto &device : devices)
-				pixelviewDevices->addItem(QString::fromStdString(device.name), QString::fromStdString(device.id));
+			for (const auto &entry : entries) {
+				if (entry.id.empty())
+					pixelviewDevices->insertSeparator(pixelviewDevices->count());
+				else
+					pixelviewDevices->addItem(QString::fromStdString(entry.name), QString::fromStdString(entry.id));
+			}
 		}
-		int index = pixelviewDevices->findData(QString::fromStdString(selected));
+		int index = selected.empty() ? -1 : pixelviewDevices->findData(QString::fromStdString(selected));
 		pixelviewDevices->setCurrentIndex(index < 0 ? 0 : index);
 	}
 	const bool busy = PixelviewConfigurationLocked();
-	pixelviewDevices->setEnabled(!busy && !devices.empty() && !properties);
-	pixelviewSettings->setEnabled(!busy && source && list);
-	pixelviewFit->setEnabled(!busy && source != nullptr);
+	pixelviewDevices->setEnabled(!busy && !entries.empty() && !properties);
+	pixelviewSettings->setEnabled(!busy && (testPattern || (source && list)));
+	pixelviewSettings->setToolTip(testPattern ? QStringLiteral("Test pattern, audio and timecode overlay") : QStringLiteral("Native Blackmagic device settings"));
+	pixelviewFit->setEnabled(!busy && (testPattern || source != nullptr));
 	// Keep source-edit/context-menu input disabled: GetCurrentScene is still
 	// the sender. Only local viewport controls bypass the receiver's
 	// configuration lock; they never change source/program framing.
@@ -1979,10 +1996,13 @@ void OBSBasic::RefreshPixelviewDevices()
 	case CaptureStatus::AvailableUnverified:
 		captureHelp = QStringLiteral("Input signal is not verified independently. If the preview is blank or frozen, check input mode, cable and other capture apps.");
 		break;
+	case CaptureStatus::TestPattern:
+		captureHelp = QStringLiteral("Test pattern generated on this Mac at the canvas size and frame rate; no capture device is used.");
+		break;
 	}
 	pixelviewDevices->setToolTip(captureHelp);
 	RefreshPixelviewStreamHint();
-	if (source)
+	if (source || testPattern)
 		pixelviewCaptureAutoSelectPending = false; // Saved or explicitly chosen, even if disconnected.
 	if (pixelviewCaptureAutoSelectPending && !devices.empty() && !pixelviewReceiving &&
 	    !PixelviewSettingsBusy() && !properties) {
@@ -1999,6 +2019,12 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	if (pixelviewReceiving || index <= 0 || isClosing() || properties)
 		return;
 	const QByteArray id = pixelviewDevices->itemData(index).toString().toUtf8();
+	if (id.isEmpty())
+		return; // Separator.
+	if (auto pattern = pixelview::testPatternFromId(id.toStdString())) {
+		SelectPixelviewTestPattern(*pattern);
+		return;
+	}
 	const QByteArray name = pixelviewDevices->itemText(index).toUtf8();
 	OBSProperties props = obs_get_source_properties("decklink-input");
 	auto *deviceList = props ? obs_properties_get(props, "device_hash") : nullptr;
@@ -2017,8 +2043,15 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : obs_get_source_defaults("decklink-input");
 	if (!settings)
 		settings = obs_data_create();
-	if (source && !pixelview::shouldChangeDevice(obs_data_get_string(settings, "device_hash"), id.constData()))
+	if (source && !pixelview::shouldChangeDevice(obs_data_get_string(settings, "device_hash"), id.constData())) {
+		// Back from a test pattern to the same device: show it, keep its settings.
+		if (PixelviewTestPatternActive()) {
+			ShowPixelviewCapture(false);
+			SaveProject();
+			RefreshPixelviewDevices();
+		}
 		return;
+	}
 	obs_data_set_string(settings, "device_hash", id.constData());
 	obs_data_set_string(settings, "device_name", name.constData());
 	obs_properties_apply_settings(props, settings);
@@ -2058,15 +2091,107 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	} else {
 		obs_source_update(source, settings);
 	}
+	ShowPixelviewCapture(false);
 	FitPixelviewCapture(initializing);
 	SaveProject();
 	RefreshPixelviewDevices();
 }
 
+void OBSBasic::SelectPixelviewTestPattern(int64_t pattern)
+{
+	if (pixelviewReceiving || isClosing() || properties || PixelviewConfigurationLocked()) {
+		RefreshPixelviewDevices();
+		return;
+	}
+	OBSProperties props = obs_get_source_properties(pixelview::TestPatternSourceId);
+	auto *patterns = props ? obs_properties_get(props, "pattern") : nullptr;
+	bool offered = false;
+	for (size_t i = 0; patterns && i < obs_property_list_item_count(patterns); ++i)
+		offered |= obs_property_list_item_int(patterns, i) == pattern;
+	if (!offered) {
+		RefreshPixelviewDevices();
+		return;
+	}
+	OBSSourceAutoRelease source = obs_get_source_by_name(pixelview::TestPatternSourceName);
+	if (source && strcmp(obs_source_get_id(source), pixelview::TestPatternSourceId) != 0)
+		return;
+	if (!source) {
+		OBSDataAutoRelease settings = obs_data_create();
+		obs_data_set_int(settings, "pattern", pattern);
+		source = obs_source_create(pixelview::TestPatternSourceId, pixelview::TestPatternSourceName, settings, nullptr);
+		if (!source) {
+			PixelviewWarn(QStringLiteral("Pixelview"), QStringLiteral("Could not create the test pattern. Check the application log."));
+			return;
+		}
+	} else {
+		OBSDataAutoRelease settings = obs_source_get_settings(source);
+		obs_data_set_int(settings, "pattern", pattern);
+		obs_source_update(source, settings);
+	}
+	if (!PixelviewTestPatternItem()) {
+		auto *item = obs_scene_add(GetCurrentScene(), source);
+		if (!item)
+			return;
+		obs_sceneitem_select(item, false);
+		pixelviewFitPolicy.sourceCreated();
+	}
+	ShowPixelviewCapture(true);
+	FitPixelviewCapture();
+	SaveProject();
+	RefreshPixelviewDevices();
+}
+
+obs_sceneitem_t *OBSBasic::PixelviewTestPatternItem()
+{
+	return obs_scene_find_source(GetCurrentScene(), pixelview::TestPatternSourceName);
+}
+
+bool OBSBasic::PixelviewTestPatternActive()
+{
+	auto *item = PixelviewTestPatternItem();
+	return item && obs_sceneitem_visible(item);
+}
+
+obs_sceneitem_t *OBSBasic::PixelviewActiveCaptureItem()
+{
+	return PixelviewTestPatternActive() ? PixelviewTestPatternItem()
+					    : obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
+}
+
+OBSSource OBSBasic::PixelviewCaptureSource()
+{
+	auto *item = PixelviewActiveCaptureItem();
+	return item ? OBSSource(obs_sceneitem_get_source(item)) : OBSSource();
+}
+
+std::string OBSBasic::PixelviewSelectedCaptureId()
+{
+	OBSSource source = PixelviewCaptureSource();
+	if (!source) {
+		// A DeckLink capture created outside the scene still names its device.
+		OBSSourceAutoRelease capture = obs_get_source_by_name("Pixelview Capture");
+		source = capture.Get();
+	}
+	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : nullptr;
+	if (!settings)
+		return {};
+	if (strcmp(obs_source_get_id(source), pixelview::TestPatternSourceId) == 0)
+		return pixelview::testPatternId(obs_data_get_int(settings, "pattern"));
+	return obs_data_get_string(settings, "device_hash");
+}
+
+void OBSBasic::ShowPixelviewCapture(bool testPattern)
+{
+	if (auto *item = PixelviewTestPatternItem())
+		obs_sceneitem_set_visible(item, testPattern);
+	if (auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture"))
+		obs_sceneitem_set_visible(item, !testPattern);
+}
+
 void OBSBasic::FitPixelviewCapture(bool initializing)
 {
 	if (pixelviewReceiving || PixelviewSettingsBusy() || (!initializing && PixelviewConfigurationLocked())) return;
-	auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
+	auto *item = PixelviewActiveCaptureItem();
 	if (!item || !pixelviewFitPolicy.takeRequest())
 		return;
 	// Native bounds retain aspect ratio even before the first frame arrives.

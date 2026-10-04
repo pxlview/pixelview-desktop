@@ -5,10 +5,10 @@ Pixelview Desktop is a macOS application derived from OBS Studio for the
 capture, audio, encoding and output foundations and replaces the general
 broadcaster workflow with two focused modes:
 
-- **Sending** — capture a Blackmagic/DeckLink input on a fixed 1920 × 1080
-  canvas, encode with fixed Pixelview-oriented defaults, pair the machine with
-  a Pixelview node, and stream to that node over WHIP under the control of a
-  backend WebSocket.
+- **Sending** — capture a Blackmagic/DeckLink input (or a built-in test
+  pattern) on a fixed 1920 × 1080 canvas, encode with fixed Pixelview-oriented
+  defaults, pair the machine with a Pixelview node, and stream to that node
+  over WHIP under the control of a backend WebSocket.
 - **Receiving** — log in to a Pixelview session with its credentials, decode
   the WHEP stream natively, show it on the canvas and optionally play it out
   through a DeckLink output card.
@@ -34,6 +34,7 @@ Pixelview additions:
 | Sidebar, modes, pairing, streaming control, receive panel, deep links, shutdown gate | `frontend/widgets/OBSBasic_Pixelview*.inc`, hooks in `frontend/widgets/OBSBasic.cpp` and `OBSBasic_Streaming.cpp` |
 | Control-socket policy, transport, Keychain, receiver controller | `frontend/utility/Pixelview*.hpp`, `Pixelview*.cpp`, `Pixelview*.mm` |
 | Native WHEP receiver (GStreamer + VideoToolbox) | `plugins/pixelview-whep` |
+| Generated test patterns (stand-in for a capture card) | `plugins/pixelview-test-pattern` |
 | DeckLink receive output and its watchdog | `plugins/decklink` (`decklink-output-receive.inc`), `plugins/decklink-output-ui` (`decklink-receive-ui.inc`) |
 | WHIP output hardening | `plugins/obs-webrtc` |
 | Offline and loopback tests | `test/pixelview`, `plugins/decklink/tests`, `plugins/pixelview-whep/tests` |

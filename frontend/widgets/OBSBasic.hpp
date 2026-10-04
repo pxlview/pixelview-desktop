@@ -432,6 +432,15 @@ private:
 	bool pixelviewCaptureAutoSelectPending = false;
 	void RefreshPixelviewDevices();
 	void SelectPixelviewDevice(int index, bool initializing = false);
+	void SelectPixelviewTestPattern(int64_t pattern);
+	// The sender capture is the visible one of "Pixelview Capture" (DeckLink)
+	// and "Pixelview Test Pattern"; the hidden one keeps its settings.
+	obs_sceneitem_t *PixelviewTestPatternItem();
+	bool PixelviewTestPatternActive();
+	obs_sceneitem_t *PixelviewActiveCaptureItem();
+	OBSSource PixelviewCaptureSource();
+	std::string PixelviewSelectedCaptureId();
+	void ShowPixelviewCapture(bool testPattern);
 	void FitPixelviewCapture(bool initializing = false);
 	void RefreshPixelviewFPS();
 	void SelectPixelviewFPS(int index);

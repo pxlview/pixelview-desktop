@@ -27,6 +27,17 @@ int main()
 	// Reappearance is availability, never evidence of frames or a fit request.
 	assert(captureStatus(true, devices, "real-hash") == CaptureStatus::AvailableUnverified);
 	assert(!fit.takeRequest());
+	// Test patterns need neither the DeckLink plugin nor a device.
+	assert(pixelview::testPatternId(3) == "test-pattern:3");
+	assert(pixelview::testPatternFromId("test-pattern:0") == 0);
+	assert(pixelview::testPatternFromId("test-pattern:12") == 12);
+	assert(!pixelview::testPatternFromId("test-pattern:").has_value());
+	assert(!pixelview::testPatternFromId("test-pattern:-1").has_value());
+	assert(!pixelview::testPatternFromId("test-pattern:1x").has_value());
+	assert(!pixelview::testPatternFromId("test-pattern:99999999999999999999").has_value());
+	assert(!pixelview::testPatternFromId("real-hash").has_value());
+	assert(captureStatus(false, {}, "test-pattern:0") == CaptureStatus::TestPattern);
+	assert(captureStatus(true, devices, "test-pattern:2") == CaptureStatus::TestPattern);
 	assert(!pixelview::shouldChangeDevice("same-id", "same-id"));
 	assert(!pixelview::shouldChangeDevice("same-id", ""));
 	assert(pixelview::shouldChangeDevice("", "new-id"));

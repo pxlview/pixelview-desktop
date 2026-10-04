@@ -41,7 +41,7 @@ int main() {
         refresh = body(text, 'RefreshPixelviewDevices')
         discovery = refresh[refresh.index('std::vector<pixelview::Device> devices;'):refresh.index('OBSSourceAutoRelease source')]
         startup = body(text, 'InitPixelview').split('pixelviewRefreshTimer->start(2000);', 1)[1]
-        seed = refresh[refresh.index('\tif (source)\n\t\tpixelviewCaptureAutoSelectPending'):]
+        seed = refresh[refresh.index('\tif (source || testPattern)\n\t\tpixelviewCaptureAutoSelectPending'):]
         compiled(r'''#include <cassert>
 #include <string>
 #include <vector>
@@ -59,6 +59,9 @@ bool saved=false; int item=0; std::string selected;
 int GetCurrentScene(){return 0;}
 int *obs_scene_find_source(int,const char*){return saved?&item:nullptr;}
 int *obs_get_source_by_name(const char*){return saved?&item:nullptr;}
+// Test patterns are covered by test_capture_startup; none is saved here.
+int *PixelviewTestPatternItem(){return nullptr;}
+bool PixelviewTestPatternActive(){return false;}
 using OBSSourceAutoRelease=int*;
 void obs_sceneitem_select(int*,bool){}
 void obs_sceneitem_set_locked(int*,bool){}
@@ -69,7 +72,7 @@ bool PixelviewSettingsBusy(){return false;}
 void SelectPixelviewDevice(int index,bool initializing=false) {
  assert(initializing); selected=discover().at(index-1).id;
 }
-void RefreshPixelviewDevices(){auto devices=discover();auto source=obs_get_source_by_name("");SEED}
+void RefreshPixelviewDevices(){auto devices=discover();auto source=obs_get_source_by_name("");const bool testPattern=PixelviewTestPatternActive();SEED}
 void startup() {STARTUP}
 int main(){
  entries={{"","empty",false},{"gone","Disconnected",true},{"actual-first","First",false},{"actual-second","Second",false}};

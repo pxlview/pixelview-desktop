@@ -6,6 +6,7 @@
 #include "frontend/utility/PixelviewReceiveCredentialStore.hpp"
 #include "frontend/utility/PixelviewDeepLinkInbox.hpp"
 #include "frontend/utility/PixelviewLogShipper.hpp"
+#include "frontend/utility/PixelviewCapturePolicy.hpp"
 #include <cassert>
 #include <Security/Security.h>
 namespace pixelview {
@@ -72,6 +73,8 @@ public:
  struct UI {QMenu *menuTools=nullptr; Preview *preview=nullptr;} storage, *ui=&storage;
  bool isClosing() const { return closing; }
  bool PixelviewSettingsBusy() const {return nativeBusy;}
+ // The fixture has no test pattern; the sender capture is the DeckLink fixture.
+ bool PixelviewTestPatternActive() {return false;}
  int clears=0;
  void ClearPixelviewAudio(){++clears;}
  void RefreshPixelviewAudio(){}

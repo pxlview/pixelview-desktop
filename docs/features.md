@@ -135,8 +135,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   `DESKTOP_CONTROL_RESULT {request_id, ok, error?, state}` on the same socket. Commands are handled
   only on a ready socket and run on the next event-loop turn
   (`frontend/widgets/OBSBasic_PixelviewControl.inc`).
-- Commands: `get_state`, `start`, `stop`, `select_device`, `set_capture` (a visible boolean or list
-  property of the DeckLink input and one of its enabled values; never the device hash or free text),
+- Commands: `get_state`, `start`, `stop`, `select_device` (a DeckLink device or a
+  `test-pattern:<n>` entry from the device list), `set_capture` (a visible boolean or list property
+  of the selected DeckLink input or test pattern and one of its enabled values; never the device
+  hash or free text),
   `fit`, `set_fps` (the eight sidebar rates), `set_encoder`, `set_bitrate` (whole Mbps, 1-12, the
   quick range), `set_profile`, `set_mute`. Each runs the same native path as the sidebar control
   (`SelectPixelviewDevice`, `SelectPixelviewFPS`, `SavePixelviewEncoding`, `ChangePixelviewAudio`,
@@ -175,6 +177,37 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   real `ResetVideo()` with rollback on failure; it is disabled while output is active.
 - Status distinguishes missing plugin, no devices, no selection, disconnected selection and
   "Device selected - Local preview"; device presence is not signal lock.
+
+### Test patterns
+
+- For testing without a capture card, the device list offers, after the DeckLink devices and a
+  separator, one "Test pattern: ..." entry per pattern of the bundled `pixelview-test-pattern`
+  plugin (the list comes from the plugin's own property, like the DeckLink devices): SMPTE RP 219
+  HD bars with PLUGE (-2/0/+2/+4 %), EBU 100/0/75/0 bars, 100 % bars, a 10-bit gray ramp (all 877
+  legal luma codes, so an 8-bit stage shows steps), 11 gray steps, white/red/green/blue ramps, a
+  16 x 9 crosshatch with circle and centre cross, a circular zone plate reaching Nyquist at the
+  side edges, and black.
+- Choosing one creates a second managed source, `Pixelview Test Pattern`, in the sender scene and
+  shows it instead of `Pixelview Capture`, which stays in the scene hidden with its device and
+  settings; choosing a device switches back. Exactly one of the two scene items is visible and that
+  one is the capture for Fit, **Settings...**, the audio meter, mute, Listen locally, the
+  Start-streaming gate and the remote-control state. A saved test pattern is never replaced by the
+  first-run automatic device selection when a card appears. Like every capture control it is
+  available only when paired.
+- Frames are generated at the canvas size and frame rate as v210, limited-range BT.709 Y'CbCr with
+  sub-black and super-white kept, so the pattern takes the same conversion path as a 10-bit
+  DeckLink capture (code values are exact RP 219 values). Output stops while the source is not
+  shown (for example while receiving).
+- **Settings...** on a test pattern sets the pattern, the audio and the overlay. Audio: a sync beep
+  (1 kHz at -20 dBFS for one frame, once a second; default), continuous 1 kHz at -20 dBFS or
+  -18 dBFS, or none. Overlay (default on): the Mac's time of day as HH:MM:SS plus the frame within
+  the second, a bar that fills over each second, and a square that flashes on the first frame of
+  each second. The beep is the audio span of exactly that frame with the same timestamp, so the
+  A/V offset at the source is zero by construction; the time of day can be compared with the
+  receiving side's clock to read glass-to-glass latency.
+- Remote control: the patterns appear in `state.capture.devices` with `test-pattern:<n>` ids and are
+  chosen with `select_device`; with one selected, `state.capture.properties` and `set_capture` cover
+  its pattern, audio and overlay settings. No backend or admin change is involved.
 
 ### Encoding defaults
 
@@ -595,6 +628,12 @@ gate) fail in the current environment regardless of changes.
   (v210 through the real libobs canvas to the encoder input and to the DeckLink v210 render)
   (real libobs/OpenGL level count). `receiver_live.py` and `receiver_media_live.py` are opt-in live
   tools.
+- Test patterns (`plugins/pixelview-test-pattern/tests/run-generator.py`, generator only, no
+  libobs): RP 219 code values and bar/PLUGE layout, every pattern legal at four sizes, v210 packing
+  round trip with co-sited chroma, overlay bounds (inside the 75 % bars, chroma aligned, nothing
+  outside its rectangle), tone levels, phase continuity and beep gating. `test_capture_policy.cpp`
+  (ids, status) and `test_capture_startup.py` (list order, separator, selection, no automatic
+  replacement of a saved pattern) cover the sidebar.
 - Capture, encoding, audio, UI: `test_capture_policy.cpp`, `test_capture_*.py`, `test_fps.py`,
   `test_encoding.py`, `test_first_launch_defaults.py`, `test_unavailable_encoder.py`,
   `test_nvenc_policy.py`, `test_amf_policy.py`, `test_vt_sdk_compat.py`, `test_audio*.py`,
@@ -618,6 +657,18 @@ gate) fail in the current environment regardless of changes.
 
 ### Verified live
 
+- Test patterns (2026-10-04, signed local build, isolated `--app-config-dir`, unpaired, an
+  UltraStudio Recorder 3G attached without signal): with a saved scene holding a visible
+  `Pixelview Test Pattern` and a hidden `Pixelview Capture`, the app restored "Test pattern: SMPTE
+  color bars" in the device list and the attached card did not replace it; the preview showed the
+  RP 219 bars with the running time-of-day overlay, the meter showed the once-a-second beep, and
+  crosshatch rendered likewise. Quit through SIGTERM was clean (no remaining sources, empty
+  sentinel, no crash report); the plugin's destroy freed all of its own allocations before libobs
+  counted leaks. The shutdown "Number of memory leaks: 1" seen in some runs also occurs with the
+  original DeckLink-only scene (7 of 8 runs), so it is not from the test pattern; its cause is not
+  identified. Not verified: choosing a pattern from the dropdown or **Settings...** in the running
+  app (both need pairing; covered only by `test_capture_startup.py`), streaming a pattern over WHIP
+  to a receiver, the beep/flash alignment as received, and selecting a pattern from the admin.
 - Control socket against the local backend (`dev.sh --k8s`, backend commit ab4aa77) with the rebuilt
   signed bundle: pairing exchange and `DESKTOP_READY`; pongs recorded in Redis presence with parsed
   settings; backend reload (close 1005) followed by automatic reconnect; admin revocation via

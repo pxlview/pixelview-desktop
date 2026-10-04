@@ -85,8 +85,11 @@ bool OBSBasic::PixelviewModeBusy() const
 OBSSource OBSBasic::PixelviewManagedSource()
 {
 	if (pixelviewReceiving) return pixelviewReceiveSource;
-	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
-	if (source && (obs_source_removed(source) || strcmp(obs_source_get_id(source), "decklink-input") != 0)) return nullptr;
+	// A visible test pattern stands in for the DeckLink input.
+	const bool testPattern = PixelviewTestPatternActive();
+	OBSSourceAutoRelease source = obs_get_source_by_name(testPattern ? pixelview::TestPatternSourceName : "Pixelview Capture");
+	if (source && (obs_source_removed(source) ||
+		       strcmp(obs_source_get_id(source), testPattern ? pixelview::TestPatternSourceId : "decklink-input") != 0)) return nullptr;
 	return OBSSource(source.Get());
 }
 

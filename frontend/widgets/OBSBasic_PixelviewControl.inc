@@ -87,8 +87,9 @@ QJsonValue PixelviewListItemValue(obs_property_t *prop, size_t i)
 	}
 }
 
-// Remote capture settings: the DeckLink input's own boolean and list
-// properties, never free text; the device itself is chosen by select_device.
+// Remote capture settings: the selected source's own boolean and list
+// properties (DeckLink input or test pattern), never free text; the device
+// itself is chosen by select_device.
 bool PixelviewRemoteProperty(obs_property_t *prop)
 {
 	const auto type = obs_property_get_type(prop);
@@ -102,8 +103,7 @@ bool PixelviewRemoteProperty(obs_property_t *prop)
 bool OBSBasic::PixelviewCaptureSelected()
 {
 	// Same condition as the "Choose a capture device to stream." hint.
-	return pixelviewDevices && pixelviewDevices->currentIndex() > 0 &&
-	       obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
+	return pixelviewDevices && pixelviewDevices->currentIndex() > 0 && PixelviewActiveCaptureItem();
 }
 
 QJsonObject OBSBasic::PixelviewControlState()
@@ -126,16 +126,19 @@ QJsonObject OBSBasic::PixelviewControlState()
 			   {"status", pixelviewConnectionStatus ? pixelviewConnectionStatus->text() : QString()},
 			   {"hint", pixelviewStreamHint && pixelviewStreamHint->isVisible() ? pixelviewStreamHint->text() : QString()}};
 
-	// Capture: discovered devices and the managed source's native properties.
+	// Capture: discovered devices, then the test patterns ("test-pattern:<n>"
+	// ids), and the selected source's own properties.
 	QJsonArray devices;
-	for (int i = 1; pixelviewDevices && i < pixelviewDevices->count(); ++i)
+	for (int i = 1; pixelviewDevices && i < pixelviewDevices->count(); ++i) {
+		if (pixelviewDevices->itemData(i).toString().isEmpty()) continue; // Separator.
 		devices.append(QJsonObject{{"id", pixelviewDevices->itemData(i).toString()}, {"name", pixelviewDevices->itemText(i)}});
+	}
 	QJsonObject capture{{"devices", devices}, {"device", QString()}, {"properties", QJsonArray()},
 			    {"status", pixelviewDevices ? pixelviewDevices->toolTip() : QString()}};
-	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+	capture["device"] = QString::fromStdString(PixelviewSelectedCaptureId());
+	OBSSource source = PixelviewCaptureSource();
 	if (source) {
 		OBSDataAutoRelease settings = obs_source_get_settings(source);
-		capture["device"] = QString::fromUtf8(obs_data_get_string(settings, "device_hash"));
 		QJsonArray list;
 		OBSProperties props = obs_source_properties(source);
 		for (obs_property_t *prop = props ? obs_properties_first(props) : nullptr; prop; obs_property_next(&prop)) {
@@ -245,14 +248,12 @@ QString OBSBasic::RunPixelviewControl(const QJsonObject &command)
 		const int index = pixelviewDevices ? pixelviewDevices->findData(id) : -1;
 		if (id.isEmpty() || index <= 0) return QStringLiteral("That capture device is not connected.");
 		SelectPixelviewDevice(index);
-		OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
-		OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : nullptr;
-		if (error.isEmpty() && (!settings || id != QString::fromUtf8(obs_data_get_string(settings, "device_hash"))))
+		if (error.isEmpty() && (!PixelviewActiveCaptureItem() || id != QString::fromStdString(PixelviewSelectedCaptureId())))
 			error = QStringLiteral("The capture device could not be selected.");
 		return error;
 	}
 	if (action == "set_capture") {
-		OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
+		OBSSource source = PixelviewCaptureSource();
 		if (!source) return QStringLiteral("Select a capture device first.");
 		const QByteArray key = command["key"].toString().toUtf8();
 		const QJsonValue value = command["value"];
@@ -283,7 +284,7 @@ QString OBSBasic::RunPixelviewControl(const QJsonObject &command)
 		return {};
 	}
 	if (action == "fit") {
-		if (!obs_scene_find_source(GetCurrentScene(), "Pixelview Capture")) return QStringLiteral("Select a capture device first.");
+		if (!PixelviewActiveCaptureItem()) return QStringLiteral("Select a capture device first.");
 		pixelviewFitPolicy.requestReset();
 		FitPixelviewCapture();
 		return {};

@@ -27,9 +27,36 @@ struct Device {
 	std::string id;
 	std::string name;
 };
-enum class CaptureStatus { PluginUnavailable, NoDevices, NotSelected, Disconnected, AvailableUnverified };
+// A generated test pattern stands in for the DeckLink input without hardware.
+// It is a second managed source in the sender scene; exactly one of the two
+// scene items is visible, and that one is the capture. In the device list and
+// the remote-control state it appears as one entry per pattern.
+inline constexpr const char *TestPatternSourceId = "pixelview_test_pattern";
+inline constexpr const char *TestPatternSourceName = "Pixelview Test Pattern";
+inline constexpr const char *TestPatternPrefix = "test-pattern:";
+inline std::string testPatternId(int64_t pattern)
+{
+	return TestPatternPrefix + std::to_string(pattern);
+}
+inline std::optional<int64_t> testPatternFromId(const std::string &id)
+{
+	const std::string prefix = TestPatternPrefix;
+	if (id.size() <= prefix.size() || id.compare(0, prefix.size(), prefix) != 0)
+		return std::nullopt;
+	int64_t value = 0;
+	for (size_t i = prefix.size(); i < id.size(); ++i) {
+		if (id[i] < '0' || id[i] > '9' || value > 1000)
+			return std::nullopt;
+		value = value * 10 + (id[i] - '0');
+	}
+	return value;
+}
+
+enum class CaptureStatus { PluginUnavailable, NoDevices, NotSelected, Disconnected, AvailableUnverified, TestPattern };
 inline CaptureStatus captureStatus(bool plugin, const std::vector<Device> &devices, const std::string &selected)
 {
+	if (testPatternFromId(selected))
+		return CaptureStatus::TestPattern;
 	if (!plugin)
 		return CaptureStatus::PluginUnavailable;
 	if (!selected.empty()) {
