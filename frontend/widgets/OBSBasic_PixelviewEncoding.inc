@@ -75,6 +75,19 @@ OBSData PixelviewEncoderData(const std::filesystem::path &path, const char *id, 
 		PixelviewDefaultList(data, props, "tune", "zerolatency");
 		PixelviewDefaultList(data, props, "preset", "ultrafast");
 	}
+	// NVENC (H.264 and HEVC): NVIDIA's ultra-low-latency recipe. The tuning
+	// also selects a one-frame VBV and zero output delay in obs-nvenc;
+	// look-ahead would wait for future frames. AQ helps flat gradients.
+	if (strncmp(id, "obs_nvenc_", 10) == 0) {
+		PixelviewDefaultList(data, props, "preset", "p4");
+		PixelviewDefaultList(data, props, "tune", "ull");
+		PixelviewDefaultList(data, props, "multipass", "qres");
+		for (const auto &[key, value] : {std::pair{"lookahead", false}, std::pair{"adaptive_quantization", true}}) {
+			auto *p = obs_properties_get(props, key);
+			if (p && obs_property_get_type(p) == OBS_PROPERTY_BOOL)
+				obs_data_set_bool(data, key, value);
+		}
+	}
 	for (const auto *key : {"bitrate", "keyint_sec", "bf"}) {
 		auto *p = obs_properties_get(props, key);
 		// HEVC (Main, Main10 and Main 4:2:2 10 share one encoder configuration)

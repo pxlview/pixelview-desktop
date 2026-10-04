@@ -3,6 +3,7 @@
 #include <obs-nal.h>
 #include <util/darray.h>
 #include <util/dstr.h>
+#include <util/platform.h>
 
 /* ========================================================================= */
 
@@ -111,6 +112,18 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 
 		enc->config.rcParams.maxBitRate = vbr ? (uint32_t)enc->props.max_bitrate * 1000
 						      : (uint32_t)enc->props.bitrate * 1000;
+
+		/* Pixelview: keep the one-frame VBV of ultra-low-latency CBR
+		 * unless the user opts set the VBV explicitly. */
+		int user_vbv;
+		if (!get_user_arg_int(enc, "vbvBufferSize", &user_vbv) &&
+		    enc->config.rcParams.rateControlMode == NV_ENC_PARAMS_RC_CBR &&
+		    enc->params.tuningInfo == NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY && enc->params.frameRateNum) {
+			const uint32_t frame_bits = (uint32_t)((uint64_t)enc->props.bitrate * 1000 *
+							       enc->params.frameRateDen / enc->params.frameRateNum);
+			enc->config.rcParams.vbvBufferSize = frame_bits;
+			enc->config.rcParams.vbvInitialDelay = frame_bits;
+		}
 
 		NV_ENC_RECONFIGURE_PARAMS params = {0};
 		params.version = NV_ENC_RECONFIGURE_PARAMS_VER;
@@ -338,6 +351,14 @@ static bool init_encoder_base(struct nvenc_data *enc, obs_data_t *settings)
 		}
 	}
 
+	/* Pixelview: the queue above trades frames of delay for throughput.
+	 * Ultra-low-latency encodes without reordering or lookahead have no
+	 * reason to wait, so collect each packet right after its picture. */
+	const bool zero_delay = nv_tuning == NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY && config->frameIntervalP <= 1 &&
+				!lookahead;
+	if (zero_delay)
+		enc->output_delay = 0;
+
 	enc->config.rcParams.disableIadapt = enc->props.disable_scenecut;
 
 	/* psycho aq */
@@ -372,6 +393,17 @@ static bool init_encoder_base(struct nvenc_data *enc, obs_data_t *settings)
 
 	} else if (!vbr) { /* CBR by default */
 		config->rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR;
+
+		/* Pixelview: NVIDIA's ultra-low-latency guidance is a VBV of one
+		 * frame (bitrate / framerate), which bounds every frame's size and
+		 * so its transmission time. User opts (vbvBufferSize=...) still
+		 * override this. */
+		if (nv_tuning == NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY) {
+			const uint32_t frame_bits =
+				(uint32_t)((uint64_t)bitrate * 1000 * voi->fps_den / voi->fps_num);
+			config->rcParams.vbvBufferSize = frame_bits;
+			config->rcParams.vbvInitialDelay = frame_bits;
+		}
 	} else if (cqvbr) {
 		config->rcParams.targetQuality = (uint8_t)enc->props.target_quality;
 		config->rcParams.averageBitRate = 0;
@@ -411,6 +443,9 @@ static bool init_encoder_base(struct nvenc_data *enc, obs_data_t *settings)
 	dstr_catf(&log, "\tlookahead:    %s (%d frames)\n", lookahead ? "true" : "false",
 		  config->rcParams.lookaheadDepth);
 	dstr_catf(&log, "\taq:           %s\n", enc->props.adaptive_quantization ? "true" : "false");
+	dstr_catf(&log, "\toutput delay: %d frames\n", enc->output_delay);
+	if (config->rcParams.rateControlMode == NV_ENC_PARAMS_RC_CBR)
+		dstr_catf(&log, "\tvbv:          %u bits\n", config->rcParams.vbvBufferSize);
 
 	if (enc->props.split_encode) {
 		dstr_catf(&log, "\tsplit encode: %ld\n", enc->props.split_encode);
@@ -1035,6 +1070,13 @@ static void nvenc_destroy(void *data)
 		get_encoded_packet(enc, true);
 	}
 
+	if (enc->latency_frames) {
+		info("encode latency (submit to packet): %llu frames, avg %.1f ms, max %.1f ms",
+		     (unsigned long long)enc->latency_frames,
+		     (double)enc->latency_sum_ns / (double)enc->latency_frames / 1000000.0,
+		     (double)enc->latency_max_ns / 1000000.0);
+	}
+
 	for (size_t i = 0; i < enc->bitstreams.num; i++) {
 		nv_bitstream_free(enc, &enc->bitstreams.array[i]);
 	}
@@ -1111,6 +1153,14 @@ static bool get_encoded_packet(struct nvenc_data *enc, bool finalize)
 
 		if (NV_FAILED(nv.nvEncLockBitstream(s, &lock))) {
 			return false;
+		}
+
+		if (!finalize && bs->submit_ns) {
+			const uint64_t latency_ns = os_gettime_ns() - bs->submit_ns;
+			enc->latency_frames++;
+			enc->latency_sum_ns += latency_ns;
+			if (latency_ns > enc->latency_max_ns)
+				enc->latency_max_ns = latency_ns;
 		}
 
 		if (enc->first_packet) {
@@ -1322,6 +1372,7 @@ bool nvenc_encode_base(struct nvenc_data *enc, struct nv_bitstream *bs, void *pi
 	if (obs_encoder_has_roi(enc->encoder))
 		add_roi(enc, &params);
 
+	bs->submit_ns = os_gettime_ns();
 	NVENCSTATUS err = nv.nvEncEncodePicture(enc->session, &params);
 	if (err != NV_ENC_SUCCESS && err != NV_ENC_ERR_NEED_MORE_INPUT) {
 		nv_failed(enc->encoder, err, __FUNCTION__, "nvEncEncodePicture");

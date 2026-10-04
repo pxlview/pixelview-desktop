@@ -218,6 +218,14 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   encoder configuration, so the default holds for all three) and one second for H.264, HEVC Main
   (H.264 baseline where offered, x264 also ultrafast/zerolatency), Opus audio, `Output/Mode=Advanced`, rescale disabled. Quick bitrate range
   is 1-12 Mbps; the native Advanced dialog keeps out-of-range values.
+- NVENC (H.264 and HEVC) defaults to P4, ultra-low-latency tuning, quarter-resolution multipass,
+  look-ahead off and adaptive quantization on; all remain editable in Advanced. With
+  ultra-low-latency tuning, no B-frames and no look-ahead, `obs-nvenc` returns each packet right
+  after its picture (upstream holds three frames for throughput), and CBR uses a one-frame VBV
+  (bitrate / fps) that follows live bitrate changes; a `vbvBufferSize=` custom option overrides it.
+  The encoder logs its submit-to-packet latency (average and maximum) when it stops. x264 CBR with
+  `zerolatency` likewise uses a one-frame VBV unless a custom buffer size is set (macOS included).
+  VideoToolbox keeps its native defaults.
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
@@ -714,6 +722,14 @@ gate) fail in the current environment regardless of changes.
   `com.pixelview.desktop.device:http://localhost:8000`, control socket `DESKTOP_READY`; the backend
   registered the desktop for node 707880). Not run on Windows: the test suites, capture, streaming
   (no engine), Unpair, revocation, links, the installer and release.
+- NVENC latency on Windows (2026-10-04, `windows-port`, EC2 g4dn Tesla T4, driver 616.92): a libobs
+  probe fed the 1080p30 test pattern into `obs_nvenc_hevc_tex` and OBS's null output for 15 s per
+  setting, with no skipped frames. Submit-to-packet: upstream defaults (P5, high quality, three-frame
+  output delay) 70.7 ms average / 76.6 ms max; Pixelview defaults (P4, ultra-low latency,
+  quarter-res, AQ, zero delay) 15.0 / 21.3 ms; P7 17.0 / 24.6 ms; P4 with look-ahead (13-frame delay)
+  404 / 412 ms. x264 logged the one-frame buffer (200 kbit at 6 Mbps) and kept a custom buffer size.
+  Not measured: transmission and receive, real camera content, other GPUs, and NVENC on a live
+  stream.
 - Control socket against the local backend (`dev.sh --k8s`, backend commit ab4aa77) with the rebuilt
   signed bundle: pairing exchange and `DESKTOP_READY`; pongs recorded in Redis presence with parsed
   settings; backend reload (close 1005) followed by automatic reconnect; admin revocation via

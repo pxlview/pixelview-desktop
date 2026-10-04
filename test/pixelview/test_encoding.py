@@ -73,7 +73,12 @@ int main() {
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 using Data = std::map<std::string,std::string>;
+enum { OBS_PROPERTY_BOOL = 1 };
+const char *obs_properties_get(const char *props, const char *) { return props; }
+int obs_property_get_type(const char *) { return OBS_PROPERTY_BOOL; }
+void obs_data_set_bool(Data &data, const char *key, bool value) { data[key] = value ? "true" : "false"; }
 const char *obs_get_encoder_codec(const char *id) { return std::string(id).find("hevc") != std::string::npos ? "hevc" : "h264"; }
 void PixelviewDefaultList(Data &data, const char *id, const char *key, const char *value) {
  if (std::string(key) == "profile") {
@@ -90,9 +95,18 @@ int main() {
  for (const char *id : {"obs_x264", "com.apple.videotoolbox.videoencoder.ave.avc", "obs_nvenc_h264_tex"}) {
   auto data = defaults(id); assert(data["profile"] == "baseline");
   if (std::string(id) == "obs_x264") { assert(data["tune"] == "zerolatency"); assert(data["preset"] == "ultrafast"); }
+  else if (std::string(id) == "obs_nvenc_h264_tex") { assert(data["tune"] == "ull"); assert(data["preset"] == "p4"); }
   else { assert(data.count("tune") == 0 && data.count("preset") == 0); }
  }
- assert(defaults("com.apple.videotoolbox.videoencoder.ave.hevc")["profile"] == "main");
+ // NVENC (H.264 and HEVC) gets NVIDIA's ultra-low-latency recipe; VideoToolbox keeps its native defaults.
+ for (const char *id : {"obs_nvenc_h264_tex", "obs_nvenc_hevc_tex"}) {
+  auto data = defaults(id);
+  assert(data["preset"] == "p4" && data["tune"] == "ull" && data["multipass"] == "qres");
+  assert(data["lookahead"] == "false" && data["adaptive_quantization"] == "true");
+ }
+ auto vt = defaults("com.apple.videotoolbox.videoencoder.ave.hevc");
+ assert(vt["profile"] == "main");
+ assert(!vt.count("tune") && !vt.count("preset") && !vt.count("multipass") && !vt.count("lookahead") && !vt.count("adaptive_quantization"));
 }'''
         with tempfile.TemporaryDirectory() as tmp:
             src = pathlib.Path(tmp) / 'test.cpp'

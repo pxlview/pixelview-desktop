@@ -405,8 +405,18 @@ static void update_params(struct obs_x264 *obsx264, obs_data_t *settings, const 
 	if (keyint_sec)
 		obsx264->params.i_keyint_max = keyint_sec * voi->fps_num / voi->fps_den;
 
-	if (!use_bufsize)
+	if (!use_bufsize) {
 		buffer_size = bitrate;
+
+		/* Pixelview: zerolatency CBR gets a one-frame VBV (bitrate / fps)
+		 * so no frame takes longer than a frame interval to send. A custom
+		 * buffer size or vbv-bufsize in the x264 options still wins. */
+		const char *tune = obs_data_get_string(settings, "tune");
+		if (rc == RATE_CONTROL_CBR && tune && astrstri(tune, "zerolatency")) {
+			const int frame_kbit = (int)((int64_t)bitrate * voi->fps_den / voi->fps_num);
+			buffer_size = frame_kbit > 0 ? frame_kbit : 1;
+		}
+	}
 
 #ifdef ENABLE_VFR
 	obsx264->params.b_vfr_input = vfr;

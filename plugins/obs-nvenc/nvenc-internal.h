@@ -70,6 +70,11 @@ struct nvenc_data {
 	uint32_t buf_count;
 	int output_delay;
 	int buffers_queued;
+
+	/* Pixelview: submit-to-packet latency, logged when the encoder stops */
+	uint64_t latency_frames;
+	uint64_t latency_sum_ns;
+	uint64_t latency_max_ns;
 	size_t next_bitstream;
 	size_t cur_bitstream;
 	bool encode_started;
@@ -138,6 +143,7 @@ struct handle_tex {
 /* Bitstream buffer */
 struct nv_bitstream {
 	void *ptr;
+	uint64_t submit_ns; /* Pixelview: os_gettime_ns() when the picture was submitted */
 };
 
 /** Mapped resources **/
