@@ -214,8 +214,9 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - First initialization prefers Apple VideoToolbox HEVC, then other hardware HEVC, hardware
   H.264/AV1, then x264. Only exact known encoder IDs (VT, NVENC, QSV, AMF, VAAPI) are offered, and
   only when OBS registers them.
-- Defaults: 6 Mbps CBR, two-second keyframes for HEVC (Main, Main10 and Main 4:2:2 10 share one
-  encoder configuration, so the default holds for all three) and one second for H.264, HEVC Main
+- Defaults: 6 Mbps CBR, two-second keyframes for every encoder and codec (HEVC Main, Main10 and
+  Main 4:2:2 10 share one encoder configuration; H.264 hardware, VideoToolbox included, and x264
+  moved from one second to two on 2026-10-04), HEVC Main
   (H.264 baseline where offered, x264 also ultrafast/zerolatency), Opus audio, `Output/Mode=Advanced`, rescale disabled. Quick bitrate range
   is 1-12 Mbps; the native Advanced dialog keeps out-of-range values.
 - NVENC (H.264 and HEVC) defaults to P4, ultra-low-latency tuning, quarter-resolution multipass,

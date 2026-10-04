@@ -170,8 +170,8 @@ int main(int argc,char **argv){
   assert(obs_data_get_int(data,"bitrate")==6000);
   assert(strcmp(obs_data_get_string(data,"profile"),strcmp(encoder,"obs_x264")==0?"baseline":"main")==0);
   assert(strcmp(obs_data_get_string(data,"rate_control"),"CBR")==0);
-  // HEVC (all three profiles use this one configuration): 2 s; H.264: 1 s.
-  assert(obs_data_get_int(data,"keyint_sec")==(strcmp(encoder,"obs_x264")==0?1:2));
+  // Every encoder (HEVC's three profiles share one configuration): 2 s.
+  assert(obs_data_get_int(data,"keyint_sec")==2);
   obs_data_set_int(data,"bitrate",9000);obs_data_set_string(data,"profile",strcmp(encoder,"obs_x264")==0?"high":"main10");
   assert(obs_data_save_json_safe(data,saved.c_str(),"tmp","bak"));
   obs_data_set_int(data,"keyint_sec",4);
