@@ -50,8 +50,9 @@ static struct tp_settings snapshot(struct tp_source *tp)
 
 static int64_t wall_offset_ns(void)
 {
+	// C11 timespec_get reads the realtime clock on both macOS and MSVC.
 	struct timespec now;
-	clock_gettime(CLOCK_REALTIME, &now);
+	timespec_get(&now, TIME_UTC);
 	return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec - (int64_t)os_gettime_ns();
 }
 
@@ -152,7 +153,11 @@ static void *tp_thread(void *data)
 			if (s.timecode) {
 				const time_t t = (time_t)second;
 				struct tm local;
+#ifdef _WIN32
+				localtime_s(&local, &t);
+#else
 				localtime_r(&t, &local);
+#endif
 				const unsigned nominal = (fps_num + fps_den - 1) / fps_den;
 				const struct tp_overlay overlay = {(unsigned)local.tm_hour, (unsigned)local.tm_min,
 								   (unsigned)local.tm_sec, frame_in_second, nominal, flash};
