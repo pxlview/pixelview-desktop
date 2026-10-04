@@ -23,6 +23,13 @@ void PixelviewDefaultList(obs_data_t *data, obs_properties_t *props, const char 
 // BEGIN B-FRAME POLICY
 void PixelviewEnforceNoBFrames(const char *id, obs_data_t *data)
 {
+	// WebRTC viewers join mid-stream and the engine passes H.264/HEVC through,
+	// so every keyframe must carry its parameter sets. The WHIP service asks for
+	// this, but Pixelview skips service encoder settings (ApplyServiceSettings=false),
+	// so enforce it here. Without it NVENC sends SPS/PPS only with the first IDR
+	// and late browsers decode nothing; x264 repeats them by default and
+	// VideoToolbox ignores the key.
+	obs_data_set_bool(data, "repeat_headers", true);
 	// Native backends use either the bool bframes or integer bf setting.
 	// Set both explicitly: saved user values must not bypass the low-latency policy.
 	// QSV exposes an integer bframes count; VT exposes a boolean.

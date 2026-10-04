@@ -227,6 +227,14 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   The encoder logs its submit-to-packet latency (average and maximum) when it stops. x264 CBR with
   `zerolatency` likewise uses a one-frame VBV unless a custom buffer size is set (macOS included).
   VideoToolbox keeps its native defaults.
+- Keyframes always carry their parameter sets: the same load/save policy forces `repeat_headers` on.
+  The WHIP service requests it, but Pixelview does not apply service encoder settings
+  (`ApplyServiceSettings=false`), and NVENC otherwise sends SPS/PPS only with the first IDR, so
+  browsers that joined later (the engine passes H.264/HEVC through) decoded nothing. x264 repeats
+  them by default (it now also emits AUDs, as OBS's WHIP setup does); VideoToolbox ignores the key.
+  Measured on the T4 (25 fps, 2 s keyframes, 7 s): NVENC HEVC and H.264 carried SPS in 1 of 4
+  keyframes before and 4 of 4 after; x264 4 of 4 either way. Browser playback after the fix is not
+  yet verified.
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
