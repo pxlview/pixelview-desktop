@@ -42,6 +42,8 @@ bool obs_property_list_item_disabled(Property *, size_t) { return false; }
 const char *obs_property_list_item_name(Property *p, size_t i) { return p->entries[i].first.c_str(); }
 const char *obs_property_list_item_string(Property *p, size_t i) { return p->entries[i].second.c_str(); }
 const char *obs_data_get_string(const char *d, const char *) { return d; }
+std::vector<std::string> blocked;
+bool PixelviewProfileBlocked(const std::string &p) { for (const auto &b : blocked) if (b == p) return true; return false; }
 void refresh(Combo *pixelviewProfile, Property *props, const char *data, bool idle) {
 /* PRODUCTION_REFRESH */
 }
@@ -66,4 +68,11 @@ int main() {
  props.entries[1].first = "Updated name";
  refresh(&combo,&props,"main10",true);
  assert(combo.itemText(1) == "Updated name (recommended)" && combo.current == 1);
+ // Profiles blocked in the node's region are not offered.
+ blocked = {"main42210"};
+ refresh(&combo,&props,"main10",true);
+ assert(combo.count() == 2 && combo.findData("main42210") == -1 && combo.current == 1);
+ blocked.clear();
+ refresh(&combo,&props,"main10",true);
+ assert(combo.count() == 3);
 }
