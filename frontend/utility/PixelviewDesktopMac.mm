@@ -48,9 +48,10 @@
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didOpenWithProtocol:(NSString *)protocol {
  if(!owner) return; // A cancelled attempt must not arm a receive loop.
- __weak PVDesktopSocket *weakSelf=self;
+ // One weak variable per callback: ARC rejects reading the same one twice in a method.
+ __weak PVDesktopSocket *weakSelf=self, *weakReport=self;
  watchdog=pixelview::watchControlSocket(task,[weakSelf]{PVDesktopSocket *s=weakSelf;if(s) [s failed:0];},
-  [weakSelf](int ms){PVDesktopSocket *s=weakSelf;if(s && s->owner) s->owner->controlRttMs=ms;});
+  [weakReport](int ms){PVDesktopSocket *s=weakReport;if(s && s->owner) s->owner->controlRttMs=ms;});
  [self receive];
 }
 -(void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task didCloseWithCode:(NSURLSessionWebSocketCloseCode)code reason:(NSData *)reason { [self failed:code]; }
