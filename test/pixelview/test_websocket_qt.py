@@ -82,7 +82,7 @@ class Server:
                     elif path == '/badutf8': send(frame(1, b'\xff\xfe'))
                     elif path == '/close4000': send(frame(8, struct.pack('!H', 4000) + b'bye'))
                     elif path == '/drop': time.sleep(0.2); self.connection.shutdown(socket.SHUT_RDWR); return
-                    elif path in ('/desktop/ws', '/desktop/close4403'):
+                    elif path in ('/desktop/ws', '/desktop/close4403', '/desktop/pong2s'):
                         send(frame(1, json.dumps({'mutation': 'DESKTOP_READY', 'data': {}}).encode()))
                     elif path == '/wsocket': pass
                     while True:
@@ -91,7 +91,8 @@ class Server:
                         op, data = got
                         outer.events.append(('frame', path, op, data, time.monotonic()))
                         if op == 8: send(frame(8, data[:2])); break
-                        if op == 9 and path != '/keepalive': send(frame(10, data))
+                        if op == 9 and path == '/desktop/pong2s': time.sleep(2); send(frame(10, data))
+                        elif op == 9 and path != '/keepalive': send(frame(10, data))
                         if op == 1 and path == '/desktop/close4403': send(frame(8, struct.pack('!H', 4403)))
                         if op == 1 and path == '/wsocket': send(frame(1, b'{"mutation":"SOCKET_ADD_VIEWER_WEB"}'))
                 except (ConnectionResetError, BrokenPipeError, socket.timeout, OSError):
@@ -228,6 +229,16 @@ class PortableTransport(unittest.TestCase):
                 self.assertFalse(any(e[0] == 'post' for e in server.events), 'credentials crossed an untrusted TLS session')
             finally:
                 server.httpd.shutdown()
+
+    def test_desktop_control_round_trip(self):
+        # Same scenario as the macOS native test: the first keepalive ping
+        # (20 s after open) is answered 2 s late, and that is the round trip
+        # the connection report sends; closing the socket forgets it.
+        events = self.run_probe('desktop-rtt', self.url('/desktop/pong2s'), 'keepalive', timeout=40)
+        rtt = [e for e in events if e['event'] == 'rtt']
+        self.assertEqual(len(rtt), 1, events)
+        self.assertTrue(1950 <= rtt[0]['ms'] < 2600, rtt)
+        self.assertEqual([e['ms'] for e in events if e['event'] == 'reset'], [-1])
 
     @unittest.skipUnless(os.environ.get('PIXELVIEW_SLOW_TESTS') == '1', 'slow: set PIXELVIEW_SLOW_TESTS=1')
     def test_keepalive_pings_and_times_out(self):

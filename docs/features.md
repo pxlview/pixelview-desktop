@@ -185,8 +185,12 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   reports. With simulcast it covers the first video layer; Pixelview sends one.
 - Always, `control.rtt_ms` is the round trip of the control socket's own WebSocket ping (every
   20 s, so it is `null` for the first 20 s of a socket): NSURLSession's ping on macOS, the Qt
-  client's keepalive (`PixelviewWebSocket`) on Windows and Linux. The Qt path is compiled and
-  covered by source checks only; no Windows build was run with it. Not streaming, a report is sent only
+  client's keepalive (`PixelviewWebSocket`) on Windows and Linux. Both are held to one
+  scenario: a server that answers the first ping 2 s late reads as a ~2000 ms round trip,
+  unanswered pings time nothing, and closing the socket forgets it (`test_control_socket.py`
+  for macOS, `test_websocket_qt.py` for the Qt client, run on macOS). The media part and the
+  report are the same code on both platforms (same obs-deps, libdatachannel 0.24.2); the
+  `windows-build` CI job compiled this branch with MSVC, but the app was not run on Windows. Not streaming, a report is sent only
   when it differs from the last one, which is once per answered ping. A new socket gets one
   after `DESKTOP_READY`.
 - Once per minute of streaming a summary goes to the application log, and with it to the log

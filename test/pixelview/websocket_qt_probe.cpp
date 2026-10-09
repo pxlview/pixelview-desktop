@@ -2,6 +2,7 @@
 // Prints one JSON object per event; test_websocket_qt.py asserts on them.
 //   probe ws <url> [keepalive] [echo] [close-on-message] [send-big]
 //   probe desktop <url>
+//   probe desktop-rtt <url> keepalive   (reports the control round trip, then closes)
 //   probe receiver <login-url> <ws-url>
 #include "frontend/utility/PixelviewDesktopConnection.hpp"
 #include "frontend/utility/PixelviewReceiver.hpp"
@@ -58,6 +59,20 @@ int main(int argc, char **argv)
   };
   desktop.disconnected = [&](int code) { report({{"event", "disconnected"}, {"code", code}}); desktop.closeSocket(); quitSoon(); };
   desktop.openSocket(QUrl(args[2]), QStringLiteral("device-token"));
+ } else if (mode == "desktop-rtt") {
+  desktop.message = [](QByteArray) {};
+  desktop.disconnected = [&](int code) { report({{"event", "disconnected"}, {"code", code}}); quitSoon(); };
+  desktop.openSocket(QUrl(args[2]), QStringLiteral("device-token"));
+  auto *poll = new QTimer(&app);
+  QObject::connect(poll, &QTimer::timeout, &app, [&, poll] {
+   if (desktop.controlRttMs < 0) return;
+   poll->stop();
+   report({{"event", "rtt"}, {"ms", desktop.controlRttMs}});
+   desktop.closeSocket();
+   report({{"event", "reset"}, {"ms", desktop.controlRttMs}});
+   quitSoon();
+  });
+  poll->start(20);
  } else if (mode == "receiver" && args.size() >= 4) {
   receiver = pixelview::makeReceiverTransport();
   const QUrl ws(args[3]);

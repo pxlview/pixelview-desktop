@@ -3,6 +3,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QElapsedTimer>
 #import <Foundation/Foundation.h>
+#include <algorithm>
 #include <cassert>
 #include <iostream>
 int main(int argc,char **argv) {
@@ -11,7 +12,7 @@ int main(int argc,char **argv) {
  bool denied=QString::fromUtf8(argv[2]).endsWith("denied");
  bool delayed=QString::fromUtf8(argv[2]).endsWith("delay");
  pixelview::DesktopConnection desktop; pixelview::PixelviewReceiver receiver;
- int lost=0, endpoints=0, stopped=0;
+ int lost=0, endpoints=0, stopped=0, rtt=-1;
  desktop.message=[](QByteArray){};
  desktop.disconnected=[&](int code){assert(denied ? code==4403 : (code==0 || code==1006));++lost;desktop.closeSocket(false);};
  receiver.onEndpoint=[&](const QString &){++endpoints;}; receiver.onStopped=[&]{++stopped;};
@@ -23,10 +24,13 @@ int main(int argc,char **argv) {
   if(!sender && receiver.state()==pixelview::PixelviewReceiver::State::Reconnecting) {++lost;break;}
   if(denied && !sender && receiver.state()==pixelview::PixelviewReceiver::State::Error) {++lost;break;}
   if(sender && lost) break;
+  if(sender && desktop.socket) rtt=std::max(rtt,desktop.controlRttMs);
  }
  assert(lost==1);
  if(denied) {assert(endpoints==0);assert(sender || receiver.state()==pixelview::PixelviewReceiver::State::Error);std::cout<<"terminal upgrade rejection: PASS\n";return 0;}
  assert(clock.elapsed()>=(delayed ? 59900 : 39900) && clock.elapsed()<(delayed ? 64500 : 44500));
  if(!sender) {assert(endpoints==1 && stopped==0);receiver.stop();assert(stopped==1);}
+ // Connection report: the answered ping (2 s late) is the control round trip; unanswered ones time nothing.
+ if(sender) {assert(delayed ? (rtt>=1950 && rtt<2600) : rtt==-1);assert(desktop.controlRttMs==-1);}
  std::cout<<(sender ? "sender" : "receiver")<<" native unanswered RFC6455 ping detected without app heartbeat at 20s/20s: PASS\n";
 }
