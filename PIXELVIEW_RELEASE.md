@@ -23,6 +23,8 @@ for that existing tag.
 2. **Validate on both machines.** `release/pixelview-macos.sh
    --validate-config` on the Mac and `powershell -ExecutionPolicy Bypass -File
    release\pixelview-windows.ps1 --validate-config` on Windows.
+   If the release changes the Windows updater, the installer or WinSparkle,
+   run the local update test first (`docs/build-and-release.md` 6.3).
 3. **Create and push the tag**, once, from either machine:
    `git tag -a v<version> -m 'Pixelview Desktop <version>'` and
    `git push origin v<version>`. Never move or reuse a pushed tag; if a fix is

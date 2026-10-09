@@ -295,3 +295,19 @@ The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64
 5. Re-point `desktop/windows/latest/` (installer copy plus `latest.json`).
 
 Every public object is compared byte for byte after upload, and credentials reach `curl` only through stdin.
+
+### 6.3 Local update test
+
+Tests a real WinSparkle update on one Windows machine before a release is public; nothing touches R2, GitHub or the production feed. Run it whenever the updater, the installer or WinSparkle changes.
+
+```powershell
+az login
+powershell -ExecutionPolicy Bypass -File release\pixelview-windows.ps1 --staging-build 9001
+powershell -ExecutionPolicy Bypass -File release\pixelview-windows.ps1 --staging-build 9002
+python cmake\windows\pixelview-release.py --staging-serve        # 127.0.0.1:8731; Ctrl-C stops
+```
+
+- `--staging-build <n>` (n ≥ 1000) builds the checked-out source like `--prepare` (Release, every binary and the installer Authenticode-signed, installer EdDSA-signed with the production key, one 1Password prompt), but the updater reads only `http://127.0.0.1:<port>/appcast-x64.xml` (`--staging-port`, default 8731) and the build number is `<n>`. Output: `build_x64_staging_<n>` and `dist/windows-staging/releases/<n>/`. `feature-winsparkle.cmake` refuses a staging build with `PIXELVIEW_RELEASE_BUILD` or with any non-loopback feed. No clean tree or tag is required.
+- `--staging-serve` re-verifies each staged installer's EdDSA signature, writes `dist/windows-staging/appcast-x64.xml` (newest first; `--staging-up-to <n>` hides newer builds) and serves the folder on 127.0.0.1 only, logging each request.
+- Install the older build silently (`…-staging9001-x64-setup.exe /SILENT /SP- /NOCANCEL /NORESTART`), start the feed, launch the app: the startup check should open **Software Update** offering the newer build; **Install update** downloads, closes the app, installs silently and relaunches it. Check that the installed `Pixelview.exe` matches the newer build and that settings and the pairing remain.
+- A staging build never updates from production. Afterwards install a real release over it (same AppId) before using the machine normally.
