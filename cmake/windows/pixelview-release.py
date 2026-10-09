@@ -48,6 +48,8 @@ INSTALLER_ARGUMENTS = '/SILENT /SP- /NOCANCEL /NORESTART'
 MAX_FEED_ITEMS = 10
 NO_CACHE = 'no-cache, max-age=0, must-revalidate'
 IMMUTABLE = 'public,max-age=31536000,immutable'
+# downloads.pixelview.io (Cloudflare) answers Python's default urllib User-Agent with 403.
+USER_AGENT = 'Pixelview-Desktop-Release/1'
 OBS_UPDATE_MARKERS = (b'obsproject.com/update_studio', b'obsproject.com/osx_update')
 
 ET.register_namespace('sparkle', SPARKLE_NS)
@@ -324,7 +326,7 @@ class Release:
 
     def fetch_current_appcast(self):
         try:
-            with urllib.request.urlopen(urllib.request.Request(self.appcast_url, headers={'Cache-Control': 'no-cache'}), timeout=60) as response:
+            with urllib.request.urlopen(urllib.request.Request(self.appcast_url, headers={'Cache-Control': 'no-cache', 'User-Agent': USER_AGENT}), timeout=60) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
             if error.code == 404: return None
