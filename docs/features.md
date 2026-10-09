@@ -656,8 +656,9 @@ what that section lists, treat everything below as source-level work.
   and log categories as the Keychain. There are no prompts. Blobs are limited to 2,560 bytes, so an
   oversized receive password is not saved.
 - **Isolation.** The single-instance mutex is `PixelviewDesktopCore`, settings live under
-  `%APPDATA%\pixelview\obs-studio`, and third-party plugins are loaded only from that per-user
-  tree (never from `C:\ProgramData\obs-studio`). The app switches to its own `bin\64bit`
+  `%APPDATA%\pixelview\obs-studio`, and only the modules installed with the app
+  (`obs-plugins\64bit`) are loaded: no `OBS_PLUGINS_PATH`, per-user or `C:\ProgramData\obs-studio`
+  plugins. The app switches to its own `bin\64bit`
   directory at startup so link launches resolve data correctly.
 - **Updates.** The OBS Windows updater, What's New and their obsproject.com endpoints are not
   compiled (`OBS_WINDOWS_UPDATER` is never defined). Release builds use WinSparkle 0.9.4 with the
@@ -750,6 +751,11 @@ gate) fail in the current environment regardless of changes.
   `com.pixelview.desktop.device:http://localhost:8000`, control socket `DESKTOP_READY`; the backend
   registered the desktop for node 707880). Not run on Windows: the test suites, capture, streaming
   (no engine), Unpair, revocation, links, the installer and release.
+- Bundled modules only on Windows (2026-10-09, merged `master`, development build on the same
+  laptop): with a fake plugin in `OBS_PLUGINS_PATH` and one in `%APPDATA%\pixelview\obs-studio\plugins`,
+  the build loaded the same 21 modules as the 0.0.12 release run and never opened either fake; the
+  installed staging build 9002 (from before the change) logged "Skipping module ... not an OBS
+  plugin" for both.
 - Windows update from one signed build to the next (2026-10-09, `master` c7efdacd8, same laptop),
   through the local staging feed (`docs/build-and-release.md` 6.3): staging build 9001 was installed
   silently; on launch its automatic check fetched the 127.0.0.1 feed and opened Software Update
