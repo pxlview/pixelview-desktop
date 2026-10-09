@@ -1,0 +1,10 @@
+{
+  "name": "pixelview-desktop-release-e2e",
+  "private": true,
+  "description": "Node helpers for the release end-to-end gate (Namespace Devbox display, viewer check)",
+  "type": "module",
+  "dependencies": {
+    "@namespacelabs/sdk": "1.4.0",
+    "puppeteer-core": "23.11.1"
+  }
+}

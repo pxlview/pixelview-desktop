@@ -32,9 +32,11 @@ for that existing tag.
 4. **macOS** (on the Mac, from `git fetch --tags && git checkout v<version>`):
    `release/pixelview-macos.sh --prepare` builds, signs, notarizes, staples,
    Gatekeeper-assesses and stages the signed appcast under `dist/macos/`
-   without uploading; then `release/pixelview-macos.sh --publish` uploads the
-   immutable assets and, last, the appcast. Approve the 1Password prompt for
-   each phase.
+   without uploading; `release/pixelview-macos.sh --e2e` then installs, pairs,
+   streams and unpairs that DMG on fresh Namespace VMs (macOS 14, 15, 26 and
+   27), and every image must pass; then `release/pixelview-macos.sh --publish`
+   uploads the immutable assets and, last, the appcast, and refuses without
+   that passing report. Approve the 1Password prompt for each phase.
 5. **Windows** (on the Windows machine, from `git fetch --tags && git checkout
    v<version>`): `az login` as the Artifact Signing signer, then
    `powershell -ExecutionPolicy Bypass -File release\pixelview-windows.ps1 --prepare`

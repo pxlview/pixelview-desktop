@@ -23,6 +23,11 @@ the "Verification status" section says so explicitly.
 - Upstream docks, first-run wizard, onboarding, OBS auto-update and OBS telemetry are not exposed.
   Configuration lives under `~/Library/Application Support/pixelview/obs-studio/` (or a private root
   via `--app-config-dir`), so a stock OBS installation is never read or overwritten.
+- Only the modules inside the app bundle are loaded. Third-party OBS plugins are never searched for:
+  not `OBS_PLUGINS_PATH`, not the user plugin folder, and not the stock OBS system folder
+  `/Library/Application Support/obs-studio/plugins`, which upstream still read on Intel Macs.
+  Guarded by `test/pixelview/test_bundled_plugins_only.py`; a local arm64 launch with fake plugins
+  in `OBS_PLUGINS_PATH` and the user plugin folder loaded the same bundled modules and none of them.
 
 ### Pairing
 
