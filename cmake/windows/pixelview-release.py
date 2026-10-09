@@ -2,14 +2,17 @@
 """Pixelview Desktop Windows release (x64). Operator-run only, never a side effect.
 
   python cmake/windows/pixelview-release.py --validate-config
+  python cmake/windows/pixelview-release.py --fetch-sources    # fill the source cache from the inventory
   python cmake/windows/pixelview-release.py --prepare          # build, sign, package, appcast
   python cmake/windows/pixelview-release.py --publish          # R2 upload, appcast last, latest/
   python cmake/windows/pixelview-release.py --publish-latest   # re-point latest/ only
 
 Run through release/pixelview-windows.ps1, which injects credentials with
 `op run` only for the phase that needs them:
-  --prepare: PIXELVIEW_WINSPARKLE_PRIVATE_KEY (EdDSA private key, PEM text) and,
-             for trusted-signing, the Azure identity variables in the metadata.
+  --prepare: PIXELVIEW_WINSPARKLE_PRIVATE_KEY (EdDSA private key, the one-line
+             base64 text `winsparkle-tool generate-key` writes). Artifact Signing
+             authenticates as the operator's `az login` session; no Azure secret
+             is stored or injected.
   --publish: PIXELVIEW_R2_ENDPOINT, PIXELVIEW_R2_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
 Secret values are never printed or passed on a command line. The EdDSA key
 exists on disk only inside a private temporary directory for the duration of
@@ -140,8 +143,31 @@ class Release:
         return self.tool('signtool.exe', [kits / f'10.0.26100.0/x64', kits])
 
     def iscc(self):
-        programs = [pathlib.Path(os.environ.get(v, '')) / 'Inno Setup 6' for v in ('ProgramFiles(x86)', 'ProgramFiles', 'LOCALAPPDATA')]
-        return self.tool('ISCC.exe', [p for p in programs if p.parts])
+        # winget installs Inno Setup per user under %LOCALAPPDATA%\Programs.
+        bases = [pathlib.Path(os.environ[v]) for v in ('ProgramFiles(x86)', 'ProgramFiles', 'LOCALAPPDATA') if os.environ.get(v)]
+        if os.environ.get('LOCALAPPDATA'): bases.append(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Programs')
+        return self.tool('ISCC.exe', [base / 'Inno Setup 6' for base in bases])
+
+    @staticmethod
+    def signing_dlib():
+        # Microsoft.Azure.ArtifactSigningClientTools (winget) installs the dlib per user.
+        default = pathlib.Path(os.environ.get('LOCALAPPDATA', '')) / 'Microsoft/MicrosoftArtifactSigningClientTools/Azure.CodeSigning.Dlib.dll'
+        dlib = pathlib.Path(os.environ.get('PIXELVIEW_TRUSTED_SIGNING_DLIB') or default)
+        if not dlib.is_file():
+            die('Azure.CodeSigning.Dlib.dll was not found (winget install Microsoft.Azure.ArtifactSigningClientTools, '
+                'or set PIXELVIEW_TRUSTED_SIGNING_DLIB)')
+        return dlib
+
+    def check_azure_login(self):
+        """Artifact Signing uses the operator's Azure CLI session; refuse to start a build without one."""
+        az = shutil.which('az') or shutil.which('az.cmd')
+        if not az:
+            candidate = pathlib.Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Microsoft SDKs/Azure/CLI2/wbin/az.cmd'
+            az = str(candidate) if candidate.is_file() else None
+        if not az: die('Azure CLI (az) is required for Artifact Signing; run `az login` first')
+        result = run(az, 'account', 'get-access-token', '--resource', 'https://codesigning.azure.net',
+                     '--query', 'expiresOn', '-o', 'tsv', check=False, capture_output=True, text=True)
+        if result.returncode != 0: die('no Azure CLI session for Artifact Signing; run `az login` first')
 
     def sign_command(self, path_placeholder):
         signing = self.config['signing']
@@ -149,10 +175,7 @@ class Release:
         if signing['method'] == 'certificate':
             command += ['/sha1', signing['certificate_sha1']]
         else:
-            dlib = os.environ.get('PIXELVIEW_TRUSTED_SIGNING_DLIB')
-            if not dlib or not pathlib.Path(dlib).is_file():
-                die('PIXELVIEW_TRUSTED_SIGNING_DLIB must point at Azure.CodeSigning.Dlib.dll')
-            command += ['/dlib', dlib, '/dmdf', str(ROOT / signing['trusted_signing_metadata'])]
+            command += ['/dlib', str(self.signing_dlib()), '/dmdf', str(ROOT / signing['trusted_signing_metadata'])]
         return command + [path_placeholder]
 
     def authenticode_valid(self, path):
@@ -172,6 +195,8 @@ class Release:
         for tool in ('openssl', 'curl'):
             if not shutil.which(tool): die(f'{tool} is required')
         self.signtool(); self.iscc()
+        if self.config['signing']['method'] == 'trusted-signing':
+            self.signing_dlib(); self.check_azure_login()
         self.source_commit = head
 
     def compliance(self, stage):
@@ -244,10 +269,10 @@ class Release:
                 output = run(tool, 'sign', '--private-key-file', key, path, capture_output=True, text=True).stdout
             finally:
                 key.unlink(missing_ok=True)
-        match = re.search(r'sparkle:edSignature="([A-Za-z0-9+/=]+)"\s+length="(\d+)"', output)
-        if not match: die('winsparkle-tool did not return an EdDSA signature')
-        signature, length = match.group(1), int(match.group(2))
-        if length != path.stat().st_size: die('EdDSA signature length does not match the installer')
+        # winsparkle-tool 0.9.4 prints only the base64 signature (64 bytes).
+        signature = output.strip()
+        if not re.fullmatch(r'[A-Za-z0-9+/]{86}==', signature): die('winsparkle-tool did not return an EdDSA signature')
+        length = path.stat().st_size
         self.verify_eddsa(path, signature)
         return signature, length
 
@@ -264,6 +289,27 @@ class Release:
                          check=False, capture_output=True, text=True)
         if result.returncode != 0 or 'Verified Successfully' not in result.stdout:
             die('installer EdDSA signature does not verify against winsparkle_public_key')
+
+    def fetch_sources(self):
+        """Download each inventoried source archive once into the hash-addressed cache, verified."""
+        inventory = json.loads((ROOT / self.config['source_inventory']).read_text(encoding='utf-8'))
+        self.source_cache.mkdir(parents=True, exist_ok=True)
+        for component in inventory['components']:
+            for record in component['sources']:
+                target = self.source_cache / record['sha256']
+                if target.is_file() and sha256(target) == record['sha256']:
+                    continue
+                with tempfile.NamedTemporaryFile(dir=self.source_cache, delete=False) as handle:
+                    partial = pathlib.Path(handle.name)
+                try:
+                    run('curl', '-fsSL', '--retry', '3', '-o', partial, record['url'])
+                    if partial.stat().st_size != record['size'] or sha256(partial) != record['sha256']:
+                        die(f"{record['name']} does not match its inventory pin")
+                    os.replace(partial, target)
+                finally:
+                    partial.unlink(missing_ok=True)
+                print(f"Cached {component['id']}: {record['name']}")
+        print(f'Source cache ready: {self.source_cache}')
 
     # ------------------------------------------------------------------ appcast
     @staticmethod
@@ -524,13 +570,15 @@ def release_lock(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = parser.add_mutually_exclusive_group(required=True)
-    for flag in ('--validate-config', '--prepare', '--publish', '--publish-latest'):
+    for flag in ('--validate-config', '--fetch-sources', '--prepare', '--publish', '--publish-latest'):
         mode.add_argument(flag, action='store_true')
     args = parser.parse_args()
     try:
         release = Release()
         if args.validate_config:
             release.validate_config(); return 0
+        if args.fetch_sources:
+            release.fetch_sources(); return 0
         with release_lock(release.root):
             if args.prepare: release.prepare()
             elif args.publish: release.publish()

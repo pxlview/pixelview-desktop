@@ -1,0 +1,146 @@
+{
+ "schema_version": 1,
+ "review": {
+  "status": "informational",
+  "source_repository": "https://github.com/pxlview/pixelview-desktop",
+  "note": "Windows x64 counterpart of release/source-inventory.json. The complete project source is public at the repository above and every release is tagged v<version>; the release packager also ships a sources tarball, NOTICES and this resolved inventory next to each installer. This block does not gate a release. The items below are open review points about third-party component materials, kept for follow-up.",
+  "open_items": [
+   "No whole-app binary/static dependency closure review or responsible release approval exists for the Windows installer.",
+   "The windows-x64 obs-deps 2026-08-26 bundle (FFmpeg with GPL components, x264, librist, srt, mbedTLS, etc.) and its exact sources/build configuration are not archived here; FFmpeg GPLv3 whole-combination terms are open as on macOS.",
+   "Qt 6 (obs-deps-qt6 2026-08-26 x64) exact module sources, notices and relinking materials are incomplete.",
+   "WinSparkle 0.9.4 is shipped as the upstream prebuilt DLL; its tag archive excludes the bundled third-party submodules (expat and others), whose notices are carried by COPYING.expat only.",
+   "Vendor-signed redistributables in the program tree (MSVC runtime, NVIDIA/AMD/Intel encoder interfaces, Blackmagic DeckLink API) need redistribution review.",
+   "Review modification notices/dates, build/install instructions and codec/patent obligations for the Windows payload."
+  ]
+ },
+ "runtime_bindings": [
+  {
+   "path": "CMakePresets.json",
+   "sha256": "9e9bd35142b9959336c0049bbe79c8be65c789cd1b064d5d65acff8d47f3acdc",
+   "size": 9386
+  },
+  {
+   "path": "release/windows.json",
+   "sha256": "d64e6712e43b7ed7be2f97f2dc463e3ec97f1191174abdac309578221cc279a8",
+   "size": 934
+  }
+ ],
+ "components": [
+  {
+   "id": "libdshowcapture",
+   "version": "887863832439",
+   "license": "LGPL-2.1-or-later",
+   "sources": [
+    {
+     "name": "libdshowcapture-8878638324393815512f802640b0d5ce940161f1.tar.gz",
+     "url": "https://github.com/obsproject/libdshowcapture/archive/8878638324393815512f802640b0d5ce940161f1.tar.gz",
+     "sha256": "f473bd8040fd772bb590ad03952031a056dbaab9d9310b10d9ebd8bee3da2407",
+     "size": 56702
+    }
+   ],
+   "notices": [
+    {
+     "path": "release/licenses/windows/libdshowcapture/COPYING",
+     "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+     "size": 26530
+    }
+   ],
+   "patches": [],
+   "recipes": [
+    {
+     "path": "deps/libdshowcapture/CMakeLists.txt",
+     "sha256": "c1b9d906e184f07243b6b9d720a69b0f2a8a59f44df1d4c25fee2ce870dc7ef7",
+     "size": 1838
+    },
+    {
+     "path": "plugins/win-dshow/CMakeLists.txt",
+     "sha256": "f06ef84c4f79d2c124467fef3998fcf3a2a1797611f1dc244c9d18722f0c8f4b",
+     "size": 1602
+    }
+   ]
+  },
+  {
+   "id": "capture-device-support",
+   "version": "fe9630974d47",
+   "license": "MIT",
+   "sources": [
+    {
+     "name": "capture-device-support-fe9630974d47f51bf54826e72fb8b654e620aa93.tar.gz",
+     "url": "https://github.com/elgatosf/capture-device-support/archive/fe9630974d47f51bf54826e72fb8b654e620aa93.tar.gz",
+     "sha256": "bdf253133a61fdf2498628c5a8ec2a52a17e63b0d36abb546009eeaef80bfeb7",
+     "size": 20814
+    }
+   ],
+   "notices": [
+    {
+     "path": "release/licenses/windows/capture-device-support/LICENSE",
+     "sha256": "1064a80d76685b713c8fdc231d102f1213403cefc608dc13cfc0f84998d7e1ce",
+     "size": 1077
+    }
+   ],
+   "patches": [],
+   "recipes": [
+    {
+     "path": "deps/libdshowcapture/CMakeLists.txt",
+     "sha256": "c1b9d906e184f07243b6b9d720a69b0f2a8a59f44df1d4c25fee2ce870dc7ef7",
+     "size": 1838
+    }
+   ]
+  },
+  {
+   "id": "winsparkle",
+   "version": "0.9.4",
+   "license": "MIT",
+   "sources": [
+    {
+     "name": "winsparkle-0.9.4.tar.gz",
+     "url": "https://github.com/vslavik/winsparkle/archive/refs/tags/v0.9.4.tar.gz",
+     "sha256": "badb4ce89359a15429205174189077a7fdef271cb552aaad681725ccf052ae5d",
+     "size": 781669
+    }
+   ],
+   "notices": [
+    {
+     "path": "release/licenses/windows/winsparkle/COPYING",
+     "sha256": "db64f4842babd9a8f0a549f99e4afa32ce5d9cbe0464d0afc5bebb1d67564ee8",
+     "size": 1188
+    },
+    {
+     "path": "release/licenses/windows/winsparkle/COPYING.expat",
+     "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+     "size": 1144
+    }
+   ],
+   "patches": [],
+   "recipes": [
+    {
+     "path": "frontend/cmake/feature-winsparkle.cmake",
+     "sha256": "4687d419b9bcf7f35653f4b853be56613729fc0fe5e271504eadea1c872ba2be",
+     "size": 2300
+    },
+    {
+     "path": "cmake/windows/pixelview-build.py",
+     "sha256": "aaf9105fc6aea7184ac07a045f9dfd82e3f6fd0a4da6774782b7914d155e2e71",
+     "size": 7114
+    }
+   ]
+  }
+ ],
+ "excluded_submodules": [
+  {
+   "path": "deps/libdshowcapture/src",
+   "commit": "8878638324393815512f802640b0d5ce940161f1",
+   "reason": "Built into win-dshow; its source and the nested capture-device-support source ship as the libdshowcapture and capture-device-support component archives rather than as a checkout"
+  },
+  {
+   "path": "plugins/obs-browser",
+   "commit": "3f0a2cdf378939ebe3c6f9ab36d4ea100c25aac2",
+   "reason": "Browser source is disabled in the Pixelview Windows build (ENABLE_BROWSER=OFF); submodule not built"
+  },
+  {
+   "path": "plugins/obs-websocket",
+   "commit": "1ef34bf48110c2a18184e50e41cd0b1a855e2147",
+   "reason": "obs-websocket is disabled in the Pixelview Windows build (ENABLE_WEBSOCKET=OFF); submodule not built"
+  }
+ ]
+}

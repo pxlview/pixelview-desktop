@@ -1,0 +1,16 @@
+{
+  "Endpoint": "https://neu.codesigning.azure.net",
+  "CodeSigningAccountName": "Pixelview-Desktop",
+  "CertificateProfileName": "pixelview-desktop",
+  "ExcludeCredentials": [
+    "EnvironmentCredential",
+    "WorkloadIdentityCredential",
+    "ManagedIdentityCredential",
+    "SharedTokenCacheCredential",
+    "VisualStudioCredential",
+    "VisualStudioCodeCredential",
+    "AzurePowerShellCredential",
+    "AzureDeveloperCliCredential",
+    "InteractiveBrowserCredential"
+  ]
+}

@@ -48,11 +48,40 @@ class Config(unittest.TestCase):
         self.assertIn('-DPIXELVIEW_RELEASE_BUILD=OFF', out)
         self.assertIn('-DSPARKLE_APPCAST_URL= ', out)  # Development builds never update.
 
-    def test_validate_config_fails_closed_without_keys(self):
+    def test_validate_config(self):
         result = subprocess.run([sys.executable, ROOT / 'cmake/windows/pixelview-release.py', '--validate-config'],
                                 capture_output=True, text=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('error:', result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        release = release_module.Release()
+        for broken in ({'winsparkle_public_key': ''}, {'signing': dict(release.config['signing'], method='')},
+                       {'appcast_url': 'https://obsproject.com/update_studio/appcast.xml'}):
+            release.config = dict(json.loads((ROOT / 'release/windows.json').read_text()), **broken)
+            release.appcast_url = release.config['appcast_url']
+            with self.assertRaises(release_module.ReleaseError):
+                release.validate_config()
+
+    def test_artifact_signing_metadata(self):
+        config = json.loads((ROOT / 'release/windows.json').read_text())
+        self.assertEqual(config['signing']['method'], 'trusted-signing')
+        metadata = json.loads((ROOT / config['signing']['trusted_signing_metadata']).read_text())
+        self.assertRegex(metadata['Endpoint'], r'^https://[a-z]+\.codesigning\.azure\.net/?$')
+        self.assertTrue(metadata['CodeSigningAccountName'] and metadata['CertificateProfileName'])
+        # Signing authenticates only through the operator's `az login` session.
+        self.assertNotIn('AzureCliCredential', metadata['ExcludeCredentials'])
+        self.assertIn('EnvironmentCredential', metadata['ExcludeCredentials'])
+
+    def test_source_inventory_covers_every_submodule(self):
+        sources = load('pixelview_sources', 'cmake/macos/pixelview_sources.py')
+        config = json.loads((ROOT / 'release/windows.json').read_text())
+        inventory = json.loads((ROOT / config['source_inventory']).read_text())
+        sources.validate_inventory(inventory)
+        gitlinks = {line.split('\t')[1]: line.split()[2] for line in subprocess.run(
+            ['git', 'ls-tree', '-r', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()
+            if line.split()[1] == 'commit'}
+        excluded = {entry['path']: entry['commit'] for entry in inventory['excluded_submodules']}
+        self.assertEqual(excluded, gitlinks)
+        ids = {component['id'] for component in inventory['components']}
+        self.assertTrue({'libdshowcapture', 'capture-device-support', 'winsparkle'} <= ids)
 
 
 @unittest.skipUnless(shutil.which('openssl'), 'openssl is required')

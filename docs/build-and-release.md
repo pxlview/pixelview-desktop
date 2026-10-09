@@ -261,19 +261,18 @@ Only the development build (6.1) has been run on Windows (2026-10-03, Windows Se
 
 ### 6.2 Release
 
-`powershell -File release\pixelview-windows.ps1 --validate-config|--prepare|--publish|--publish-latest` wraps `cmake/windows/pixelview-release.py` with `op run`:
+`powershell -File release\pixelview-windows.ps1 --validate-config|--fetch-sources|--prepare|--publish|--publish-latest` wraps `cmake/windows/pixelview-release.py` with `op run`:
 
 - `--prepare` resolves only the WinSparkle EdDSA private key (`release/windows-update-key.1password.env`).
 - `--publish` resolves only the R2 credentials (`release/windows-r2.1password.env`, the same bucket as macOS under the `desktop/windows` prefix).
 
-**One-time operator setup** (`--validate-config` refuses to run until it is done):
+**Signing and keys (set up 2026-10-09):**
 
-1. Generate the update key with `.deps\winsparkle-0.9.4\bin\winsparkle-tool.exe generate-key`. Store the private key PEM in 1Password as `pixelview-desktop-winsparkle/private_key`, and put the public key in `release/windows.json` (`winsparkle_public_key`).
-2. Choose Authenticode signing in `release/windows.json` `signing`:
-   - `certificate`: a SHA-1 thumbprint of a certificate in the Windows store, e.g. on a hardware token.
-   - `trusted-signing`: Azure Trusted Signing metadata JSON, with `PIXELVIEW_TRUSTED_SIGNING_DLIB` pointing at `Azure.CodeSigning.Dlib.dll`.
-3. Install Inno Setup 6, and make sure `openssl` and `curl` are on `PATH`.
-4. Review and commit `release/source-inventory-windows.json`, the Windows corresponding-source inventory (see 4.7). It does not exist yet, so `--prepare` stops at the compliance step.
+- **Authenticode: Azure Artifact Signing** (formerly Trusted Signing). Account `Pixelview-Desktop` (resource group `Pixelview-desktop`, North Europe, `https://neu.codesigning.azure.net`), Public Trust certificate profile `pixelview-desktop`, subject `CN=Cinecode OÜ, O=Cinecode OÜ, L=Tallinn, S=Harjumaa, C=EE`. `release/windows.json` selects `trusted-signing` with `release/windows-artifact-signing.json` (endpoint, account, profile; every credential type except the Azure CLI is excluded). The certificates are short-lived and rotate every few days; the RFC 3161 timestamp (`http://timestamp.acs.microsoft.com`) keeps signatures valid after expiry.
+- **Azure sign-in.** No Azure secret is stored or injected. Before `--prepare`, run `az login` as a user with the **Artifact Signing Certificate Profile Signer** role on the account (`cinecode@pixelview.io` has it). `--prepare` refuses to start without an Azure CLI token for `https://codesigning.azure.net`.
+- **Update key.** WinSparkle EdDSA key in 1Password item `pixelview-desktop/pixelview-desktop-winsparkle` (`private_key` concealed, `public_key`); the public key `KDfTBZ3u4AQ+s/NQw+ygj5JT/TOSSrKh7AobXy7sLuM=` is in `release/windows.json` and compiled into release builds. The private key is the one-line base64 text `winsparkle-tool generate-key` writes. Losing it orphans every installed copy; leaking it lets anyone sign updates.
+- **Tools** (all via winget): Azure CLI (`Microsoft.AzureCLI`), Inno Setup 6 (`JRSoftware.InnoSetup`, per user under `%LOCALAPPDATA%\Programs\Inno Setup 6`), the Artifact Signing client (`Microsoft.Azure.ArtifactSigningClientTools`, which installs `Azure.CodeSigning.Dlib.dll` under `%LOCALAPPDATA%\Microsoft\MicrosoftArtifactSigningClientTools`; `PIXELVIEW_TRUSTED_SIGNING_DLIB` overrides the path), the x64 `signtool.exe` from Windows SDK 10.0.26100, and `openssl` and `curl` (Git for Windows provides OpenSSL).
+- **Corresponding source.** `release/source-inventory-windows.json` lists libdshowcapture and its nested capture-device-support (both built into `win-dshow`) and WinSparkle 0.9.4, with tracked notice copies under `release/licenses/windows/`. `python cmake/windows/pixelview-release.py --fetch-sources` downloads the pinned archives once into the hash-addressed cache (`%USERPROFILE%\.cache\pixelview-sources`, or `PIXELVIEW_SOURCE_CACHE`), verified by size and SHA-256.
 
 **`--prepare`, in order:**
 
@@ -283,7 +282,7 @@ Only the development build (6.1) has been run on Windows (2026-10-03, Windows Se
 4. Build Release into `build_x64_release_<version>_<build>`.
 5. Authenticode-sign every `.exe`/`.dll` that is not already validly signed, then verify all of them and refuse any that embeds `obsproject.com/update_studio`.
 6. Build the per-user Inno Setup installer `Pixelview-Desktop-<version>-build<n>-x64-setup.exe` (`cmake/windows/pixelview-installer.iss`, which signs itself and its uninstaller). It registers `pixelview://` for the user and relaunches the app after silent updates.
-7. EdDSA-sign the installer with `winsparkle-tool`. The key exists only in a private temporary directory for that call. Verify the signature independently with OpenSSL against the public key.
+7. EdDSA-sign the installer with `winsparkle-tool` (0.9.4 prints only the base64 signature; the length is the file size). The key exists only in a private temporary directory for that call. Verify the signature independently with OpenSSL against the public key.
 8. Fetch the published appcast and refuse a build number that does not advance it. Then write `dist/windows/appcast-x64.xml` with the new item first (`sparkle:version` = build number, `sparkle:os="windows-x64"`, `sparkle:installerArguments="/SILENT /SP- /NOCANCEL /NORESTART"`), keeping up to 10 items.
 9. Write the `.sha256`, notes, compliance artifacts and `release-manifest.json`, then re-verify.
 
