@@ -634,7 +634,7 @@ configuration.
 - Qt is pinned to the OBS 6.10.3 package on macOS because 6.11.1 crashes in `QImage::toCGImage`
   during scene activation.
 
-## Windows port (in progress, development build only)
+## Windows port (in progress; release 0.0.12 prepared, not yet published)
 
 The Windows x64 development build compiles and runs (2026-10-03, see "Verified live"). Apart from
 what that section lists, treat everything below as source-level work.
@@ -745,6 +745,18 @@ gate) fail in the current environment regardless of changes.
   `com.pixelview.desktop.device:http://localhost:8000`, control socket `DESKTOP_READY`; the backend
   registered the desktop for node 707880). Not run on Windows: the test suites, capture, streaming
   (no engine), Unpair, revocation, links, the installer and release.
+- Windows release 0.0.12 build 12 prepared (2026-10-09, `master` 9f14b3100, Windows 11 26H2 laptop,
+  AMD Radeon integrated GPU, DeckLink driver 16.4 without a card): `release/pixelview-windows.ps1 --prepare`
+  built Release, Artifact Signing signed all 75 program binaries, the uninstaller and the installer
+  (`CN=Cinecode OÜ`, timestamped; `Get-AuthenticodeSignature` reports all valid), the installer's EdDSA
+  signature verified with OpenSSL against the committed public key, and the staged appcast initializes
+  the Windows feed. `Pixelview.exe` embeds the Pixelview appcast and key and no OBS update URL. The
+  installer ran silently with the update arguments, installed per user under
+  `%LOCALAPPDATA%\Programs\Pixelview Desktop`, registered `pixelview://` and relaunched the app; it started
+  on D3D11 with AMF H.264/HEVC, WinSparkle initialized and checked the (not yet published, 404) feed,
+  and a normal close ended with 0 memory leaks. Not run: publication to R2, an update from an older
+  build to a newer one (needs a second published build or a staging feed), pairing, streaming or
+  capture with the release build, NVENC/QSV with it, and a macOS build of this commit.
 - NVENC latency on Windows (2026-10-04, `windows-port`, EC2 g4dn Tesla T4, driver 616.92): a libobs
   probe fed the 1080p30 test pattern into `obs_nvenc_hevc_tex` and OBS's null output for 15 s per
   setting, with no skipped frames. Submit-to-packet: upstream defaults (P5, high quality, three-frame
