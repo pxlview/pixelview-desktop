@@ -1000,12 +1000,21 @@ gate) fail in the current environment regardless of changes.
 
 ### Not verified
 
-- The connection report in the built app (2026-10-02: written against a tree another build was
-  using, so the app was not compiled; `whip-output.cpp`, `OBSBasic.cpp` and the two socket files
-  passed a syntax-only compile with the app target's flags). Not run: a real stream to an engine
-  (that the engine's receiver reports arrive and give a plausible round trip, loss and jitter
-  over a real network), `DESKTOP_STATS` against a backend, the bars in the admin, and the log
-  summary reaching Loki.
+- The connection report from the app itself: the built app (2026-10-09, signed development build
+  of this branch) was not paired against a backend, because pairing needs the Pair dialog, so the
+  app's own `DESKTOP_STATS` push, its timer and the per-minute log line were not observed live.
+  What was run end to end locally the same day, against the pentest backend with this branch's
+  relay, the existing local engine, a local Loki and Grafana, and the admin branch:
+  a test WHIP publisher built from the same `LinkProbe`/`LinkStats` and the WHIP track chain
+  (packetizer, probe around the sender-report handler, NACK responder, the app's pacing) got a
+  real grant through `DESKTOP_START` and published H.264 + Opus to the engine. The engine's
+  receiver reports arrived and gave a round trip (12-40 ms on this Mac when calm), loss, jitter
+  and NACK counts; the cumulative loss matched the engine's own
+  `pv_engine_ingest_rtp_packets_lost_total` (about 10,500 vs 10,297). The publisher's numbers,
+  sent as `DESKTOP_STATS` on a real device-token control socket, reached the admin (bars and
+  drawer text, live), were stored in Loki and drew in the dashboard panels. On this Mac the path
+  went over the Tailscale interface and the engine itself lost up to 89 % of video packets in
+  some intervals, with and without pacing; that is the local network path, not the probe.
 - The receive canvas following the DeckLink output mode's frame rate, and the on-screen Start
   failure warning, on real DeckLink hardware (offline harness and compile only).
 - Physical SDI picture inspection of the receiver's DeckLink output (cadence, colour, long-run A/V
