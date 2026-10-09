@@ -1,5 +1,5 @@
 """Offline checks of the Windows build/release tooling (no Windows, network or credentials)."""
-import base64, importlib.util, json, pathlib, re, shutil, subprocess, sys, tempfile, unittest
+import base64, hashlib, importlib.util, json, pathlib, re, shutil, subprocess, sys, tempfile, unittest
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -80,6 +80,12 @@ class Config(unittest.TestCase):
             if line.split()[1] == 'commit'}
         excluded = {entry['path']: entry['commit'] for entry in inventory['excluded_submodules']}
         self.assertEqual(excluded, gitlinks)
+        # Every pinned repository file must match its committed blob, or --prepare stops at compliance.
+        records = inventory['runtime_bindings'] + [record for component in inventory['components']
+                                                   for key in ('notices', 'recipes', 'patches') for record in component[key]]
+        for record in records:
+            blob = subprocess.run(['git', 'show', f"HEAD:{record['path']}"], cwd=ROOT, capture_output=True, check=True).stdout
+            self.assertEqual((hashlib.sha256(blob).hexdigest(), len(blob)), (record['sha256'], record['size']), record['path'])
         ids = {component['id'] for component in inventory['components']}
         self.assertTrue({'libdshowcapture', 'capture-device-support', 'winsparkle'} <= ids)
 

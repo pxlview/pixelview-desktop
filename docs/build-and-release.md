@@ -261,7 +261,7 @@ Only the development build (6.1) has been run on Windows (2026-10-03, Windows Se
 
 ### 6.2 Release
 
-`powershell -File release\pixelview-windows.ps1 --validate-config|--fetch-sources|--prepare|--publish|--publish-latest` wraps `cmake/windows/pixelview-release.py` with `op run`:
+`powershell -ExecutionPolicy Bypass -File release\pixelview-windows.ps1 --validate-config|--fetch-sources|--prepare|--publish|--publish-latest` wraps `cmake/windows/pixelview-release.py` with `op run`:
 
 - `--prepare` resolves only the WinSparkle EdDSA private key (`release/windows-update-key.1password.env`).
 - `--publish` resolves only the R2 credentials (`release/windows-r2.1password.env`, the same bucket as macOS under the `desktop/windows` prefix).
