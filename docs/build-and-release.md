@@ -247,7 +247,7 @@ Only the development build (6.1) has been run on Windows (2026-10-03, Windows Se
   - Windows 10 22H2 or 11, x64 or ARM64; ARM64 hosts cross-compile x64, e.g. Windows 11 in Parallels.
   - Visual Studio 2026 with the C++ desktop workload and Windows SDK 10.0.26100 (the preset's `Visual Studio 18 2026` generator).
   - CMake 4.2 or newer (the first release with the `Visual Studio 18 2026` generator), Git and Python 3.12 or newer. Visual Studio Build Tools 2026 is enough; the full IDE is not needed.
-  - At least 30 GiB of free disk.
+  - At least 15 GiB of free disk (a complete RelWithDebInfo tree in `build_x64` and `build_x86` is about 1.8 GiB; `.deps` about 1.7 GiB).
 - **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule and its nested `capture-device-support` submodule, which the helper initializes recursively. On x64 the configure also generates a Win32 child build in `build_x86` (32-bit capture helpers); it receives the same `OBS_VERSION_OVERRIDE`.
 - **Development build:** `python cmake/windows/pixelview-build.py` (or `--print` to see the configure command, `--check-only` for preflight).
   - Mirrors the macOS feature flags: no browser, What's New, obs-websocket, scripting, virtual camera, AJA, VST or VLC; DeckLink and WebRTC on.

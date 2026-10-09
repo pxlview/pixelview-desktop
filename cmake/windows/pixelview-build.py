@@ -137,8 +137,8 @@ def main():
         if not shutil.which(tool):
             die(f'{tool} is not on PATH')
     free = shutil.disk_usage(ROOT).free
-    if free < 30 * 1024**3:
-        die(f'at least 30 GiB of free disk is required ({free // 1024**3} GiB free)')
+    if free < 15 * 1024**3:
+        die(f'at least 15 GiB of free disk is required ({free // 1024**3} GiB free)')
     if args.check_only:
         print('Preflight OK')
         return 0
