@@ -1,6 +1,6 @@
-# Pixelview Desktop: build, test and release runbook (macOS, Apple Silicon)
+# Pixelview Desktop: build, test and release runbook (macOS Apple Silicon and Windows x64)
 
-This runbook covers the toolchain, the canonical local Developer ID build and launch, the test suites, the local-only signed/notarized release pipeline with Sparkle updates and Cloudflare R2 publication, and the GPL distribution obligations that gate any public release. The inherited OBS Studio `README.rst`, `CONTRIBUTING.md` and `CODESTYLE.md` stay unchanged for upstream attribution and rebasing (the release contract test pins the `README.rst` hash).
+This runbook covers the toolchain, the canonical local Developer ID build and launch, the test suites, the local-only signed/notarized release pipeline with Sparkle updates and Cloudflare R2 publication, and the GPL distribution obligations that gate any public release. Sections 1–5 are macOS; section 6 is Windows. Every release ships on both platforms from one version, one tag and one set of notes, each publishing to its own feed; the operator order is `PIXELVIEW_RELEASE.md`. The inherited OBS Studio `README.rst`, `CONTRIBUTING.md` and `CODESTYLE.md` stay unchanged for upstream attribution and rebasing (the release contract test pins the `README.rst` hash).
 
 ## 1. Toolchain and dependencies
 
@@ -206,7 +206,7 @@ desktop/macos/
 2. `release/pixelview-macos.sh --prepare`; approve the 1Password prompt. `--prepare` itself checks Gatekeeper, notarization and stapling.
 3. `release/pixelview-macos.sh --publish`; approve the 1Password prompt. A transport failure is safe to rerun: byte-identical uploaded objects are accepted.
 4. Update cycle: publish an older internal build and a higher-build replacement on a temporary staging feed (not a permanent beta channel); verify **Help → Check for Updates…** downloads, replaces, relaunches and preserves configuration and Keychain state.
-5. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub, then create the GitHub release (`gh release create v<version> --notes-file docs/releases/<version>.md`); the website download button can point permanently at `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg` (updated by publish, after the appcast; `--publish-latest` re-points it for a prepared release that is already public), and `latest/latest.json` gives the version, checksum and immutable URL for display.
+5. Confirm the appcast and DMG expose no secret and the manifest commit/tag matches GitHub. Once Windows (6.2) is published too, create the one GitHub release for the tag (`gh release create v<version> --notes-file docs/releases/<version>.md`); the website download button can point permanently at `https://downloads.pixelview.io/desktop/macos/latest/Pixelview-Desktop-arm64.dmg` (updated by publish, after the appcast; `--publish-latest` re-points it for a prepared release that is already public), and `latest/latest.json` gives the version, checksum and immutable URL for display.
 
 The repository cannot create the R2 bucket/domain/token, the App Store Connect API key or the GitHub tag/release; those are operator steps.
 
@@ -237,9 +237,9 @@ python3 cmake/macos/pixelview_sources.py \
 - **Proprietary SDKs/drivers** (DeckLink and similar): check vendor redistribution rights and the narrow §3 system-component exception per component; nothing is assumed exempt or prohibited. Codec/patent terms may need specialist review.
 - Before shipping: anonymously retrieve and rebuild the release source, inspect the final DMG for full license and notice files, verify the offline license UI (Help → About → License) and attribution, and audit enabled dependencies. This is an engineering checklist, not legal advice.
 
-## 6. Windows (x64): in progress, development build only
+## 6. Windows (x64)
 
-Only the development build (6.1) has been run on Windows (2026-10-03, Windows Server 2025 x64, Visual Studio Build Tools 2026 18.10, CMake 4.4.3, Python 3.13). The release commands (6.2) have not. They are written against the upstream `windows-x64` preset and the macOS pipeline, and their logic is covered offline by `test/pixelview/test_windows_release.py`. See `docs/features.md`, "Windows port".
+The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64, Visual Studio Build Tools 2026 18.10, CMake 4.4.3, Python 3.13). `--validate-config`, `--fetch-sources` and `--prepare` (6.2) ran on 2026-10-09 for 0.0.12 on a Windows 11 machine; `--publish` and `--publish-latest` have not run yet. The logic is also covered offline by `test/pixelview/test_windows_release.py`. Windows releases are cut from the same tag as macOS and publish to `desktop/windows/` in the same bucket. See `docs/features.md`, "Windows port".
 
 ### 6.1 Toolchain and build
 

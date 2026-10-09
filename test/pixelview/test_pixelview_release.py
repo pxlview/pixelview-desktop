@@ -430,12 +430,15 @@ class PixelviewLocalRelease(unittest.TestCase):
         self.assertTrue(guide_path.is_file())
         guide = guide_path.read_text()
         for step in (
-            "Create and push `v0.0.1`",
+            "Create and push the tag",
             "Create the GitHub release",
             "--prepare",
             "clean/quarantined Mac",
             "--publish",
             "Sparkle replacement and relaunch",
+            "release/pixelview-macos.sh",
+            r"release\pixelview-windows.ps1",
+            "desktop/windows/",
         ):
             self.assertIn(step, guide)
         ignored = subprocess.run(
