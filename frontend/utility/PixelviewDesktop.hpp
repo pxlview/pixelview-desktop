@@ -1,6 +1,8 @@
 #pragma once
 #include <QtCore/QUrl>
 #include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
+#include <QtCore/QStringList>
 #include <functional>
 #include <algorithm>
 namespace pixelview {
@@ -30,6 +32,12 @@ public:
  std::function<QJsonObject()> report = []{return QJsonObject{{"streaming",false},{"settings",QJsonValue::Null}};};
  std::function<void(QString)> error=[](QString){};
  std::function<qint64()> monotonic=[] {return qint64(0);};
+ // Region profile policy: encoder profile ids the paired node's region does
+ // not accept. The backend sends it with DESKTOP_READY and DESKTOP_STARTED and
+ // with a profile_blocked refusal; an older backend sends none (nothing blocked).
+ QStringList blockedProfiles;
+ std::function<void()> policy=[]{};
+ std::function<QString()> profile=[]{return QString();};
  bool ready=false, pending=false, started=false;
  bool mediaDraining=false;
  // Terminal mutations arrive before the close that follows them.
@@ -83,7 +91,9 @@ public:
   if (!ready || pending || started || mediaDraining) return false;
   if(!intent) retries=0;
   ++generation;setupClaimed=false;intent=true; pending=true;
-  send({{"message","DESKTOP_START"},{"data",QJsonObject{}}}); return true;
+  QJsonObject data;
+  if(const QString current=profile(); !current.isEmpty()) data["encoder_profile"]=current;
+  send({{"message","DESKTOP_START"},{"data",data}}); return true;
  }
  void fail(QString message, bool transient=false) {
   if(transient && retryAt>=0) return; // Duplicate transport notifications.
@@ -103,12 +113,23 @@ public:
   halt();error(message);
  }
  bool development=false;
+ // Returns whether the list changed (and the policy callback ran).
+ bool acceptPolicy(const QJsonObject &data) {
+  QStringList next;
+  const QJsonArray values=data["blocked_profiles"].toArray();
+  for(const QJsonValue value : values)
+   if(value.isString() && !value.toString().isEmpty()) next.append(value.toString());
+  next.sort(); next.removeDuplicates();
+  if(next==blockedProfiles) return false;
+  blockedProfiles=next; policy(); return true;
+ }
  void receive(const QJsonObject &o, qint64 now) {
   const auto name=o["mutation"].toString();
   const auto data=o["data"].toObject();
   if(name=="DESKTOP_READY") {
    if(ready) return;
    ready=true; pingDeadline=now+PING_SILENCE_MS;
+   acceptPolicy(data);
    if(intent && !started && retryAt<0) requestStart(now);
   } else if(name=="SOCKET_SEND_PING") {
    // The server's ping loop can run ahead of DESKTOP_READY; a pong is always
@@ -118,6 +139,7 @@ public:
   } else if(name=="DESKTOP_STARTED") {
    if(!ready || !pending) return;
    pending=false;
+   if(data.contains("blocked_profiles")) acceptPolicy(data);
    if(mediaDraining) return; // Cancelled attempt, not fresh authority.
    const auto whip=data["config"].toObject()["whip"].toObject();
    QUrl endpoint(whip["endpoint"].toString());
@@ -132,6 +154,13 @@ public:
    // this message (e.g. DESKTOP_STATE); it never touches the stream.
    const QString code=data["code"].toString();
    if(code=="unknown_message" || (!intent && !pending)) return;
+   if(code=="profile_blocked") {
+    // Refuse first so the policy can switch the profile on an idle output.
+    deny(QStringLiteral("The %1 encoder profile is not available in this node's region. Choose another profile and start again.")
+     .arg(data["profile"].toString()));
+    if(!acceptPolicy(data)) policy(); // Known list, profile not switched yet.
+    return;
+   }
    deny(code=="subscription_required" ? QStringLiteral("Pixelview could not start the stream: the subscription is not active.") :
         QStringLiteral("Pixelview could not start the stream."));
   } else if(name=="SOCKET_DESKTOP_REVOKED") {

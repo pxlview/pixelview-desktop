@@ -75,8 +75,8 @@ behaviour is:
   resolution, framerate, encoder, bitrate, profile and an allowlist of non-secret encoder options,
   or `null` if any field would fail server validation. 60 s without a ping is treated as a dead
   socket. There is no client heartbeat, lease, fence or resume.
-- `DESKTOP_START {}` yields `DESKTOP_STARTED {config: {whip: {endpoint, bearer_token}}}` or
-  `DESKTOP_ERROR {code}` with `subscription_required` or `start_failed`. The Desktop is a plain
+- `DESKTOP_START {encoder_profile}` yields `DESKTOP_STARTED {config: {whip: {endpoint, bearer_token}}}` or
+  `DESKTOP_ERROR {code}` with `subscription_required`, `start_failed` or `profile_blocked`. The Desktop is a plain
   sender that stays online: it needs no project, and knows nothing about pause (pausing a node only
   shows viewers the pause screen). Without a running project nothing listens at the WHIP endpoint,
   so the WHIP POST fails with the ordinary stream-failure dialog. A refused start (or an unusable
@@ -239,6 +239,15 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - B-frames are a permanent policy: `bframes`, `bf` and `bframe_ref_mode` are hidden in Advanced and
   normalized off on every load and save, including x264 `x264opts`, NVENC `frameIntervalP`/UHQ and
   AMF `ffmpeg_opts` overrides.
+- Region profile policy: the backend sends `blocked_profiles` (profile ids such as `main42210` and
+  `main44410`) with `DESKTOP_READY` and `DESKTOP_STARTED`, taken from the k8s region row of the
+  paired node (currently Sydney and Tokyo; see the backend's `docs/desktop-remote-control.md`).
+  Blocked profiles are left out of the sidebar list and the remote-control `encoding.profiles`, a
+  save of one is refused, and a blocked current profile is switched to Main10 (or the first allowed
+  profile) at once, or after the stream if one is live. `DESKTOP_START` carries `encoder_profile`;
+  the backend refuses a blocked one with `DESKTOP_ERROR profile_blocked`, which re-applies the
+  switch. Unpairing forgets the list, and a backend without the policy blocks nothing. Covered by the
+  protocol and encoding harness tests; not yet run in the built app against a backend.
 - The sidebar Profile list labels HEVC Main10 "(recommended)" and Main 4:2:2 10 "(transcoded for
   browsers)", each with a tooltip (the Pixelview Player iOS app and Pixelview Desktop on Apple
   silicon play 4:2:2 natively; browsers get a server transcode). The saved profile value is unchanged.

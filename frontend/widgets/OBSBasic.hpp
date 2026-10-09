@@ -467,6 +467,10 @@ private:
 	void InitPixelviewEncoding(QWidget *sidebar);
 	void RefreshPixelviewEncoding();
 	bool SavePixelviewEncoding(const char *id, obs_data_t *settings, bool initializing = false);
+	// Region profile policy from the backend (pixelviewLease.blockedProfiles).
+	bool PixelviewProfileBlocked(const std::string &profile) const;
+	void ApplyPixelviewProfilePolicy();
+	bool pixelviewProfilePolicyPending = false;
 	void AdvancedPixelviewEncoding();
 	QComboBox *pixelviewEncoder = nullptr;
 	QComboBox *pixelviewProfile = nullptr;

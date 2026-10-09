@@ -45,6 +45,12 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   // A refused start keeps the socket ready, which hides the status line.
   if(pixelviewLease.ready) ui->statusbar->showMessage(message,10000);
  };
+ pixelviewLease.policy=[this]{
+  blog(LOG_INFO,"Pixelview: region blocks encoder profiles [%s]",pixelviewLease.blockedProfiles.join(QStringLiteral(", ")).toUtf8().constData());
+  // Queued: DESKTOP_READY is handled before the pairing identity is saved.
+  QTimer::singleShot(0,this,&OBSBasic::ApplyPixelviewProfilePolicy);
+ };
+ pixelviewLease.profile=[this]{return PixelviewReportedSettings()["encoder_profile"].toString();};
  pixelviewLease.send=[this](QJsonObject o){pixelviewDesktop->sendSocket(QJsonDocument(o).toJson(QJsonDocument::Compact));};
  pixelviewLease.report=[this]{
   // Exactly the documented pong shape; anything the server cannot validate
@@ -448,7 +454,7 @@ void OBSBasic::FinishPixelviewUnpair(PixelviewAccountRemoval account)
  const auto origin=pixelviewOrigin;
  pixelview::runKeychainUserAction(this,[origin]{return pixelview::removeDevice(origin.toString());},[this,account](bool removed){
  if(isClosing() || pixelviewShutdownPending) return;
- if(removed) {pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();}
+ if(removed) {pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();pixelviewLease.blockedProfiles.clear();RefreshPixelviewEncoding();}
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",removed);
  bool saved=SavePixelviewIdentity();
  pixelviewUnpairRetry=!saved || !removed;
@@ -475,6 +481,7 @@ void OBSBasic::CompletePixelviewRevocation()
   RefreshPixelviewPairing();return;
  }
  pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();
+ pixelviewLease.blockedProfiles.clear();RefreshPixelviewEncoding();
  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",true);
  pixelviewUnpairRetry=!SavePixelviewIdentity();
  pixelviewConnectionStatus->setText(pixelviewUnpairRetry ?

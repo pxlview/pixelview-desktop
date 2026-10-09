@@ -83,7 +83,8 @@ int main(int argc,char **argv) {
  bool pixelviewPairingDurable=false, pixelviewUnpairRetry=false, nativeBusy=false, closing=false;
  bool pixelviewActualStreaming=false;
  bool pixelviewShutdownPending=false,pixelviewUnpairPending=false,pixelviewClosingSocket=false,pixelviewStopPending=false;
- struct {bool intent=false,ready=false,pending=false,started=false;} pixelviewLease;
+ struct {bool intent=false,ready=false,pending=false,started=false;QStringList blockedProfiles;} pixelviewLease;
+ int encodingRefreshes=0; auto RefreshPixelviewEncoding=[&]{++encodingRefreshes;};
  struct {QString authorizedToken;bool exchanging=false;void closeSocket(){}} desktop; auto *pixelviewDesktop=&desktop;
  struct Identity {QString nodeId="707880";void clear(){nodeId.clear();}} pixelviewIdentity,pixelviewExpectedIdentity;
  auto PixelviewSettingsBusy=[&]{return nativeBusy;};
@@ -197,8 +198,11 @@ int main(int argc,char **argv) {
  assert(pixelviewUnpairRetry && !unpair.isHidden() && unpair.isEnabled() && pair.isHidden());
  assert(pixelviewIdentity.nodeId=="707880" && credential=="synthetic-secret");
  assert(connection.text().contains("unpaired from your Pixelview account") && connection.text().contains("Click Unpair"));
+ pixelviewLease.blockedProfiles={"main42210"}; encodingRefreshes=0;
  removed=true; completeRevocation();
  assert(!pixelviewUnpairRetry && credential.isEmpty() && pixelviewIdentity.nodeId.isEmpty());
+ // The region profile policy belongs to the node: unpairing forgets it.
+ assert(pixelviewLease.blockedProfiles.isEmpty() && encodingRefreshes==1);
  assert(unpair.isHidden() && !pair.isHidden() && pair.isEnabled());
  assert(connection.text().isEmpty() && connection.isHidden()); // The Pair button and hint say it.
 

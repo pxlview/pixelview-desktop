@@ -320,6 +320,7 @@ void OBSBasic::RefreshPixelviewEncoding()
 		if (profile && obs_property_get_type(profile) == OBS_PROPERTY_LIST && obs_property_list_format(profile) == OBS_COMBO_FORMAT_STRING) {
 			for (size_t i = 0; i < obs_property_list_item_count(profile); ++i) {
 				if (obs_property_list_item_disabled(profile, i)) continue;
+				if (PixelviewProfileBlocked(obs_property_list_item_string(profile, i))) continue;
 				const QString value = QString::fromUtf8(obs_property_list_item_string(profile, i));
 				entries.emplace_back(PixelviewProfileLabel(QString::fromUtf8(obs_property_list_item_name(profile, i)), value), value);
 			}
@@ -345,6 +346,50 @@ void OBSBasic::RefreshPixelviewEncoding()
 	pixelviewAdvanced->setToolTip(QStringLiteral("%1 kbps • Opus (OBS defaults)\n%2 • SDR/input settings independent\nB-frames always off. Preferences only — no output started.")
 		.arg(kbps).arg(QString::fromUtf8(config_get_string(activeConfiguration, "Video", "ColorFormat"))));
 	pixelviewBitrate->setToolTip(QStringLiteral("Quick control: 1–12 Mbps. Actual saved bitrate: %1 kbps. Advanced values are retained until you edit this control.").arg(kbps));
+	// A blocked profile met while streaming is switched once configuration unlocks.
+	if (pixelviewProfilePolicyPending && idle)
+		QTimer::singleShot(0, this, &OBSBasic::ApplyPixelviewProfilePolicy);
+}
+
+bool OBSBasic::PixelviewProfileBlocked(const std::string &profile) const
+{
+	return !profile.empty() && pixelviewLease.blockedProfiles.contains(QString::fromStdString(profile));
+}
+
+// The backend blocks some profiles per region (e.g. HEVC 4:2:2 in Sydney). A
+// blocked current profile is replaced by Main10, else the first allowed one.
+void OBSBasic::ApplyPixelviewProfilePolicy()
+{
+	pixelviewProfilePolicyPending = false;
+	if (isClosing() || !pixelviewEncoder) return;
+	const std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
+	OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.c_str(), false);
+	const std::string current = obs_data_get_string(data, "profile");
+	if (PixelviewProfileBlocked(current)) {
+		if (PixelviewConfigurationLocked()) {
+			blog(LOG_INFO, "Pixelview: encoder profile %s is blocked in the node's region; switching after the stream", current.c_str());
+			pixelviewProfilePolicyPending = true;
+			return;
+		}
+		std::string fallback;
+		OBSProperties props = obs_get_encoder_properties(id.c_str());
+		auto *list = props ? obs_properties_get(props, "profile") : nullptr;
+		if (list && obs_property_get_type(list) == OBS_PROPERTY_LIST && obs_property_list_format(list) == OBS_COMBO_FORMAT_STRING) {
+			for (size_t i = 0; i < obs_property_list_item_count(list); ++i) {
+				const std::string value = obs_property_list_item_string(list, i);
+				if (obs_property_list_item_disabled(list, i) || PixelviewProfileBlocked(value)) continue;
+				if (fallback.empty() || value == "main10") fallback = value;
+			}
+		}
+		if (fallback.empty()) {
+			blog(LOG_WARNING, "Pixelview: encoder profile %s is blocked in the node's region and no other profile is available", current.c_str());
+		} else {
+			blog(LOG_INFO, "Pixelview: encoder profile %s is blocked in the node's region; switching to %s", current.c_str(), fallback.c_str());
+			obs_data_set_string(data, "profile", fallback.c_str());
+			SavePixelviewEncoding(id.c_str(), data);
+		}
+	}
+	RefreshPixelviewDevices();
 }
 
 bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool initializing)
@@ -363,6 +408,8 @@ bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool 
 	const std::string profile = obs_data_get_string(settings, "profile");
 	if (!profile.empty() && !PixelviewListValue(props, "profile", profile.c_str()))
 		return fail(QStringLiteral("This profile is not enabled in the native encoder properties."));
+	if (PixelviewProfileBlocked(profile))
+		return fail(QStringLiteral("This profile is not available in the region of the paired Pixelview node."));
 	std::string format;
 	if (strcmp(obs_get_encoder_codec(id), "hevc") == 0) {
 		format = profile.empty() && !obs_properties_get(props, "profile")

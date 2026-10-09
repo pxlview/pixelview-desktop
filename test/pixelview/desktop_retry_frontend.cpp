@@ -70,6 +70,7 @@ public:
  void closeWindow();void ConnectPixelviewDesktop();bool RequestPixelviewStart();
  void Watchdog();void PixelviewDeviceRevoked();
  QJsonObject PixelviewReportedSettings(){return {};}
+ void ApplyPixelviewProfilePolicy(){} void RefreshPixelviewEncoding(){}
  quint64 pixelviewStopGeneration=0;
  qint64 pixelviewReconnectAt=0,pixelviewAuthDeadline=0;
  int pixelviewBackoff=1000;

@@ -176,6 +176,7 @@ QJsonObject OBSBasic::PixelviewControlState()
 		    obs_property_list_format(profile) == OBS_COMBO_FORMAT_STRING) {
 			for (size_t i = 0; i < obs_property_list_item_count(profile); ++i) {
 				if (obs_property_list_item_disabled(profile, i)) continue;
+				if (PixelviewProfileBlocked(obs_property_list_item_string(profile, i))) continue;
 				profiles.append(QJsonObject{{"id", QString::fromUtf8(obs_property_list_item_string(profile, i))},
 							    {"name", QString::fromUtf8(obs_property_list_item_name(profile, i))}});
 			}
