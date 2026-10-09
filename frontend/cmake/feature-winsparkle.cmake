@@ -12,6 +12,18 @@ if(PIXELVIEW_RELEASE_BUILD)
     message(FATAL_ERROR "Pixelview releases require the Pixelview WinSparkle public key")
   endif()
 endif()
+# Local update tests (cmake/windows/pixelview-release.py --staging-build): a
+# loopback-only feed, never in a release build, so a staging build can only
+# update from a feed served on the same machine.
+option(PIXELVIEW_UPDATE_STAGING "Build against a local 127.0.0.1 update feed for update tests" OFF)
+if(PIXELVIEW_UPDATE_STAGING)
+  if(PIXELVIEW_RELEASE_BUILD)
+    message(FATAL_ERROR "PIXELVIEW_UPDATE_STAGING cannot be combined with PIXELVIEW_RELEASE_BUILD")
+  endif()
+  if(NOT SPARKLE_APPCAST_URL MATCHES "^http://127\\.0\\.0\\.1:[0-9]+/appcast-x64\\.xml$" OR NOT SPARKLE_PUBLIC_KEY)
+    message(FATAL_ERROR "Staging update builds need a http://127.0.0.1:<port>/appcast-x64.xml feed and the public key")
+  endif()
+endif()
 if(SPARKLE_APPCAST_URL MATCHES "obsproject\\.com")
   message(FATAL_ERROR "Pixelview must never use OBS update infrastructure")
 endif()

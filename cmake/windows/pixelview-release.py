@@ -292,6 +292,91 @@ class Release:
         if result.returncode != 0 or 'Verified Successfully' not in result.stdout:
             die('installer EdDSA signature does not verify against winsparkle_public_key')
 
+    # ------------------------------------------------------------------ local update test
+    def use_staging(self, number, port):
+        """Retargets this run at a local update-test build; nothing here is ever published."""
+        self.build = number
+        self.release_id = f'{self.version}-staging{number}'
+        self.staging_port = port
+        self.staging_feed = f'http://127.0.0.1:{port}/appcast-x64.xml'
+        self.root = ROOT / 'dist/windows-staging'
+        self.release_dir = self.root / 'releases' / str(number)
+        self.installer_name = f'Pixelview-Desktop-{self.version}-staging{number}-x64-setup.exe'
+        self.installer = self.release_dir / self.installer_name
+        self.notes_name = f'Pixelview-Desktop-{self.version}-staging{number}-x64.html'
+        self.build_dir = ROOT / f'build_x64_staging_{number}'
+        self.rundir = self.build_dir / 'rundir' / 'Release'
+
+    def staging_build(self, number, port):
+        """Signed installer of the checked-out source whose updater reads only a 127.0.0.1 feed."""
+        self.validate_config()
+        if platform.system() != 'Windows': die('staging builds are made on Windows')
+        if number < 1000: die('staging build numbers start at 1000 so they never look like a release build')
+        if not os.environ.get('PIXELVIEW_WINSPARKLE_PRIVATE_KEY'): die('PIXELVIEW_WINSPARKLE_PRIVATE_KEY is not set (run through release/pixelview-windows.ps1)')
+        self.signtool(); self.iscc()
+        if self.config['signing']['method'] == 'trusted-signing':
+            self.signing_dlib(); self.check_azure_login()
+        self.use_staging(number, port)
+        self.source_commit = git('rev-parse', 'HEAD')
+        if self.release_dir.exists(): shutil.rmtree(self.release_dir)
+        self.release_dir.mkdir(parents=True)
+        env = dict(os.environ, PIXELVIEW_BUILD_CONFIG='Release', PIXELVIEW_UPDATE_STAGING_FEED=self.staging_feed,
+                   PIXELVIEW_STAGING_BUILD_NUMBER=str(number), PIXELVIEW_SOURCE_COMMIT=self.source_commit, PIXELVIEW_SOURCE_TAG='')
+        for name in ('PIXELVIEW_RELEASE_BUILD', 'PIXELVIEW_WINSPARKLE_PRIVATE_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'):
+            env.pop(name, None)
+        run(sys.executable, ROOT / 'cmake/windows/pixelview-build.py', '--config', 'Release', env=env)
+        if not (self.rundir / 'bin/64bit/WinSparkle.dll').is_file(): die('staging build is missing WinSparkle.dll')
+        self.sign_binaries()
+        with tempfile.TemporaryDirectory(prefix='pixelview-staging-licenses-') as licenses_dir:
+            licenses = pathlib.Path(licenses_dir) / 'Licenses'
+            licenses.mkdir()
+            for name in ('COPYING', 'AUTHORS'):
+                shutil.copy2(ROOT / name, licenses / name)
+            shutil.copy2(ROOT / '.deps' / f"winsparkle-{self.config['winsparkle_version']}" / 'COPYING', licenses / 'WinSparkle-COPYING.txt')
+            (licenses / 'RELEASE.txt').write_text(
+                f'Pixelview Desktop {self.version} staging build {number}: local update test, not for distribution.\n'
+                f'Update feed: {self.staging_feed}\nSource commit: {self.source_commit}\n', encoding='utf-8')
+            self.build_installer(licenses)
+        signature, length = self.eddsa_sign(self.installer)
+        if self.notes_source.is_file(): shutil.copy2(self.notes_source, self.release_dir / self.notes_name)
+        (self.release_dir / 'item.json').write_text(json.dumps({
+            'build': number, 'version': self.version, 'installer': self.installer_name, 'length': length,
+            'signature': signature, 'notes': self.notes_name, 'source_commit': self.source_commit}, indent=2) + '\n')
+        print(f'Staging build {number}: {self.installer}')
+
+    def staging_serve(self, port, up_to=None):
+        """Writes the local appcast from the staged builds (newest first) and serves it on 127.0.0.1 only."""
+        import functools, http.server
+        root = ROOT / 'dist/windows-staging'
+        items = sorted((json.loads(p.read_text()) for p in root.glob('releases/*/item.json')), key=lambda i: -i['build'])
+        if up_to: items = [i for i in items if i['build'] <= up_to]
+        if not items: die('no staging builds; run --staging-build first')
+        base = f'http://127.0.0.1:{port}'
+        rss = ET.Element('rss', {'version': '2.0'})
+        channel = ET.SubElement(rss, 'channel')
+        ET.SubElement(channel, 'title').text = 'Pixelview Desktop for Windows (local update test)'
+        for entry in items:
+            item = ET.SubElement(channel, 'item')
+            ET.SubElement(item, 'title').text = f"Pixelview Desktop {entry['version']} (staging build {entry['build']})"
+            ET.SubElement(item, f'{{{SPARKLE_NS}}}version').text = str(entry['build'])
+            ET.SubElement(item, f'{{{SPARKLE_NS}}}shortVersionString').text = f"{entry['version']} (build {entry['build']})"
+            ET.SubElement(item, f'{{{SPARKLE_NS}}}releaseNotesLink').text = f"{base}/releases/{entry['build']}/{entry['notes']}"
+            ET.SubElement(item, f'{{{SPARKLE_NS}}}minimumSystemVersion').text = self.config['minimum_windows']
+            ET.SubElement(item, 'enclosure', {
+                'url': f"{base}/releases/{entry['build']}/{entry['installer']}", 'length': str(entry['length']),
+                'type': 'application/octet-stream', f'{{{SPARKLE_NS}}}os': 'windows-x64',
+                f'{{{SPARKLE_NS}}}installerArguments': INSTALLER_ARGUMENTS, f'{{{SPARKLE_NS}}}edSignature': entry['signature']})
+            self.verify_eddsa(root / 'releases' / str(entry['build']) / entry['installer'], entry['signature'])
+        ET.indent(rss)
+        (root / 'appcast-x64.xml').write_bytes(b'<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(rss, encoding='utf-8'))
+        print(f"Serving {base}/appcast-x64.xml with builds {[i['build'] for i in items]} (Ctrl-C stops)", flush=True)
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+        with http.server.ThreadingHTTPServer(('127.0.0.1', port), handler) as server:
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+
     def fetch_sources(self):
         """Download each inventoried source archive once into the hash-addressed cache, verified."""
         inventory = json.loads((ROOT / self.config['source_inventory']).read_text(encoding='utf-8'))
@@ -574,6 +659,10 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     for flag in ('--validate-config', '--fetch-sources', '--prepare', '--publish', '--publish-latest'):
         mode.add_argument(flag, action='store_true')
+    mode.add_argument('--staging-build', type=int, metavar='BUILD', help='local update test: signed build reading a 127.0.0.1 feed')
+    mode.add_argument('--staging-serve', action='store_true', help='local update test: serve the staged builds on 127.0.0.1')
+    parser.add_argument('--staging-port', type=int, default=8731)
+    parser.add_argument('--staging-up-to', type=int, metavar='BUILD', help='with --staging-serve: list only builds up to this one')
     args = parser.parse_args()
     try:
         release = Release()
@@ -581,6 +670,12 @@ def main():
             release.validate_config(); return 0
         if args.fetch_sources:
             release.fetch_sources(); return 0
+        if args.staging_serve:
+            release.staging_serve(args.staging_port, args.staging_up_to); return 0
+        if args.staging_build is not None:
+            with release_lock(ROOT / 'dist/windows-staging'):
+                release.staging_build(args.staging_build, args.staging_port)
+            return 0
         with release_lock(release.root):
             if args.prepare: release.prepare()
             elif args.publish: release.publish()

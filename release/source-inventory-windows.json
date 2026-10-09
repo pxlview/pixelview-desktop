@@ -115,13 +115,13 @@
    "recipes": [
     {
      "path": "frontend/cmake/feature-winsparkle.cmake",
-     "sha256": "4687d419b9bcf7f35653f4b853be56613729fc0fe5e271504eadea1c872ba2be",
-     "size": 2300
+     "sha256": "9b9c91e6b0d9e883453af0804e5c154d06fb69eba0957070b6a57da0aa1633b2",
+     "size": 3025
     },
     {
      "path": "cmake/windows/pixelview-build.py",
-     "sha256": "9e2ec90d8ccf204f710f52055f9dbc9a186f693f065b219a3ef1c1c0f74150ed",
-     "size": 7114
+     "sha256": "e6dc348675f43cd1c7b336c125eadb7c6c462b7881e517950288b01ae3258aae",
+     "size": 7932
     }
    ]
   }

@@ -14,6 +14,12 @@ string(JSON PIXELVIEW_OBS_BASE_VERSION GET "${_pixelview_version_json}" obs_base
 string(JSON PIXELVIEW_OBS_BASE_DESCRIBE GET "${_pixelview_version_json}" obs_base_describe)
 string(JSON PIXELVIEW_OBS_BASE_COMMIT GET "${_pixelview_version_json}" obs_base_commit)
 
+# Local update tests build two otherwise identical apps with different build
+# numbers; only a staging build may override version.json.
+if(PIXELVIEW_UPDATE_STAGING AND PIXELVIEW_STAGING_BUILD_NUMBER)
+  set(PIXELVIEW_BUILD_NUMBER "${PIXELVIEW_STAGING_BUILD_NUMBER}")
+endif()
+
 if(NOT PIXELVIEW_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "pixelview_version must use MAJOR.MINOR.PATCH")
 endif()

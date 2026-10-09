@@ -9,9 +9,10 @@ $configFile = Join-Path $root 'release\windows.env'
 $r2File = Join-Path $root 'release\windows-r2.1password.env'
 $keyFile = Join-Path $root 'release\windows-update-key.1password.env'
 
-$mode = $args | Where-Object { $_ -in '--prepare', '--publish', '--publish-latest', '--validate-config' } | Select-Object -Last 1
+$mode = $args | Where-Object { $_ -in '--prepare', '--staging-build', '--publish', '--publish-latest', '--validate-config' } | Select-Object -Last 1
 switch ($mode) {
   '--prepare' { $secretFiles = @($keyFile) }
+  '--staging-build' { $secretFiles = @($keyFile) }
   '--publish' { $secretFiles = @($r2File) }
   '--publish-latest' { $secretFiles = @($r2File) }
   default {

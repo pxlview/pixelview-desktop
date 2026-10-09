@@ -1,5 +1,5 @@
 """Offline checks of the Windows build/release tooling (no Windows, network or credentials)."""
-import base64, hashlib, importlib.util, json, pathlib, re, shutil, subprocess, sys, tempfile, unittest
+import base64, hashlib, importlib.util, os, json, pathlib, re, shutil, subprocess, sys, tempfile, unittest
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -47,6 +47,23 @@ class Config(unittest.TestCase):
         self.assertIn(f'-DOBS_VERSION_OVERRIDE={version}', out)
         self.assertIn('-DPIXELVIEW_RELEASE_BUILD=OFF', out)
         self.assertIn('-DSPARKLE_APPCAST_URL= ', out)  # Development builds never update.
+
+    def test_staging_builds_only_read_a_loopback_feed(self):
+        cmake = (ROOT / 'frontend/cmake/feature-winsparkle.cmake').read_text()
+        self.assertIn('PIXELVIEW_UPDATE_STAGING cannot be combined with PIXELVIEW_RELEASE_BUILD', cmake)
+        self.assertIn(r'^http://127\\.0\\.0\\.1:[0-9]+/appcast-x64\\.xml$', cmake)
+        env = dict(os.environ, PIXELVIEW_UPDATE_STAGING_FEED='http://127.0.0.1:8731/appcast-x64.xml',
+                   PIXELVIEW_STAGING_BUILD_NUMBER='9001')
+        env.pop('PIXELVIEW_RELEASE_BUILD', None)
+        out = subprocess.run([sys.executable, ROOT / 'cmake/windows/pixelview-build.py', '--print'],
+                             capture_output=True, text=True, check=True, env=env).stdout
+        for flag in ('-DPIXELVIEW_RELEASE_BUILD=OFF', '-DPIXELVIEW_UPDATE_STAGING=ON', '-DPIXELVIEW_STAGING_BUILD_NUMBER=9001',
+                     '-DSPARKLE_APPCAST_URL=http://127.0.0.1:8731/appcast-x64.xml', 'build_x64_staging_9001'):
+            self.assertIn(flag, out)
+        release = release_module.Release()
+        release.use_staging(9001, 8731)
+        self.assertEqual(release.root, ROOT / 'dist/windows-staging')
+        self.assertNotIn('downloads.pixelview.io', release.staging_feed)
 
     def test_validate_config(self):
         result = subprocess.run([sys.executable, ROOT / 'cmake/windows/pixelview-release.py', '--validate-config'],
