@@ -184,7 +184,9 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   to the server the stream is published to, on the media path itself, smoothed over the last few
   reports. With simulcast it covers the first video layer; Pixelview sends one.
 - Always, `control.rtt_ms` is the round trip of the control socket's own WebSocket ping (every
-  20 s, so it is `null` for the first 20 s of a socket). Not streaming, a report is sent only
+  20 s, so it is `null` for the first 20 s of a socket): NSURLSession's ping on macOS, the Qt
+  client's keepalive (`PixelviewWebSocket`) on Windows and Linux. The Qt path is compiled and
+  covered by source checks only; no Windows build was run with it. Not streaming, a report is sent only
   when it differs from the last one, which is once per answered ping. A new socket gets one
   after `DESKTOP_READY`.
 - Once per minute of streaming a summary goes to the application log, and with it to the log

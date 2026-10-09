@@ -32,6 +32,9 @@ void DesktopConnection::openSocket(QUrl url, QString token)
   if (socket != client) return;
   auto callback = message; callback(body);
  };
+ events.pong = [this, client](int ms) {
+  if (socket == client) controlRttMs = ms;
+ };
  events.closed = [this, client](WebSocketClient::Closed closed) {
   if (socket != client) return;
   auto callback = disconnected; callback(desktopCloseCode(closed));
@@ -53,6 +56,7 @@ void DesktopConnection::closeSocket(bool normal)
 {
  if (!socket) return;
  auto *client = static_cast<WebSocketClient *>(std::exchange(socket, nullptr));
+ controlRttMs = -1;
  if (normal) {
   client->close(1000);
   QTimer::singleShot(CLOSE_GRACE_MS, client, &QObject::deleteLater);

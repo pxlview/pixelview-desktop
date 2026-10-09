@@ -76,6 +76,13 @@ class LinkStats(unittest.TestCase):
         self.assertIn('s->owner->controlRttMs=ms;', mac)
         close = mac.split('void DesktopConnection::closeSocket(bool normal) {', 1)[1].split('\n}\n', 1)[0]
         self.assertIn('controlRttMs=-1;', close)
+        # Windows and Linux: the Qt client times its own keepalive pings.
+        qt = (ROOT/'frontend/utility/PixelviewWebSocket.cpp').read_text()
+        self.assertIn('if (!pingPolicy || !pingPolicy->pending) return;', qt)
+        self.assertIn('callback(int(clock.elapsed() - pingPolicy->sent));', qt)
+        desktop_qt = (ROOT/'frontend/utility/PixelviewDesktopQt.cpp').read_text()
+        self.assertIn('if (socket == client) controlRttMs = ms;', desktop_qt)
+        self.assertIn('controlRttMs = -1;', desktop_qt.split('void DesktopConnection::closeSocket(bool normal)', 1)[1])
 
 
 if __name__ == '__main__':

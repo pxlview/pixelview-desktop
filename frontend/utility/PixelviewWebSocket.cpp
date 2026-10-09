@@ -234,7 +234,12 @@ void WebSocketClient::parseFrames()
 void WebSocketClient::control(quint8 opcode, const QByteArray &payload)
 {
  if (opcode == 0x9) { if (state == State::Open) write(0xA, payload); return; }
- if (opcode == 0xA) { if (pingPolicy) pingPolicy->pong(); return; }
+ if (opcode == 0xA) {
+  if (!pingPolicy || !pingPolicy->pending) return; // Unsolicited pongs time nothing.
+  pingPolicy->pong();
+  if (events.pong) { auto callback = events.pong; callback(int(clock.elapsed() - pingPolicy->sent)); }
+  return;
+ }
  // Close: echo the code (RFC 6455 5.5.1), then report it.
  if (payload.size() == 1) { protocolError(1002); return; }
  const int code = payload.size() >= 2 ? (quint8(payload[0]) << 8) | quint8(payload[1]) : 1005;

@@ -27,6 +27,8 @@ public:
   std::function<void()> opened;
   std::function<void(QByteArray)> message;
   std::function<void(Closed)> closed;
+  // Round trip in milliseconds of each answered keepalive ping.
+  std::function<void(int)> pong;
  };
  struct Options {
   qsizetype maxMessage = 16384;
