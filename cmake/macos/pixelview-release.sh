@@ -42,7 +42,7 @@ Usage: cmake/macos/pixelview-release.sh [option]
   --prepare          Build, sign, notarize, staple, and generate appcast (default)
   --publish          Publish an already prepared release to R2 (then update latest/)
   --publish-latest   Re-point latest/ at the prepared release already public on R2
-  --all              Prepare, then publish to R2
+  --all              Prepare, run the release e2e, then publish to R2
   --validate-config  Validate public release metadata without credentials
   --release-notes F  Use an HTML release-notes file
   --help             Show this help
@@ -62,6 +62,9 @@ Required for --publish/--all:
   PIXELVIEW_R2_BUCKET           R2 bucket name
   AWS_ACCESS_KEY_ID             bucket-scoped R2 access key
   AWS_SECRET_ACCESS_KEY         bucket-scoped R2 secret
+
+--publish/--all require a passing release e2e report for the prepared DMG
+(release/pixelview-macos.sh --e2e; cmake/macos/pixelview_release_e2e.py).
 
 The script never creates Git tags, GitHub releases, R2 buckets, DNS records, or
 credentials. It uploads immutable release assets first and the appcast last.
@@ -699,9 +702,14 @@ PY
   rm -f "$head_file" "$error_file"
 }
 
+verify_release_e2e() {
+  python3 "$root/cmake/macos/pixelview_release_e2e.py" --verify-report || die "the prepared DMG has not passed the release e2e gate"
+}
+
 upload_release_assets() {
   verify_remote_tag
   verify_prepared_release
+  verify_release_e2e
   local endpoint="${PIXELVIEW_R2_ENDPOINT:-}"
   local bucket="${PIXELVIEW_R2_BUCKET:-}"
   [[ "$endpoint" =~ ^https://[0-9a-fA-F]{32}\.r2\.cloudflarestorage\.com$ ]] || die "PIXELVIEW_R2_ENDPOINT is invalid"
@@ -859,6 +867,7 @@ case "$mode" in
     ;;
   all)
     prepare_release
+    python3 "$root/cmake/macos/pixelview_release_e2e.py" || die "release e2e failed"
     upload_release_assets
     upload_appcast
     publish_latest

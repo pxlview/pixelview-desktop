@@ -10,13 +10,22 @@ notary_file="$root/release/macos-notary.1password.env"
 mode=""
 for argument in "$@"; do
   case "$argument" in
-    --prepare|--publish|--publish-latest|--all|--validate-config) mode="$argument" ;;
+    --prepare|--publish|--publish-latest|--all|--validate-config|--e2e) mode="$argument" ;;
   esac
 done
 
 case "$mode" in
   --validate-config)
     exec "$release_script" "$@"
+    ;;
+  --e2e)
+    # Production test-node credentials come from the environment or the
+    # untracked .env; no release secret is needed.
+    e2e_args=()
+    for argument in "$@"; do
+      [[ "$argument" == --e2e ]] || e2e_args+=("$argument")
+    done
+    exec python3 "$root/cmake/macos/pixelview_release_e2e.py" ${e2e_args[@]+"${e2e_args[@]}"}
     ;;
   --prepare)
     secret_files=(--env-file "$notary_file")
