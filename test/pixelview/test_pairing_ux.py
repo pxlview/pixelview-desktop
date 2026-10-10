@@ -234,6 +234,7 @@ int main(int argc,char **argv) {
 #include <QtCore/QUrl>
 #include <cassert>
 #include "frontend/utility/PixelviewDesktop.hpp"
+#include "frontend/utility/PixelviewLinkReport.hpp"
 #include "frontend/utility/PixelviewKeychainTask.hpp"
 #include "frontend/utility/PixelviewPlatformText.hpp"
 using pixelview::runKeychainUserAction;
@@ -271,6 +272,7 @@ int main(int argc,char **argv) {
  auto HandlePixelviewControl=[](QJsonObject){};
  auto PixelviewStreamEnded=[](QJsonObject){};
  QByteArray pixelviewPushedState;
+ pixelview::LinkReport pixelviewLinkReport;
  int saves=0; bool configOK=true;
  auto SavePixelviewIdentity=[&]{++saves;return configOK;};
  auto RefreshPixelviewReconnect=[]{};

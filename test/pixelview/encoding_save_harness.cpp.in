@@ -48,6 +48,8 @@ using OBSProperties = int *;
 int props;
 OBSProperties obs_get_encoder_properties(const char *) { return &props; }
 void obs_properties_apply_settings(OBSProperties, obs_data_t *) {}
+// Every fixture encoder exposes a profile property, so HEVC formats follow the selected profile.
+int *obs_properties_get(OBSProperties p, const char *) { return p; }
 const char *obs_data_get_string(obs_data_t *d, const char *k) { return std::string(k) == "profile" ? d->profile.c_str() : d->values[k].c_str(); }
 /* BFRAME_POLICY */
 const char *obs_get_encoder_codec(const char *) { return "hevc"; }

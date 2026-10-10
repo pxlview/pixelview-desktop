@@ -7,6 +7,7 @@
 #include "frontend/utility/PixelviewDeepLinkInbox.hpp"
 #include "frontend/utility/PixelviewLogShipper.hpp"
 #include "frontend/utility/PixelviewCapturePolicy.hpp"
+#include "frontend/utility/PixelviewPlatformText.hpp"
 #include <cassert>
 #include <Security/Security.h>
 namespace pixelview {
@@ -182,6 +183,19 @@ int main(int argc,char **argv) {
  app.setStyle(new NativeFormStyle);
  assert(config_open(&application.config,argv[1],CONFIG_OPEN_ALWAYS)==CONFIG_SUCCESS);
  assert(obs_startup("en-US",nullptr,nullptr));
+ // Synthetic native source reports the production get_status schema. Its
+ // registration also stands in for the macOS WHEP module, which
+ // PixelviewReceiveAvailable() requires before authenticating.
+ static const char *mediaState="playing", *mediaFailure="";
+ static int64_t frames=0;
+ obs_source_info media={}; media.id="pixelview_whep_source"; media.type=OBS_SOURCE_TYPE_INPUT;
+ media.get_name=[](void*){return "Offline media telemetry";};
+ media.create=[](obs_data_t*,obs_source_t *source)->void* {
+  proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out string failure)",
+   [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_string(data,"failure",mediaFailure);},nullptr);
+  return source;
+ };
+ media.destroy=[](void*){}; obs_register_source(&media);
  if(argc==4 && QString::fromUtf8(argv[3])=="credential-error") {
   // Error is an unreadable existing record, not an operator-requested deletion.
   for(const QString action : {"authorize", "name", "config-failure", "password", "clear", "session", "link", "link-clear"}) {
@@ -319,18 +333,7 @@ int main(int argc,char **argv) {
     layout.pixelviewReceiveStorageStatus->show(); app.processEvents(); assertCredentials(layout);
     layout.pixelviewReceiveStorageStatus->hide();
    }
-   // Synthetic native source reports the production get_status schema.
-   static const char *mediaState="playing", *mediaFailure="";
-   static int64_t frames=0;
-   obs_source_info media={}; media.id="pixelview_whep_source"; media.type=OBS_SOURCE_TYPE_INPUT;
-   media.get_name=[](void*){return "Offline media telemetry";};
-   media.create=[](obs_data_t*,obs_source_t *source)->void* {
-    proc_handler_add(obs_source_get_proc_handler(source),"void get_status(out string state, out int frames, out string failure)",
-     [](void*,calldata_t *data){calldata_set_string(data,"state",mediaState); calldata_set_int(data,"frames",frames); calldata_set_string(data,"failure",mediaFailure);},nullptr);
-    return source;
-   };
-   media.destroy=[](void*){}; obs_register_source(&media);
-   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
    layout.pixelviewReceiveIntent=true;
    auto poll=[&]{QMetaObject::invokeMethod(layout.pixelviewReceiveTimer,"timeout"); app.processEvents();};
    auto green=[&]{return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#55b879");};
@@ -366,13 +369,13 @@ int main(int argc,char **argv) {
    assert(!green() && !layout.pixelviewReceiveIntent && layout.pixelviewReceiveStatus->text().contains("HEVC 4:2:2 10-bit"));
    assert(layout.pixelviewReceiveStatus->text().contains("HEVC Main or Main10"));
    assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585"));
-   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
    layout.pixelviewReceiveIntent=true; mediaFailure="unsupported-hevc-profile"; poll();
    assert(!green() && layout.pixelviewReceiveStatus->text().contains("unsupported HEVC profile") && layout.pixelviewReceiveStatus->text().contains("HEVC Main or Main10"));
-   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
    layout.pixelviewReceiveIntent=true; mediaFailure="not-a-known-reason"; poll();
    assert(!green() && layout.pixelviewReceiveStatus->text().contains("failed") && !layout.pixelviewReceiveStatus->text().contains("not-a-known-reason"));
-   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private(media.id,"Synthetic receive",nullptr));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
    // An unexplained stall or end reconnects with backoff instead of stopping;
    // the intent stays set so the button reads Stop receiving, which cancels.
    layout.pixelviewReceiveIntent=true; mediaFailure=""; poll();
