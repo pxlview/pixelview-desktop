@@ -1006,10 +1006,8 @@ gate) fail in the current environment regardless of changes.
 
 ### Not verified
 
-- The connection report from the app itself: the built app (2026-10-09, signed development build
-  of this branch) was not paired against a backend, because pairing needs the Pair dialog, so the
-  app's own `DESKTOP_STATS` push, its timer and the per-minute log line were not observed live.
-  What was run end to end locally the same day, against the pentest backend with this branch's
+- The connection report against production, and over a real network. What was run end to end
+  locally on 2026-10-09, against the pentest backend with this branch's
   relay, the existing local engine, a local Loki and Grafana, and the admin branch:
   a test WHIP publisher built from the same `LinkProbe`/`LinkStats` and the WHIP track chain
   (packetizer, probe around the sender-report handler, NACK responder, the app's pacing) got a
@@ -1018,9 +1016,14 @@ gate) fail in the current environment regardless of changes.
   and NACK counts; the cumulative loss matched the engine's own
   `pv_engine_ingest_rtp_packets_lost_total` (about 10,500 vs 10,297). The publisher's numbers,
   sent as `DESKTOP_STATS` on a real device-token control socket, reached the admin (bars and
-  drawer text, live), were stored in Loki and drew in the dashboard panels. On this Mac the path
-  went over the Tailscale interface and the engine itself lost up to 89 % of video packets in
-  some intervals, with and without pacing; that is the local network path, not the probe.
+  drawer text, live), were stored in Loki and drew in the dashboard panels. That engine process
+  had been running for a week and itself lost up to 89 % of video packets in some intervals
+  (its own counters agree); after restarting it, the app's stream showed 0 % loss and a 5 ms
+  round trip.
+- The app's own report, 2026-10-10: the signed build of local master, paired to that local
+  backend, streamed HEVC to the restarted engine; its `DESKTOP_STATS` reached the backend and the
+  admin (four bars, "round trip 5 ms, loss 0.0 %, jitter 1 ms, sending 6.8 Mb/s") and its
+  per-minute `Pixelview link:` line was written. Windows was not run.
 - The receive canvas following the DeckLink output mode's frame rate, and the on-screen Start
   failure warning, on real DeckLink hardware (offline harness and compile only).
 - Physical SDI picture inspection of the receiver's DeckLink output (cadence, colour, long-run A/V
