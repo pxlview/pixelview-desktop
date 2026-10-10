@@ -194,23 +194,33 @@ static gpointer probe_worker(gpointer unused)
 #ifdef PIXELVIEW_CAPABILITY_TESTING
  g_atomic_int_inc(&test_workers);
 #endif
- for (unsigned i = 0; i < G_N_ELEMENTS(fixtures); i++) {
-  g_mutex_lock(&cache_mutex);
-  gint64 now = g_get_monotonic_time();
-  if (sealed || now >= deadline) { seal_locked(); g_mutex_unlock(&cache_mutex); return NULL; }
-  gint64 until = MIN(deadline, now + 450 * G_TIME_SPAN_MILLISECOND);
-  g_mutex_unlock(&cache_mutex);
-  gboolean supported = decode_fixture(&fixtures[i], until);
+ /* Pixelview: a supported profile occasionally fails one decode (about one
+  * fixture in 25 for Main 4:4:4 10; any fixture can be hit). Its bit then stays
+  * off for the life of the process and the offer silently loses that profile,
+  * so a failed fixture gets further passes in the budget the first pass left. A
+  * profile the Mac cannot decode keeps failing, and the first pass is unchanged,
+  * so a slow refusal never delays the fixtures after it. */
+ for (unsigned pass = 0; pass < 3; pass++) {
+  for (unsigned i = 0; i < G_N_ELEMENTS(fixtures); i++) {
+   g_mutex_lock(&cache_mutex);
+   gint64 now = g_get_monotonic_time();
+   if (sealed || now >= deadline) { seal_locked(); g_mutex_unlock(&cache_mutex); return NULL; }
+   gboolean done = (pending.profiles & fixtures[i].bit) != 0;
+   gint64 until = MIN(deadline, now + 450 * G_TIME_SPAN_MILLISECOND);
+   g_mutex_unlock(&cache_mutex);
+   if (done) continue;
+   gboolean supported = decode_fixture(&fixtures[i], until);
 #ifdef PIXELVIEW_CAPABILITY_TESTING
-  /* Simulate a driver returning a successful decode after a waiter deadline. */
-  if (i == 0) g_usleep((gulong)test_delay_ms * 1000);
+   /* Simulate a driver returning a successful decode after a waiter deadline. */
+   if (pass == 0 && i == 0) g_usleep((gulong)test_delay_ms * 1000);
 #endif
-  g_mutex_lock(&cache_mutex);
-  if (!sealed && g_get_monotonic_time() < deadline && supported) {
-   pending.profiles |= fixtures[i].bit;
-   if (fixtures[i].bit & PV_PROFILE_HEVC_ANY) pending.hevc_level_id = 123;
+   g_mutex_lock(&cache_mutex);
+   if (!sealed && g_get_monotonic_time() < deadline && supported) {
+    pending.profiles |= fixtures[i].bit;
+    if (fixtures[i].bit & PV_PROFILE_HEVC_ANY) pending.hevc_level_id = 123;
+   }
+   g_mutex_unlock(&cache_mutex);
   }
-  g_mutex_unlock(&cache_mutex);
  }
  g_mutex_lock(&cache_mutex);
  seal_locked();

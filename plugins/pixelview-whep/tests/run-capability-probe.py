@@ -82,8 +82,9 @@ def main():
                               text=True, capture_output=True, timeout=15)
     assert observed.returncode == 0, observed
     sessions = observed.stderr.splitlines()
-    assert len(sessions) == 7 and all(line == 'HW_SESSION create=0 query=0 hardware=true' for line in sessions), observed
-    print('hardware-observed', observed.stdout.strip(), 'hardware_sessions=7')
+    # One hardware session per fixture decode; a fixture that failed once is decoded again.
+    assert len(sessions) >= 7 and all(line == 'HW_SESSION create=0 query=0 hardware=true' for line in sessions), observed
+    print('hardware-observed', observed.stdout.strip(), f'hardware_sessions={len(sessions)}')
 
 
 if __name__ == '__main__':

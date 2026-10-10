@@ -599,6 +599,14 @@ static bool probe_attempt(struct receiver *r, uint64_t generation)
  struct probe_waiter waiter = {r, generation};
  struct pixelview_receive_capabilities caps = {0};
  bool success = pixelview_capability_probe_get(&caps, probe_cancelled, &waiter);
+ /* The offer carries only these; a missing one means the engine transcodes or refuses. */
+ if (success)
+  blog(LOG_INFO, "[pixelview-whep] decodes in hardware:%s%s%s%s%s%s%s",
+       caps.profiles & PV_PROFILE_H264 ? " H264" : "", caps.profiles & PV_PROFILE_HEVC_MAIN ? " HEVC-Main" : "",
+       caps.profiles & PV_PROFILE_HEVC_MAIN10 ? " HEVC-Main10" : "",
+       caps.profiles & PV_PROFILE_HEVC_MAIN422_10 ? " HEVC-Main422-10" : "",
+       caps.profiles & PV_PROFILE_HEVC_MAIN444_10 ? " HEVC-Main444-10" : "", caps.profiles & PV_PROFILE_VP9_0 ? " VP9-0" : "",
+       caps.profiles & PV_PROFILE_VP9_2 ? " VP9-2" : "");
  g_mutex_lock(&r->lock);
  bool current = !r->quit && r->generation == generation;
  if (current) { r->active_caps = caps; r->offer_failed = false; }

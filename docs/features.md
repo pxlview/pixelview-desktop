@@ -530,9 +530,9 @@ An earlier backend handoff proposing receiver registration over the control sock
 - The limits are the ordinary ones too: up to 1920x1080, 60 fps at level 4.1, limited range. The
   canvas is linear RGB; the DeckLink output repacks it as v210 (see DeckLink program output), which
   in SDR returns the decoder's code values exactly.
-- Where the probe does not decode 4:2:2 (no hardware 4:2:2 decoder, or the probe's known EOS race
-  dropped the bit for this app run), profile 4 is not offered and the engine transcodes to VP9 as
-  before. A `main-422-10` stream that arrives anyway, or any other non-Main/Main10 HEVC profile, is
+- Where the probe does not decode 4:2:2 (no hardware 4:2:2 decoder), profile 4 is not offered and
+  the engine transcodes to VP9 as before. The receiver logs the profiles it offers once per
+  connection (`[pixelview-whep] decodes in hardware: ...`). A `main-422-10` stream that arrives anyway, or any other non-Main/Main10 HEVC profile, is
   refused before the first access unit with a typed `GST_STREAM_ERROR_WRONG_TYPE`:
   `get_status.failure` reports `unsupported-hevc-main-422-10` or `unsupported-hevc-profile`, and the
   Receiving panel stops with "The sender is streaming HEVC 4:2:2 10-bit, which this Mac cannot
@@ -1104,6 +1104,28 @@ gate) fail in the current environment regardless of changes.
   same receiver class, plugin, shaders and output plugin), the sender's sidebar label and tooltip
   on screen, 23.976 and 30 fps, HDR 4:4:4, a monitor's picture, any Mac other than this M1 Pro,
   two separate Macs, the engine's VP9 transcode of a 4:4:4 sender for other viewers, production.
+- Every HEVC profile on SDI hardware (2026-10-10, M1 Pro, signed development build of
+  `feat/hevc-444` rebased on master, local backend, local pv-engine `main` with pxlview/pv-engine#67,
+  1080p25, 12 Mbit/s). The same loop as above: 4K Mini pattern into the Recorder 3G, the sender
+  application driven only by the Desktop control route (paired at startup from
+  `PIXELVIEW_PAIR_CODE`), `run_receive_sdi_live.py` out of the Monitor 3G, 50 frames averaged on
+  the 4K Mini. All four cable legs were first identical in both picture formats. Each case was
+  judged on HEVC passthrough, the worst patch, the distinct codes on one ramp row (10-bit 609-618 of
+  632, 8-bit 159) and the share of the source's chroma alternation that arrived:
+
+  | Profile | SDI picture | Limited: worst, alternation | Full: worst, alternation |
+  |---|---|---|---|
+  | Main 4:4:4 10 | RGB 4:4:4 (per-pixel R/B) | 1.0, 99% | 2.0, 99% |
+  | Main 4:4:4 10 | Y'CbCr 4:2:2 (per-row Cb) | 0.15, 99% | 1.0, 99% |
+  | Main 4:2:2 10 | Y'CbCr 4:2:2 | 1.0, 100% | 2.0, 100% |
+  | Main 4:2:2 10 | RGB 4:4:4 | 2.0, 14% (pairs share chroma) | 3.0, 14% |
+  | Main10 | Y'CbCr 4:2:2 | 1.0, 0% (4:2:0) | 1.74, 0% |
+  | Main | Y'CbCr 4:2:2 | 2.0, 0%, 8-bit ramp | 3.0, 0%, 8-bit ramp |
+
+  Full range rounds twice; its 2-code errors are single saturated patches at the clip edge. Before
+  the capability probe retry, two of these runs received the engine's VP9 transcode instead (see
+  Known limitations); after it, 12 of 12 were passthrough. Not verified here: the receiving
+  application's window, 24/30 fps, HDR, production.
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
@@ -1228,12 +1250,15 @@ gate) fail in the current environment regardless of changes.
   offered, and the UltraStudio Recorder 3G does not capture RGB on HDMI. RGB to Y'CbCr and back
   rounds twice, so even before the lossy encode an RGB picture returns within one code, not
   bit-exact. Browsers and the iOS player get a VP9 transcode of a 4:4:4 sender.
-- Capability probing caches a reduced decoder mask for the process if the pinned applemedia decoder
-  sends EOS before its last probe frame (about one probe in twelve in a 2026-10-01 repetition, a
-  different profile each time); an isolated decoder patch was evaluated and rejected. With the
-  seventh fixture (Main 4:4:4 10), 34 of 40 probes on 2026-10-02 returned the full mask while a
-  test suite loaded the Mac; one of the six lost the 4:4:4 bit. A run that loses the Main 4:2:2 10
-  or Main 4:4:4 10 bit receives such a sender as the engine's VP9 transcode until restart.
+- A capability probe fixture occasionally fails one decode on hardware that supports it (the
+  pinned applemedia decoder sending EOS before the last frame, or a decode outlasting its 450 ms
+  slot; an isolated decoder patch was evaluated and rejected). The mask is cached for the process,
+  so a lost bit used to stay lost until restart: on 2026-10-10, 22 of 200 fresh probes on the M1
+  Pro missed a profile (Main 4:4:4 10 in 8, any profile could go), and two SDI end-to-end runs
+  received a Main 4:2:2 10 or Main 4:4:4 10 sender as the engine's VP9 profile 2 transcode. The
+  probe now gives failed fixtures two more passes in the budget the first pass leaves (a profile
+  the Mac cannot decode keeps failing and does not delay the others): 200 of 200 probes returned
+  the full mask, the slowest in 1.1 s of the 3 s budget. The rate on other Macs is not measured.
 - Signal-lock and frozen-frame telemetry are not implemented; device presence only.
 - Deep-link HTTPS dispatch needs Associated Domains and a served AASA; only the custom scheme works
   today. Fit has no undo; UI strings are English only.
