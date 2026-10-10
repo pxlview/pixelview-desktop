@@ -90,7 +90,7 @@ Windows port checks that run on macOS (section 6):
 
 ```sh
 python3 -m unittest discover -s test/pixelview -p test_websocket_qt.py      # portable Qt WebSocket/control socket/receiver transport vs loopback; PIXELVIEW_SLOW_TESTS=1 adds the 40 s keepalive timeout
-python3 -m unittest discover -s test/pixelview -p test_windows_release.py   # build flags, appcast, EdDSA verification, installer contract
+python3 -m unittest discover -s test/pixelview -p test_windows_release.py   # build flags, appcast, EdDSA verification, installer contract, launch helper
 ```
 
 ### 3.2 Plugin offline suites
@@ -266,6 +266,7 @@ The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64
   - Passes `OBS_VERSION_OVERRIDE` from `version.json`.
   - Output is `build_x64/rundir/RelWithDebInfo/bin/64bit/Pixelview.exe`.
   - Development builds are unsigned and have no updater. Run the app from that directory or open `build_x64/obs-studio.sln` and debug `obs-studio`.
+- **Launch:** `python cmake/windows/pixelview-launch.py` starts that build detached in the caller's session (run it from the interactive desktop session so the window shows); `--app-config-dir <absolute dir>` adds `--multi` and a separate settings root, `--local-development` sets `PIXELVIEW_LOCAL_DEVELOPMENT=1`, `--wait` returns the app's exit code and `--check-only` prints the command and environment (code shown as `<set>`) without launching. For unattended tests, `--pair-origin <origin> --pair-code <code>` (or `PIXELVIEW_PAIR_CODE`/`PIXELVIEW_PAIR_ORIGIN` in the environment) pairs at startup as on macOS; the helper refuses it without `--app-config-dir`, so the default root's pairing is never replaced, and passes the code to the app only in its environment. Example: `python cmake/windows/pixelview-launch.py --app-config-dir C:\Users\<user>\pv-test --pair-origin http://localhost:8010 --pair-code <code>`.
 - **Release builds** (`PIXELVIEW_RELEASE_BUILD=ON`, set only by the release script):
   - Stage WinSparkle 0.9.4 from the URL and SHA-256 in `release/windows.json` into `.deps/winsparkle-0.9.4`.
   - Compile in the production appcast and `winsparkle_public_key`.

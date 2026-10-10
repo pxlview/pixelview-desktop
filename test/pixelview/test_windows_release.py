@@ -171,5 +171,47 @@ class Installer(unittest.TestCase):
         self.assertNotIn('skipifsilent', iss)  # Silent updates relaunch the app.
 
 
+class Launch(unittest.TestCase):
+    """cmake/windows/pixelview-launch.py --check-only: unattended pairing stays in a separate root."""
+
+    def run_launch(self, *args, **environment):
+        env = {k: v for k, v in os.environ.items() if not k.startswith('PIXELVIEW_')}
+        env.update(environment)
+        return subprocess.run([sys.executable, ROOT / 'cmake/windows/pixelview-launch.py', '--check-only', *args],
+                              env=env, capture_output=True, text=True)
+
+    def test_pairing_passes_the_code_only_through_the_environment(self):
+        for args, environment in (
+                (('--app-config-dir', 'C:\\pv-test', '--pair-origin', 'http://localhost:8010', '--pair-code', 'ABC123'), {}),
+                (('--app-config-dir', 'C:\\pv-test'), {'PIXELVIEW_PAIR_CODE': 'ABC123', 'PIXELVIEW_PAIR_ORIGIN': 'http://localhost:8010'})):
+            with self.subTest(args=args):
+                out = self.run_launch(*args, **environment)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertNotIn('ABC123', out.stdout)
+                plan = json.loads(out.stdout)
+                self.assertTrue(plan['command'][0].endswith('Pixelview.exe'))
+                self.assertEqual(plan['command'][1:], ['--multi', '--app-config-dir', 'C:\\pv-test'])
+                self.assertEqual(plan['environment'], {'PIXELVIEW_LOCAL_DEVELOPMENT': '1', 'PIXELVIEW_PAIR_CODE': '<set>',
+                                                       'PIXELVIEW_PAIR_ORIGIN': 'http://localhost:8010'})
+
+    def test_never_pairs_the_default_settings_root(self):
+        for args, environment in ((('--pair-code', 'ABC123'), {}), ((), {'PIXELVIEW_PAIR_CODE': 'ABC123'}),
+                                  (('--app-config-dir', 'pv-test', '--pair-code', 'ABC123'), {}),
+                                  (('--app-config-dir', 'C:\\pv-test', '--pair-origin', 'http://localhost:8010'), {})):
+            with self.subTest(args=args, environment=environment):
+                out = self.run_launch(*args, **environment)
+                self.assertEqual(out.returncode, 2)
+                self.assertTrue(out.stderr.startswith('error: '))
+
+    def test_plain_launch_has_no_pairing_or_development_switch(self):
+        out = self.run_launch()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        plan = json.loads(out.stdout)
+        self.assertEqual(len(plan['command']), 1)
+        self.assertEqual(plan['environment'], {})
+        plan = json.loads(self.run_launch('--local-development').stdout)
+        self.assertEqual(plan['environment'], {'PIXELVIEW_LOCAL_DEVELOPMENT': '1'})
+
+
 if __name__ == '__main__':
     unittest.main()
