@@ -1126,6 +1126,25 @@ gate) fail in the current environment regardless of changes.
   the capability probe retry, two of these runs received the engine's VP9 transcode instead (see
   Known limitations); after it, 12 of 12 were passthrough. Not verified here: the receiving
   application's window, 24/30 fps, HDR, production.
+- By eye with the receiving application (2026-10-10, same build and engine, two Macs): Resolve
+  played a 10-bit test chart (pv-engine `docs/depth-chart`, plus a 4:4:4 variant whose middle band
+  alternates magenta and green on every pixel column) out of the Monitor 3G into the 4K Mini, the
+  sender captured it as 10-bit RGB, and the receiving application (watch link pasted, DeckLink
+  Output chosen in its dialog) played out of the 4K Mini into a Recorder 3G on a second Mac running
+  Resolve Live. Main 4:4:4 10 with RGB 4:4:4 output kept the per-pixel lines; the same stream with
+  a 4:2:2 output turned them into a magenta block (the output takes each pair's chroma from the
+  even pixel) while the per-row lines and 2-pixel columns stayed coloured; Main 4:2:2 10 with RGB
+  output gave the magenta block too; Main10 also turned the per-row lines grey (row pairs averaged);
+  Main showed wide bands on the shallow ramps. Full range in and out on 4:4:4 looked right.
+- Browsers on the same session (2026-10-10, macOS, local engine `main`): Chrome offers VP9
+  profiles 0-3 and HEVC Main/Main10 only, so a Main 4:4:4 10 sender reaches it as the engine's VP9
+  profile 3 transcode (10-bit 4:4:4, a second lossy encode); Safari offers VP9 profiles 0 and 2
+  and HEVC without a profile id, so it gets VP9 profile 2 (10-bit 4:2:0). A Main10 sender is HEVC
+  passthrough to both. In passthrough Chrome shows the midtones lifted compared with Safari (black
+  and white identical; against the source frame Safari is close to the code values, Chrome about
+  `V'^0.91`, near Apple's own BT.709 display treatment) while with VP9 the two match: a browser
+  display path, not the stream, which carries BT.709 limited labels and the engine's colour-space
+  extension on every path. Neither browser shows BT.1886 (gamma 2.4).
 - HDR PQ receive live (2026-09-23, local backend + engine, rebuilt signed bundle with
   `PIXELVIEW_LOCAL_DEVELOPMENT=1`): OBS 32.2 sending HEVC Main 4:2:2 10 Rec.2100 PQ over WHIP; the
   engine transcoded to VP9 profile 2 tagged BT.2020/PQ/limited (the Desktop does not offer 4:2:2);
