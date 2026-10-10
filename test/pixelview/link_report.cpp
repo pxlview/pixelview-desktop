@@ -63,5 +63,25 @@ int main() {
  assert(logged.sample(62000,31,false,0,none)["media"].isNull());
  assert(logged.logLine(200000).isEmpty());
  assert(logged.sample(300000,31,true,5,none)["media"].toObject()["uptime_s"].toInt()==0);
+ // How hard the computer works rides along while streaming, never when idle.
+ LinkReport loaded;
+ HostLoad h;h.valid=true;h.cpuPct=37.26;h.memoryMb=512.4;h.fps=29.97;h.frameTimeMs=3.14;
+ h.rendered=1000;h.missed=2;h.encoded=990;h.skipped=1;
+ assert(loaded.sample(0,5,false,0,none,h)["host"].isNull());
+ auto hostFirst=loaded.sample(2000,5,true,0,good,h)["host"].toObject();
+ // The first sample only sets the frame baseline.
+ assert(hostFirst["cpu_pct"].toDouble()==37.3 && hostFirst["memory_mb"].toInt()==512 && hostFirst["fps"].toDouble()==30.0 && hostFirst["frame_time_ms"].toDouble()==3.1);
+ assert(!hostFirst.contains("render_total") && !hostFirst.contains("encode_skipped"));
+ HostLoad h2=h;h2.cpuPct=91.0;h2.rendered=1060;h2.missed=5;h2.encoded=1050;h2.skipped=13;
+ auto hostSecond=loaded.sample(4000,5,true,1000000,good,h2)["host"].toObject();
+ assert(hostSecond["render_total"].toInt()==60 && hostSecond["render_missed"].toInt()==3);
+ assert(hostSecond["encode_total"].toInt()==60 && hostSecond["encode_skipped"].toInt()==12);
+ // Counters that went back (a restarted output) are a new baseline, not negative frames.
+ HostLoad reset=h2;reset.encoded=10;reset.skipped=0;
+ assert(!loaded.sample(6000,5,true,2000000,good,reset)["host"].toObject().contains("encode_total"));
+ // A sample without host numbers (older output path) reports none.
+ assert(loaded.sample(8000,5,true,3000000,good)["host"].isNull());
+ const QString hostLine=loaded.logLine(62000);
+ assert(hostLine.endsWith(QStringLiteral(", CPU max 91.0 %, 12 of 60 frames skipped in encoding, 3 of 60 missed in rendering, control round trip 5 ms")));
  std::puts("link report ok");
 }

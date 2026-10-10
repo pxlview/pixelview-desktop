@@ -183,6 +183,14 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   by the frontend through the output's `pixelview_link_stats` procedure). It is the round trip
   to the server the stream is published to, on the media path itself, smoothed over the last few
   reports. With simulcast it covers the first video layer; Pixelview sends one.
+- While streaming the report also has `host`: how hard this computer works, from the same
+  sources as OBS's Stats window - `cpu_pct` (this process), `memory_mb`, `fps`, `frame_time_ms`
+  (average render time), and per interval `render_total`/`render_missed` (frames missed due to
+  rendering lag) and `encode_total`/`encode_skipped` (frames skipped due to encoding lag, from
+  the stream encoder's own video). An overloaded computer drops bitrate with no packet loss and
+  would otherwise look like a bad network. The per-minute log line adds the worst CPU and the
+  skipped/missed counts of that minute. `host` is `null` when not streaming, so idle reports
+  still go out only when the control round trip changes.
 - Always, `control.rtt_ms` is the round trip of the control socket's own WebSocket ping (every
   20 s, so it is `null` for the first 20 s of a socket): NSURLSession's ping on macOS, the Qt
   client's keepalive (`PixelviewWebSocket`) on Windows and Linux. Both are held to one
