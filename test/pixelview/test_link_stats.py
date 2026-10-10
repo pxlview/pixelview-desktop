@@ -39,6 +39,12 @@ class LinkStats(unittest.TestCase):
                  str(ROOT/'test/pixelview/link_report.cpp'), '-o', tmp+'/report'],
                 tmp+'/report', 'link report ok')
 
+    def test_whole_computer_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run(['clang++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I'+str(ROOT),
+                 str(ROOT/'test/pixelview/system_load.cpp'), '-o', tmp+'/load'],
+                tmp+'/load', 'system load ok')
+
     def test_whip_output_feeds_the_probe(self):
         output = (ROOT/'plugins/obs-webrtc/whip-output.cpp').read_text()
         # The probe runs the sender-report handler itself; adding both would send every report twice.

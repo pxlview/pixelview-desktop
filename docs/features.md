@@ -187,7 +187,11 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   sources as OBS's Stats window - `cpu_pct` (this process), `memory_mb`, `fps`, `frame_time_ms`
   (average render time), and per interval `render_total`/`render_missed` (frames missed due to
   rendering lag) and `encode_total`/`encode_skipped` (frames skipped due to encoding lag, from
-  the stream encoder's own video). An overloaded computer drops bitrate with no packet loss and
+  the stream encoder's own video). `system_cpu_pct` and `system_memory_pct` are the whole
+  computer (`PixelviewSystemLoad.hpp`: busy share of all cores between reports from the system
+  tick counters - `host_statistics` on macOS, `GetSystemTimes` on Windows, `/proc/stat` on Linux -
+  and physical memory in use, counted like Activity Monitor on macOS), because Pixelview's own
+  CPU says nothing when another application is overloading the computer. An overloaded computer drops bitrate with no packet loss and
   would otherwise look like a bad network. The per-minute log line adds the worst CPU and the
   skipped/missed counts of that minute. `host` is `null` when not streaming, so idle reports
   still go out only when the control round trip changes.

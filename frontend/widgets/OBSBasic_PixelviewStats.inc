@@ -27,6 +27,8 @@ void OBSBasic::PushPixelviewStats()
 	pixelview::MediaLink link;
 	pixelview::HostLoad host;
 	quint64 bytes = 0;
+	// Sampled every tick so the first streaming report already has a CPU interval.
+	const double systemCpu = pixelviewSystemLoad.cpuPct();
 	if (streaming) {
 		// The same sources as the Stats window; skipped frames come from the stream encoder's own video.
 		obs_encoder_t *encoder = obs_output_get_video_encoder(output);
@@ -34,6 +36,8 @@ void OBSBasic::PushPixelviewStats()
 		if (!video) video = obs_get_video();
 		host.valid = true;
 		host.cpuPct = GetCPUUsage();
+		host.systemCpuPct = systemCpu;
+		host.systemMemoryPct = pixelview::SystemLoad::memoryPct();
 		host.memoryMb = (double)os_get_proc_resident_size() / (1024.0 * 1024.0);
 		host.fps = obs_get_active_fps();
 		host.frameTimeMs = (double)obs_get_average_frame_time_ns() / 1000000.0;

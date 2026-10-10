@@ -57,6 +57,7 @@ class OBSAbout;
 #include <utility/PixelviewDeepLink.hpp>
 #include <utility/PixelviewLogShipper.hpp>
 #include <utility/PixelviewLinkReport.hpp>
+#include <utility/PixelviewSystemLoad.hpp>
 class QTabBar;
 class QLineEdit;
 class QToolButton;
@@ -394,6 +395,7 @@ private:
 	void PushPixelviewStats();
 	QTimer *pixelviewStatsTimer = nullptr;
 	pixelview::LinkReport pixelviewLinkReport;
+	pixelview::SystemLoad pixelviewSystemLoad;
 	// Sender-setting failures are dialogs locally but errors for a remote command.
 	QString *pixelviewRemoteError = nullptr;
 	void PixelviewWarn(const QString &title, const QString &message);

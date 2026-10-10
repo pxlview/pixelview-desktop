@@ -7,8 +7,8 @@
 // media server reports back over RTCP. Measurements only; the admin decides
 // how to present them. While streaming it also carries how hard this computer
 // works (CPU, memory, frame rate, frames missed in rendering and skipped in
-// encoding), since an overloaded computer looks like a bad network from the
-// outside. Pure policy, tested in test/pixelview/link_report.cpp.
+// encoding, plus the whole computer's CPU and memory), since an overloaded
+// computer looks like a bad network from the outside. Pure policy, tested in test/pixelview/link_report.cpp.
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QString>
@@ -28,6 +28,8 @@ struct MediaLink {
 struct HostLoad {
  bool valid=false;
  double cpuPct=0, memoryMb=0, fps=0, frameTimeMs=0;
+ // The whole computer (all processes); -1 when unknown.
+ double systemCpuPct=-1, systemMemoryPct=-1;
  quint64 rendered=0, missed=0, encoded=0, skipped=0;
 };
 class LinkReport {
@@ -55,6 +57,8 @@ public:
    if(host.valid) {
     QJsonObject h{{"cpu_pct",tenth(host.cpuPct)},{"memory_mb",std::round(host.memoryMb)},{"fps",tenth(host.fps)},
      {"frame_time_ms",tenth(host.frameTimeMs)}};
+    if(host.systemCpuPct>=0) h["system_cpu_pct"]=tenth(host.systemCpuPct);
+    if(host.systemMemoryPct>=0) h["system_memory_pct"]=tenth(host.systemMemoryPct);
     // Frames in this interval; a stream's first sample, or counters that went back, only set the baseline.
     const bool counted=hadHost && host.rendered>=last.rendered && host.missed>=last.missed &&
      host.encoded>=last.encoded && host.skipped>=last.skipped;
@@ -65,6 +69,7 @@ public:
      window.encoded+=host.encoded-last.encoded;window.skipped+=host.skipped-last.skipped;
     }
     window.host=true;window.maxCpu=std::max(window.maxCpu,host.cpuPct);
+    window.maxSystemCpu=std::max(window.maxSystemCpu,host.systemCpuPct);
     last=host;load=h;
    }
    if(kbps>=0) {window.kbps+=kbps;++window.samples;}
@@ -102,8 +107,10 @@ public:
     .arg(window.maxLoss,0,'f',1).arg(window.maxJitter,0,'f',1).arg(window.lost).arg(window.nacked);
   }
   if(window.host)
-   line+=QStringLiteral(", CPU max %1 %, %2 of %3 frames skipped in encoding, %4 of %5 missed in rendering")
-    .arg(window.maxCpu,0,'f',1).arg(window.skipped).arg(window.encoded).arg(window.missed).arg(window.rendered);
+   line+=(window.maxSystemCpu>=0 ? QStringLiteral(", CPU max %1 % (computer max %2 %)").arg(window.maxCpu,0,'f',1).arg(window.maxSystemCpu,0,'f',1) :
+     QStringLiteral(", CPU max %1 %").arg(window.maxCpu,0,'f',1)) +
+    QStringLiteral(", %1 of %2 frames skipped in encoding, %3 of %4 missed in rendering")
+    .arg(window.skipped).arg(window.encoded).arg(window.missed).arg(window.rendered);
   line+=window.control<0 ? QStringLiteral(", control round trip unknown") : QStringLiteral(", control round trip %1 ms").arg(window.control);
   window={};window.since=now;
   return line;
@@ -112,7 +119,7 @@ private:
  static double tenth(double value) {return std::round(value*10.0)/10.0;}
  struct Window {
   qint64 since=0,lost=0,nacked=0;
-  double kbps=0,maxLoss=0,maxJitter=0,maxCpu=0;
+  double kbps=0,maxLoss=0,maxJitter=0,maxCpu=0,maxSystemCpu=-1;
   int samples=0,rtt=-1,maxRtt=-1,control=-1;
   quint64 rendered=0,missed=0,encoded=0,skipped=0;
   bool reported=false,host=false;
