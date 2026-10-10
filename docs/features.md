@@ -208,7 +208,7 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   unanswered pings time nothing, and closing the socket forgets it (`test_control_socket.py`
   for macOS, `test_websocket_qt.py` for the Qt client, run on macOS). The media part and the
   report are the same code on both platforms (same obs-deps, libdatachannel 0.24.2); the
-  `windows-build` CI job compiled this branch with MSVC, but the app was not run on Windows. Not streaming, a report is sent only
+  `windows-build` CI job compiled this branch with MSVC, and the app streamed with it on Windows (see the 2026-10-10 Windows run under verification). Not streaming, a report is sent only
   when it differs from the last one, which is once per answered ping. A new socket gets one
   after `DESKTOP_READY`.
 - Once per minute of streaming a summary goes to the application log, and with it to the log
@@ -813,6 +813,24 @@ gate) fail in the current environment regardless of changes.
   the build loaded the same 21 modules as the 0.0.12 release run and never opened either fake; the
   installed staging build 9002 (from before the change) logged "Skipping module ... not an OBS
   plugin" for both.
+- Connection report on Windows (2026-10-10, `master` 40a39217d, MSVC development build on a
+  Windows 11 x64 machine on the LAN with an AMD GPU; the stats backend, engine and admin ran on a
+  Mac, reached through a local TCP forward of `localhost:8010`): the app paired unattended from
+  `PIXELVIEW_PAIR_CODE` into a fresh `--app-config-dir` (Credential Manager save, control socket
+  ready 0.4 s after start), and with a seeded test-pattern scene the stream was started and
+  stopped from the backend's remote-control `start`/`stop`, no clicks. About 2.5 minutes of
+  1080p30 `h265_texture_amf` at 6 Mbit/s: WHIP connected in 2.1 s directly over UDP to the
+  engine; reports every 2 s reached Loki with media round trip 22-66 ms, 0 % loss, 0 lost or
+  resent, control round trip 3-32 ms, and `host` with 0 of about 1800 frames per minute skipped or
+  missed. Whole-computer memory read 28.5-28.6 % against 28.6-28.7 % from `Win32_OperatingSystem`,
+  and app memory 233 MB against a 234 MB working set. Whole-computer CPU read 1.3-1.7 % per report
+  (per-minute max 10-16 %); Windows' own counters read 2.8-3.0 % (`% Processor Utility`, what Task
+  Manager shows, frequency-scaled) and 0-33 % in 3 s samples (`% Processor Time`), so the values
+  are plausible but not compared precisely. The stop kept the control socket up; WM_CLOSE quit
+  cleanly ("Number of memory leaks: 1", which earlier Windows runs also show occasionally; no crash
+  dump). Not run on Windows: the clang-compiled unit tests (no clang++ there), so
+  `GetSystemTimes` was exercised only live; DeckLink capture; a loaded computer. At the default
+  log level the Windows log names neither the WHIP request nor the selected ICE pair.
 - Windows update from one signed build to the next (2026-10-09, `master` c7efdacd8, same laptop),
   through the local staging feed (`docs/build-and-release.md` 6.3): staging build 9001 was installed
   silently; on launch its automatic check fetched the 127.0.0.1 feed and opened Software Update
