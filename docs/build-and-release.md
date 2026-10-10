@@ -49,11 +49,13 @@ BUILD_JOBS=1 bash cmake/macos/pixelview-build.sh --allow-dirty --source-settled
 python3 cmake/macos/pixelview-launch.py --check-only   # verify and print the command only
 python3 cmake/macos/pixelview-launch.py                # new pairings use https://api4.pixelview.io
 PIXELVIEW_LOCAL_DEVELOPMENT=1 python3 cmake/macos/pixelview-launch.py   # new pairings use http://localhost:8000
+PIXELVIEW_LOCAL_DEVELOPMENT=1 PIXELVIEW_PAIR_ORIGIN=http://localhost:8010 PIXELVIEW_PAIR_CODE=<code> \
+  python3 cmake/macos/pixelview-launch.py --app-config-dir <scratch dir>   # pairs at startup, no dialog
 python3 cmake/macos/pixelview-launch.py --app-config-dir /Users/max/src/pixelview-hardware-25p/sender-config
 python3 cmake/macos/pixelview-launch.py --app-config-dir /Users/max/src/pixelview-hardware-25p/receiver-config
 ```
 
-- Only the exact value `PIXELVIEW_LOCAL_DEVELOPMENT=1` selects localhost; saved pairings are never retargeted by the environment — Unpair first. Keychain accounts are keyed by exact origin (`localhost` ≠ `127.0.0.1`).
+- Only the exact value `PIXELVIEW_LOCAL_DEVELOPMENT=1` selects localhost; saved pairings are never retargeted by the environment — Unpair first — except by `PIXELVIEW_PAIR_CODE`, which replaces the settings root's pairing at startup (`docs/features.md`). Mint the code with the admin API (`POST /login/admin`, then `POST /desktop/pairing-token {"node_id": ...}` with that token); it is single use. Keychain accounts are keyed by exact origin (`localhost` ≠ `127.0.0.1`).
 - `--app-config-dir` (absolute path) adds `--multi --app-config-dir <root>`; it isolates application files, not Keychain identities. Never run two writers against one root. `--migrate-from '<old>/Library/Application Support/pixelview' --app-config-dir <new-root>` copies only allowlisted video/audio `basic.ini` settings into a new root and exits without launching.
 
 ### 2.3 Settings, logs, sentinel

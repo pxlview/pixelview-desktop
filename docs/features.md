@@ -35,6 +35,12 @@ the "Verification status" section says so explicitly.
   admin code. Setting exactly `PIXELVIEW_LOCAL_DEVELOPMENT=1` in the launch environment exposes the
   backend origin field and a Local development checkbox, defaulting to `http://localhost:8000`.
   Any other value keeps production defaults. The switch affects new pairing form defaults only.
+- Unattended pairing for automated tests: with `PIXELVIEW_LOCAL_DEVELOPMENT=1`, a one-time admin code
+  in `PIXELVIEW_PAIR_CODE` (and optionally `PIXELVIEW_PAIR_ORIGIN`, default `http://localhost:8000`)
+  makes the app forget any saved pairing in its settings root at startup, locally only (the old device
+  stays listed in its account), and pair with that code through the normal exchange. Both variables
+  are removed from the process environment first; without the development switch the code is ignored
+  with a log warning. Use it with `--app-config-dir` so a real pairing is not replaced.
 - HTTPS/WSS is required except for loopback HTTP with the development flag; no redirects are
   followed, and resource origins are validated.
 - `POST /desktop/exchange` returns the device token and non-secret identity (`NodeId`, `DesktopId`,

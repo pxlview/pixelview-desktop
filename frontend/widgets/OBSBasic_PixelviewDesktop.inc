@@ -214,6 +214,22 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   !config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete");
  pixelviewPairingDurable=!pixelviewIdentity.nodeId.isEmpty() && !pixelviewIdentity.desktopId.isEmpty() &&
   !config_get_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled");
+ const bool environmentCode=!qgetenv("PIXELVIEW_PAIR_CODE").isEmpty();
+ if(auto pairing=pixelview::takeEnvironmentPairing()) {
+  // Automated tests: forget whatever this settings root was paired to (locally
+  // only; the old device stays listed in its account) and pair with the code.
+  blog(LOG_INFO,"Pixelview: pairing from the environment with %s, replacing any saved pairing",
+   pairing->origin.toString().toUtf8().constData());
+  if(!pixelviewOrigin.isEmpty()) pixelview::removeDevice(pixelviewOrigin.toString());
+  pixelviewIdentity.clear();pixelviewExpectedIdentity.clear();
+  pixelviewPairingDurable=false;pixelviewUnpairRetry=false;
+  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","PairingDisabled",true);
+  config_set_bool(App()->GetUserConfig(),"PixelviewDesktop","CleanupComplete",true);
+  SavePixelviewIdentity();
+  pixelviewDesktop->pair(pairing->origin,true,pairing->code);
+  return;
+ }
+ if(environmentCode) blog(LOG_WARNING,"Pixelview: PIXELVIEW_PAIR_CODE ignored; it requires PIXELVIEW_LOCAL_DEVELOPMENT=1");
  RefreshPixelviewPairing();
  if(pixelview::Desktop::validOrigin(pixelviewOrigin,pixelviewDev)) ConnectPixelviewDesktop();
 }

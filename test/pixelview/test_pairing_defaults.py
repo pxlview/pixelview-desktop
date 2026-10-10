@@ -119,5 +119,54 @@ int main(int argc,char **argv) {
                 subprocess.run([self.binary, 'production'], env=env, check=True, timeout=10)
 
 
+class EnvironmentPairing(unittest.TestCase):
+    """PIXELVIEW_PAIR_CODE/ORIGIN pair at startup only in local development."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        src = pathlib.Path(cls.tmp.name) / 'environment.cpp'
+        src.write_text(r'''
+#include <cstdio>
+#include "frontend/utility/PixelviewBackend.hpp"
+int main() {
+ auto pairing=pixelview::takeEnvironmentPairing();
+ // The code must not reach child processes, whether or not it was used.
+ if(qEnvironmentVariableIsSet("PIXELVIEW_PAIR_CODE") || qEnvironmentVariableIsSet("PIXELVIEW_PAIR_ORIGIN")) return 2;
+ if(!pairing) {std::puts("none");return 0;}
+ std::printf("%s %s\n",pairing->origin.toString().toUtf8().constData(),pairing->code.toUtf8().constData());
+}
+''')
+        qt = ROOT / '.deps/obs-deps-qt6-2026-08-26-universal/lib'
+        cls.binary = cls.tmp.name + '/environment'
+        subprocess.run(['clang++', '-std=c++17', '-I'+str(ROOT), '-F'+str(qt), '-framework', 'QtCore',
+                        '-Wl,-rpath,'+str(qt), str(src), '-o', cls.binary], check=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_with(self, **values):
+        env = {k: v for k, v in os.environ.items() if not k.startswith('PIXELVIEW_')}
+        env.update(values)
+        return subprocess.run([self.binary], env=env, check=True, timeout=10,
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_development_pairs_with_given_or_default_origin(self):
+        self.assertEqual(self.run_with(PIXELVIEW_LOCAL_DEVELOPMENT='1', PIXELVIEW_PAIR_CODE=' abc123 ',
+                                       PIXELVIEW_PAIR_ORIGIN='http://localhost:8010'),
+                         'http://localhost:8010 abc123')
+        self.assertEqual(self.run_with(PIXELVIEW_LOCAL_DEVELOPMENT='1', PIXELVIEW_PAIR_CODE='abc123'),
+                         'http://localhost:8000 abc123')
+
+    def test_ignored_without_development_or_code(self):
+        for values in ({'PIXELVIEW_PAIR_CODE': 'abc123'},
+                       {'PIXELVIEW_LOCAL_DEVELOPMENT': 'true', 'PIXELVIEW_PAIR_CODE': 'abc123'},
+                       {'PIXELVIEW_LOCAL_DEVELOPMENT': '1', 'PIXELVIEW_PAIR_ORIGIN': 'http://localhost:8010'},
+                       {'PIXELVIEW_LOCAL_DEVELOPMENT': '1', 'PIXELVIEW_PAIR_CODE': '  '}):
+            with self.subTest(values=values):
+                self.assertEqual(self.run_with(**values), 'none')
+
+
 if __name__ == '__main__':
     unittest.main()
