@@ -35,6 +35,8 @@ def main():
     parser.add_argument('--mode', default='1080p25')
     parser.add_argument('--format', choices=('yuv422', 'rgb444'), default='yuv422')
     parser.add_argument('--range', choices=('limited', 'full'), default='limited')
+    parser.add_argument('--color', choices=('sdr', 'pq', 'hlg'), default='sdr',
+                        help='receiver colour mode; pq/hlg also make the canvas Rec.2100 and the output HDR')
     parser.add_argument('--seconds', type=int, default=60)
     parser.add_argument('--origin', default='http://localhost:8000')
     args = parser.parse_args()
@@ -53,11 +55,12 @@ def main():
                         '-o', str(exe)], check=True, env=dict(os.environ, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer'))
         env = {k: v for k, v in os.environ.items() if not k.startswith(('GST_', 'DYLD_'))}
         env.update(HOME=str(tmp), CFFIXED_USER_HOME=str(tmp))
+        # Diagnostics: PIXELVIEW_GST_DEBUG (e.g. '*:2') reaches the harness, which applies it.
         decklink = APP / 'PlugIns/decklink.plugin/Contents'
         result = subprocess.run([str(exe), str(APP / 'PlugIns/pixelview-whep.plugin/Contents/MacOS/pixelview-whep'),
                                  str(FW / 'libobs.framework/Versions/A/Resources'), str(FW / 'libobs-opengl.dylib'),
                                  str(decklink / 'MacOS/decklink'), str(decklink / 'Resources'), args.output, args.mode,
-                                 args.format, args.range, str(args.seconds), args.origin, str(rate[0]), str(rate[1])],
+                                 args.format, args.range, str(args.seconds), args.origin, str(rate[0]), str(rate[1]), args.color],
                                 input=json.dumps({k: str(credentials[k]) for k in ('session_id', 'password')}) + '\n',
                                 text=True, env=env)
         raise SystemExit(result.returncode)

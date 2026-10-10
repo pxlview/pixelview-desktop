@@ -381,7 +381,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		pixelviewReceiveFrames = 0;
 		SetPixelviewReceiveStatus(pixelviewReceiver->status(), pixelviewReceiver->state() == State::Error ? ReceiveStatusTone::Error :
 			pixelviewReceiver->state() == State::Idle ? ReceiveStatusTone::Idle : ReceiveStatusTone::Connecting);
-		RefreshPixelviewModes(); RefreshPixelviewAudio();
+		// A receive that ended on its own (expired authorization, error) clears the tray too.
+		RefreshPixelviewModes(); RefreshPixelviewAudio(); RefreshPixelviewReceiveTray();
 	};
 	pixelviewReceiver->onEndpoint = [this](const QString &endpoint) {
 		if (!pixelviewReceiveIntent || !pixelviewReceiving || isClosing() || pixelviewShutdownPending) return;

@@ -479,6 +479,12 @@ private:
 	bool PixelviewProfileBlocked(const std::string &profile) const;
 	void ApplyPixelviewProfilePolicy();
 	bool pixelviewProfilePolicyPending = false;
+	// Node input colour profile -> sender canvas (SDR or Rec.2100 PQ/HLG).
+	bool PixelviewColorHdr() const;
+	bool ApplyPixelviewColor(bool starting = false);
+	void ApplyPixelviewCaptureColor();
+	bool pixelviewColorPending = false;
+	QLabel *pixelviewColorLabel = nullptr;
 	void AdvancedPixelviewEncoding();
 	QComboBox *pixelviewEncoder = nullptr;
 	QComboBox *pixelviewProfile = nullptr;

@@ -50,6 +50,10 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   // Queued: DESKTOP_READY is handled before the pairing identity is saved.
   QTimer::singleShot(0,this,&OBSBasic::ApplyPixelviewProfilePolicy);
  };
+ pixelviewLease.colorChanged=[this]{
+  blog(LOG_INFO,"Pixelview: node colour profile %s",pixelviewLease.colorProfile.toUtf8().constData());
+  QTimer::singleShot(0,this,[this]{ApplyPixelviewColor();});
+ };
  pixelviewLease.profile=[this]{return PixelviewReportedSettings()["encoder_profile"].toString();};
  pixelviewLease.send=[this](QJsonObject o){pixelviewDesktop->sendSocket(QJsonDocument(o).toJson(QJsonDocument::Compact));};
  pixelviewLease.report=[this]{
@@ -84,6 +88,8 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
  };
  pixelviewLease.publish=[this](QString endpoint,QString bearer){
   if(!PixelviewLeaseValid() || PixelviewSettingsBusy()) {pixelviewLease.fail("Cannot start while native output is busy.");return;}
+  // The stream starts in the node's colour profile (SDR, or Rec.2100 PQ/HLG).
+  if(!ApplyPixelviewColor(true)) {pixelviewLease.deny(QStringLiteral("The sender could not switch to this node's colour profile."));return;}
   pixelviewConnectionStatus->setText(QStringLiteral("Preparing WHIP stream…"));
   OBSDataAutoRelease settings=obs_data_create();
   obs_data_set_string(settings,"server",endpoint.toUtf8().constData());

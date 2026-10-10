@@ -251,6 +251,12 @@ void DeckLinkDeviceInstance::HandleVideoFrame(IDeckLinkVideoInputFrame *videoFra
 			}
 		}
 	}
+	// Pixelview: without HDR metadata on the frame, a Rec.2100 PQ or HLG colour
+	// space chosen for the input supplies the transfer (upstream read it as SDR).
+	if (trc == VIDEO_TRC_DEFAULT && activeColorSpace == VIDEO_CS_2100_PQ)
+		trc = VIDEO_TRC_PQ;
+	else if (trc == VIDEO_TRC_DEFAULT && activeColorSpace == VIDEO_CS_2100_HLG)
+		trc = VIDEO_TRC_HLG;
 	currentFrame.trc = trc;
 
 	obs_source_output_video2(static_cast<DeckLinkInput *>(decklink)->GetSource(), &currentFrame);

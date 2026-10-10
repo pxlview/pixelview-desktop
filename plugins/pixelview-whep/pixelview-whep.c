@@ -65,7 +65,16 @@ static void unsupported_profile_locked(struct receiver *r,GstMessage *msg)
 static void color_failure(struct receiver *r, GstCaps *caps, enum pixelview_color color)
 {
  const char *reason = pixelview_video_color_mismatch(caps, color);
- if (!reason) return;
+ if (!reason) {
+  /* Not a colour-mode mismatch: name the decoded caps once, or the stop is silent. */
+  static gint logged;
+  if (caps && g_atomic_int_compare_and_exchange(&logged, 0, 1)) {
+   gchar *text = gst_caps_to_string(caps);
+   blog(LOG_ERROR, "[pixelview-whep] decoded video not accepted: %s", text);
+   g_free(text);
+  }
+  return;
+ }
  g_mutex_lock(&r->lock);
  const bool first = !r->quit && !r->changed && r->generation == r->active_generation && !r->failure;
  if (first) r->failure = reason;

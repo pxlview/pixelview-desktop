@@ -3,6 +3,7 @@
 #include <QFormLayout>
 #include <QPixmap>
 #include <utility>
+#include "utility/PixelviewP3Filter.hpp"
 namespace {
 bool PixelviewListValue(obs_properties_t *props, const char *key, const char *value)
 {
@@ -155,7 +156,7 @@ static QString PixelviewProfileLabel(const QString &name, const QString &value)
 {
 	if (value == QStringLiteral("main10")) return name + QStringLiteral(" (recommended)");
 	if (value == QStringLiteral("main42210")) return name + QStringLiteral(" (transcoded for browsers)");
-	if (value == QStringLiteral("main44410")) return name + QStringLiteral(" (Pixelview Desktop only)");
+	if (value == QStringLiteral("main44410")) return name + QStringLiteral(" (transcoded for browsers)");
 	return name;
 }
 static QString PixelviewProfileTip(const QString &value)
@@ -165,7 +166,7 @@ static QString PixelviewProfileTip(const QString &value)
 	if (value == QStringLiteral("main42210"))
 		return PIXELVIEW_PLATFORM_TEXT("Native in the Pixelview Player iOS app and in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, lower quality.", "Native in the Pixelview Player iOS app and in Pixelview Desktop on a Mac with Apple silicon. Transcoded for browsers: more latency, lower quality.");
 	if (value == QStringLiteral("main44410"))
-		return PIXELVIEW_PLATFORM_TEXT("Full-resolution colour for RGB sources. Native only in Pixelview Desktop on Apple silicon; every other viewer gets a transcode. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.", "Full-resolution colour for RGB sources. Native only in Pixelview Desktop on a Mac with Apple silicon; every other viewer gets a transcode. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.");
+		return PIXELVIEW_PLATFORM_TEXT("Full-resolution colour for RGB sources. Native in Pixelview Desktop on Apple silicon. Transcoded for browsers: more latency, and 4:2:0 except where a browser takes VP9 4:4:4. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.", "Full-resolution colour for RGB sources. Native in Pixelview Desktop on a Mac with Apple silicon. Transcoded for browsers: more latency, and 4:2:0 except where a browser takes VP9 4:4:4. Needs an RGB 4:4:4 capture input and an RGB monitoring output to matter.");
 	return QString();
 }
 // END PROFILE LABELS
@@ -235,6 +236,12 @@ void OBSBasic::InitPixelviewEncoding(QWidget *sidebar)
 	pixelviewEncodingStatus->setObjectName(QStringLiteral("pixelviewEncodingStatus"));
 	pixelviewEncodingStatus->hide();
 	layout->addWidget(pixelviewEncodingStatus);
+	pixelviewColorLabel = new QLabel(sidebar);
+	pixelviewColorLabel->setObjectName(QStringLiteral("pixelviewColorProfile"));
+	pixelviewColorLabel->setWordWrap(true);
+	pixelviewColorLabel->setToolTip(QStringLiteral("Set by this node's input colour profile in Pixelview admin. HDR streams at a 1000-nit nominal peak and needs an HEVC 10-bit profile."));
+	pixelviewColorLabel->hide();
+	layout->addWidget(pixelviewColorLabel);
 	pixelviewProfile->setToolTip(QStringLiteral("Encoder profile. Main10 is recommended; 10-bit detail also needs a 10-bit capture input."));
 	const bool initialized = config_get_bool(activeConfiguration, "Pixelview", "EncodingInitialized");
 	const QString saved = QString::fromUtf8(config_get_string(activeConfiguration, "AdvOut", "Encoder"));
@@ -352,11 +359,130 @@ void OBSBasic::RefreshPixelviewEncoding()
 	// A blocked profile met while streaming is switched once configuration unlocks.
 	if (pixelviewProfilePolicyPending && idle)
 		QTimer::singleShot(0, this, &OBSBasic::ApplyPixelviewProfilePolicy);
+	// A colour profile changed while streaming or receiving applies once idle.
+	if (pixelviewColorPending && idle)
+		QTimer::singleShot(0, this, [this] { ApplyPixelviewColor(); });
 }
 
 bool OBSBasic::PixelviewProfileBlocked(const std::string &profile) const
 {
+	if (profile == "main" && PixelviewColorHdr()) return true; // HDR needs ten bits
 	return !profile.empty() && pixelviewLease.blockedProfiles.contains(QString::fromStdString(profile));
+}
+
+bool OBSBasic::PixelviewColorHdr() const
+{
+	return pixelview::nodeColor(pixelviewLease.colorProfile.toStdString()).hdr;
+}
+
+void OBSBasic::ApplyPixelviewCaptureColor()
+{
+	// A DeckLink capture labels its frames with the node's transfer (frame HDR
+	// metadata, when the signal carries it, still wins in the plugin).
+	OBSSource source = PixelviewCaptureSource();
+	if (!source || strcmp(obs_source_get_id(source), "decklink-input") != 0 || pixelviewLease.colorProfile.isEmpty()) return;
+	const auto target = pixelview::nodeColor(pixelviewLease.colorProfile.toStdString());
+	// P3-D65 sent with Pixelview Desktop: the capture's primaries are corrected here.
+	OBSSourceAutoRelease p3 = obs_source_get_filter_by_name(source, pixelview::P3_FILTER_NAME);
+	if (target.p3 && !p3) {
+		OBSSourceAutoRelease filter = obs_source_create_private(pixelview::P3_FILTER_ID, pixelview::P3_FILTER_NAME, nullptr);
+		if (filter) {
+			obs_source_filter_add(source, filter);
+			blog(LOG_INFO, "Pixelview: P3-D65 to Rec.2020 conversion on the capture");
+		} else {
+			blog(LOG_ERROR, "Pixelview: P3-D65 conversion filter unavailable");
+		}
+	} else if (!target.p3 && p3) {
+		obs_source_filter_remove(source, p3);
+		blog(LOG_INFO, "Pixelview: P3-D65 conversion removed from the capture");
+	}
+	const std::string space = target.space;
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	const long long current = obs_data_get_int(settings, "color_space");
+	const bool currentHdr = current == VIDEO_CS_2100_PQ || current == VIDEO_CS_2100_HLG;
+	const long long wanted = space == "2100PQ" ? VIDEO_CS_2100_PQ : space == "2100HLG" ? VIDEO_CS_2100_HLG
+				: currentHdr ? VIDEO_CS_DEFAULT : current;
+	if (wanted == current) {
+		if (target.p3 != !!p3) SaveProject();
+		return;
+	}
+	obs_data_set_int(settings, "color_space", wanted);
+	obs_source_update(source, settings);
+	SaveProject();
+	blog(LOG_INFO, "Pixelview: capture colour space %lld -> %lld for the node's colour profile", current, wanted);
+}
+
+// The node's input colour profile decides the sender canvas. HDR also needs an
+// HEVC 10-bit profile, so 8-bit Main (and a non-HEVC encoder) is replaced first.
+// Starting: called from publish, before the output exists, past the lease lock.
+bool OBSBasic::ApplyPixelviewColor(bool starting)
+{
+	pixelviewColorPending = false;
+	if (isClosing() || !pixelviewEncoder) return true;
+	const std::string profile = pixelviewLease.colorProfile.toStdString();
+	const auto target = pixelview::nodeColor(profile);
+	if (pixelviewColorLabel) {
+		pixelviewColorLabel->setVisible(!profile.empty());
+		pixelviewColorLabel->setText(target.hdr ? QStringLiteral("Colour: %1 · %2 nits").arg(QString::fromUtf8(target.label)).arg(pixelview::HDR_NOMINAL_PEAK_NITS)
+							: QStringLiteral("Colour: %1").arg(QString::fromUtf8(target.label)));
+	}
+	if (profile.empty()) return true; // A backend without colour profiles: keep the canvas.
+	if (starting ? (pixelviewReceiving || PixelviewSettingsBusy()) : PixelviewConfigurationLocked()) {
+		blog(LOG_INFO, "Pixelview: node colour profile %s applies when the sender is idle", profile.c_str());
+		pixelviewColorPending = true;
+		return !starting;
+	}
+	std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
+	if (target.hdr) {
+		std::string encoder = id;
+		if (strcmp(obs_get_encoder_codec(id.c_str()), "hevc") != 0) {
+			encoder.clear();
+			for (int i = 0; i < pixelviewEncoder->count() && encoder.empty(); ++i) {
+				const auto candidate = pixelviewEncoder->itemData(i).toString().toStdString();
+				if (strcmp(obs_get_encoder_codec(candidate.c_str()), "hevc") == 0) encoder = candidate;
+			}
+			if (encoder.empty()) {
+				PixelviewWarn(QStringLiteral("Pixelview colour"), QStringLiteral("This node streams HDR (%1), which needs an HEVC encoder. None is available.").arg(QString::fromUtf8(target.label)));
+				return false;
+			}
+		}
+		OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", encoder.c_str(), encoder != id);
+		const std::string current = obs_data_get_string(data, "profile");
+		if (encoder != id || current == "main") {
+			if (current == "main") obs_data_set_string(data, "profile", "main10");
+			blog(LOG_INFO, "Pixelview: node colour %s needs ten bits; encoder %s profile %s", profile.c_str(), encoder.c_str(), obs_data_get_string(data, "profile"));
+			if (!SavePixelviewEncoding(encoder.c_str(), data, starting)) return false;
+			id = encoder;
+		}
+	}
+	const std::string space = config_get_string(activeConfiguration, "Video", "ColorSpace");
+	const uint64_t peak = config_get_uint(activeConfiguration, "Video", "HdrNominalPeakLevel");
+	if (space != target.space || (target.hdr && peak != pixelview::HDR_NOMINAL_PEAK_NITS)) {
+		if (pixelview::encodingBusy(obs_video_active(), outputHandler && outputHandler->Active(), setupStreamingGuard)) {
+			pixelviewColorPending = true;
+			return !starting;
+		}
+		const bool hadSpace = config_has_user_value(activeConfiguration, "Video", "ColorSpace");
+		const bool hadPeak = config_has_user_value(activeConfiguration, "Video", "HdrNominalPeakLevel");
+		config_set_string(activeConfiguration, "Video", "ColorSpace", target.space);
+		if (target.hdr) config_set_uint(activeConfiguration, "Video", "HdrNominalPeakLevel", pixelview::HDR_NOMINAL_PEAK_NITS);
+		if (ResetVideo() != OBS_VIDEO_SUCCESS) {
+			if (hadSpace) config_set_string(activeConfiguration, "Video", "ColorSpace", space.c_str());
+			else config_remove_value(activeConfiguration, "Video", "ColorSpace");
+			if (hadPeak) config_set_uint(activeConfiguration, "Video", "HdrNominalPeakLevel", peak);
+			else config_remove_value(activeConfiguration, "Video", "HdrNominalPeakLevel");
+			const bool recovered = ResetVideo() == OBS_VIDEO_SUCCESS;
+			PixelviewWarn(QStringLiteral("Pixelview colour"), recovered ? QStringLiteral("The %1 canvas could not be initialized; the previous colour space is kept.").arg(QString::fromUtf8(target.label))
+										  : QStringLiteral("The colour space change and its rollback failed. Restart Pixelview."));
+			return false;
+		}
+		config_save_safe(activeConfiguration, "tmp", nullptr);
+		blog(LOG_INFO, "Pixelview: node colour profile %s: canvas %s -> %s%s", profile.c_str(), space.c_str(), target.space,
+		     target.hdr ? " (1000-nit nominal peak)" : "");
+	}
+	ApplyPixelviewCaptureColor();
+	RefreshPixelviewEncoding();
+	return true;
 }
 
 // The backend blocks some profiles per region (e.g. HEVC 4:2:2 in Sydney). A
@@ -411,12 +537,16 @@ bool OBSBasic::SavePixelviewEncoding(const char *id, obs_data_t *settings, bool 
 	const std::string profile = obs_data_get_string(settings, "profile");
 	if (!profile.empty() && !PixelviewListValue(props, "profile", profile.c_str()))
 		return fail(QStringLiteral("This profile is not enabled in the native encoder properties."));
+	if (profile == "main" && PixelviewColorHdr())
+		return fail(QStringLiteral("This node streams HDR, which needs ten bits. Choose Main10, Main 4:2:2 10 or Main 4:4:4 10."));
 	if (PixelviewProfileBlocked(profile))
 		return fail(QStringLiteral("This profile is not available in the region of the paired Pixelview node."));
+	if (PixelviewColorHdr() && strcmp(obs_get_encoder_codec(id), "hevc") != 0)
+		return fail(QStringLiteral("This node streams HDR, which needs an HEVC encoder with a 10-bit profile."));
 	std::string format;
 	if (strcmp(obs_get_encoder_codec(id), "hevc") == 0) {
 		format = profile.empty() && !obs_properties_get(props, "profile")
-				 ? pixelview::implicitProfileFormat(config_get_string(activeConfiguration, "Video", "ColorFormat"))
+				 ? pixelview::implicitProfileFormat(config_get_string(activeConfiguration, "Video", "ColorFormat"), PixelviewColorHdr())
 				 : pixelview::profileFormat(profile);
 		if (!pixelview::profileRangeSupported(profile, config_get_string(activeConfiguration, "Video", "ColorRange")))
 			return fail(profile == "main44410"

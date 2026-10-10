@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <future>
 #include <initializer_list>
 #include <string>
@@ -128,8 +129,34 @@ inline std::string profileFormat(const std::string &profile)
 }
 // HEVC encoders without a profile property (AMD AMF) derive Main or Main10 from
 // the input format: keep a format they accept, otherwise fall back to 8-bit NV12.
-inline std::string implicitProfileFormat(const std::string &current)
+inline std::string implicitProfileFormat(const std::string &current, bool hdr = false)
 {
-	return current == "P010" ? current : "NV12";
+	return hdr || current == "P010" ? "P010" : "NV12";
+}
+// The paired node's input colour profile (set in Pixelview admin) decides the
+// sender canvas: Rec.709 SDR, or Rec.2100 PQ/HLG at a 1000-nit nominal peak.
+// P3-D65 PQ is streamed as Rec.2100 PQ; the engine converts it with a LUT.
+struct NodeColor {
+	const char *space; // OBS Video/ColorSpace
+	bool hdr;
+	const char *label;
+	bool p3; // the sender converts P3-D65 to Rec.2020 (the engine adds no LUT)
+};
+inline NodeColor nodeColor(const std::string &profile)
+{
+	if (profile == "REC_2020_PQ") return {"2100PQ", true, "Rec.2100 PQ", false};
+	// Sending with OBS: streamed as Rec.2100 PQ; the engine converts P3 with a LUT.
+	if (profile == "P3D65_PQ") return {"2100PQ", true, "P3-D65 PQ (converted by the server)", false};
+	// Sending with Pixelview Desktop: converted here, the stream is true Rec.2100 PQ.
+	if (profile == "P3D65_PQ_DESKTOP") return {"2100PQ", true, "P3-D65 PQ (converted to Rec.2100 PQ here)", true};
+	if (profile == "REC_2020_HLG") return {"2100HLG", true, "Rec.2100 HLG", false};
+	return {"709", false, "Rec.709 SDR", false};
+}
+constexpr uint32_t HDR_NOMINAL_PEAK_NITS = 1000;
+// HDR needs ten bits: HEVC Main10, Main 4:2:2 10 or Main 4:4:4 10 (or an HEVC
+// encoder without a profile property, which follows a P010 canvas).
+inline bool profileCarriesHdr(const std::string &codec, const std::string &profile)
+{
+	return codec == "hevc" && profile != "main";
 }
 } // namespace pixelview

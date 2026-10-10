@@ -453,7 +453,9 @@ float2 PS_P216_SRGB_UV_Cosited(FragPos frag_in) : TARGET
 
 float2 PS_P416_PQ_UV_709_2020(FragPos frag_in) : TARGET
 {
-	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb;
+	// Pixelview: scale to the HDR range as the Y shader does (upstream left it out,
+	// which over-saturated every 4:4:4 PQ/HLG colour while greys stayed exact).
+	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
 	rgb = linear_to_st2084(rgb);
 	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
@@ -464,7 +466,9 @@ float2 PS_P416_PQ_UV_709_2020(FragPos frag_in) : TARGET
 
 float2 PS_P416_HLG_UV_709_2020(FragPos frag_in) : TARGET
 {
-	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb;
+	// Pixelview: scale to the HDR range as the Y shader does (upstream left it out,
+	// which over-saturated every 4:4:4 PQ/HLG colour while greys stayed exact).
+	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
 	rgb = linear_to_hlg(rgb, hdr_lw);
 	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;

@@ -235,6 +235,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   and converts an RGB signal to 4:2:2 for a YUV format. RGB is read at video levels (64-940)
   unless Color Range says Full, unclamped like Y'CbCr. An upstream shader bug that dropped the low
   four bits of green in every R10l capture is fixed (`compute_r10l_reverse`).
+- Color Space offers **Rec. 2100 PQ** and **Rec. 2100 HLG** (upstream had one "Rec. 2020" entry
+  meaning PQ, and no HLG). The chosen transfer labels frames that carry no HDR metadata on SDI;
+  upstream read such a PQ or HLG signal as SDR. Frame metadata, when present, still wins. The
+  sender sets this from the node's colour profile.
 - Canvas and output are fixed at 1920x1080 on every video reset. **Fit** resets position, scale,
   bounds, crop and rotation to an inner-fit; polling, hotplug and restored sources never rewrite
   transforms. FPS offers 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 as exact rationals through the
@@ -313,7 +317,7 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   switch. Unpairing forgets the list, and a backend without the policy blocks nothing. Covered by the
   protocol and encoding harness tests; not yet run in the built app against a backend.
 - The sidebar Profile list labels HEVC Main10 "(recommended)", Main 4:2:2 10 "(transcoded for
-  browsers)" and Main 4:4:4 10 "(Pixelview Desktop only)", each with a tooltip (the Pixelview
+  browsers)" and Main 4:4:4 10 "(transcoded for browsers)", each with a tooltip (the Pixelview
   Player iOS app and Pixelview Desktop on Apple silicon play 4:2:2 natively, only Pixelview Desktop
   plays 4:4:4; everything else gets a server transcode). The saved profile value is unchanged.
 - Main 4:4:4 10 (`main44410`) is offered only where the selected VideoToolbox encoder itself lists
@@ -328,6 +332,21 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   without 10-bit HEVC. An HEVC encoder without a profile property keeps a P010 canvas and otherwise
   uses NV12 (Windows 2026-10-04: first launch selects `h265_texture_amf` Main/NV12). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
+- **Colour profile from the node.** The node's input colour profile in Pixelview admin decides the
+  canvas, with no control on the Desktop (the sidebar shows it read-only, e.g. "Colour: Rec.2100 PQ
+  · 1000 nits"). The backend sends it with `DESKTOP_READY`, `DESKTOP_STARTED` and, when an admin
+  changes it, `DESKTOP_COLOR` (`{"color": {"profile", "max_luminance"}}`); a change while streaming
+  or receiving applies once the sender is idle, and every start re-applies it before the output
+  exists. `REC_709` gives a Rec.709 SDR canvas; `REC_2020_PQ` and `REC_2020_HLG` a Rec.2100 PQ or
+  HLG canvas at a fixed 1000-nit nominal peak, which the VideoToolbox encoder writes into the HEVC
+  VUI and HDR10 metadata for every profile. `P3D65_PQ` ("sending with OBS") streams as Rec.2100 PQ
+  and the engine converts P3 with its LUT; `P3D65_PQ_DESKTOP` ("sending with Pixelview Desktop")
+  converts P3-D65 to BT.2020 on the sender: a filter on the capture applies the exact 3x3 in the
+  canvas's linear light, so the stream is true Rec.2100 PQ, the engine adds no LUT, and
+  passthrough stays possible. HDR needs ten bits: 8-bit Main is hidden and replaced by Main10, a
+  non-HEVC encoder by the HEVC one, and saving either is refused. The DeckLink capture's colour
+  space follows (Rec. 2100 PQ or HLG; back to Default for SDR). A backend without colour profiles
+  leaves the canvas as it is.
 - Every profile encodes the same 10-bit 4:2:2 capture; only the stream format differs. The canvas
   is a linear float texture for all SDR outputs (a Pixelview change in `obs_init_textures`: upstream
   rendered NV12 through an 8-bit RGB canvas, which clipped sub-black, super-white and out-of-gamut
@@ -1102,7 +1121,7 @@ gate) fail in the current environment regardless of changes.
   Not verified: the receiving application itself (screen control was declined, so the receive
   form, the Output format dropdown and the output dialog were not driven; the harness uses the
   same receiver class, plugin, shaders and output plugin), the sender's sidebar label and tooltip
-  on screen, 23.976 and 30 fps, HDR 4:4:4, a monitor's picture, any Mac other than this M1 Pro,
+  on screen, 23.976 and 30 fps, a monitor's picture, any Mac other than this M1 Pro,
   two separate Macs, the engine's VP9 transcode of a 4:4:4 sender for other viewers, production.
 - Every HEVC profile on SDI hardware (2026-10-10, M1 Pro, signed development build of
   `feat/hevc-444` rebased on master, local backend, local pv-engine `main` with pxlview/pv-engine#67,
@@ -1126,6 +1145,30 @@ gate) fail in the current environment regardless of changes.
   the capability probe retry, two of these runs received the engine's VP9 transcode instead (see
   Known limitations); after it, 12 of 12 were passthrough. Not verified here: the receiving
   application's window, 24/30 fps, HDR, production.
+- HDR and P3 on SDI hardware (2026-10-10, same loop and runner, signed development build of
+  `feat/sender-hdr`, backend `feat/desktop-color-profile`, engine `main`). The node's profile was
+  set through the admin API and the sender followed it; the headless receiver ran in PQ or HLG with
+  HDR metadata on the output. Every case was HEVC passthrough with a 10-bit ramp (614-620 codes):
+
+  | Profile | SDI picture | PQ: neutral, saturated worst | HLG: neutral, saturated worst |
+  |---|---|---|---|
+  | Main 4:4:4 10 | RGB 4:4:4 | 0.0, 78 (per-pixel alternation 99.5%) | 0.1, 6 (99.5%) |
+  | Main 4:4:4 10 | Y'CbCr 4:2:2 | 0.02, 55 | 0.02, 48 |
+  | Main 4:2:2 10 | Y'CbCr 4:2:2 | 0.0, 55 | 0.0, 48 |
+  | Main10 | Y'CbCr 4:2:2 | 0.0, 55 | 0.0, 48 |
+
+  The saturated errors sit in the near-zero channel of the pure primaries (the linear float
+  canvas, see Known limitations). `P3D65_PQ_DESKTOP` with the RGB picture read as P3: every patch
+  within 1.2 codes of the computed P3-to-BT.2020 result and neutrals exact, except pure red's blue
+  channel (expected black, 139 codes, the same near-zero limit). SDR rerun on the same build:
+  unchanged (4:4:4 within 1 code, 8-bit Main within 2, 159 ramp codes). The runs found and fixed:
+  libobs's P416 PQ/HLG output shaders computed chroma without the HDR scale their luma uses
+  (upstream since P416 was added), which over-saturated every 4:4:4 HDR colour by up to 200
+  codes while greys stayed exact; and the receive codec route refused a stream whose first NAL
+  unit precedes the parameter sets (VideoToolbox HLG Main10 opens with a prefix SEI), because the
+  parser's first caps carry no profile. The route now holds such caps and the access units before
+  the parameter sets, and selects on the parser's next caps. Not verified: the receiving
+  application's HDR window, HLG or PQ by eye on a monitor, 24/30 fps, other Macs, production.
 - By eye with the receiving application (2026-10-10, same build and engine, two Macs): Resolve
   played a 10-bit test chart (pv-engine `docs/depth-chart`, plus a 4:4:4 variant whose middle band
   alternates magenta and green on every pixel column) out of the Monitor 3G into the 4K Mini, the

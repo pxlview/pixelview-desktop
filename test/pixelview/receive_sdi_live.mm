@@ -17,6 +17,7 @@
 #include <media-io/video-io.h>
 #include <media-io/video-frame.h>
 #include <atomic>
+#include <dlfcn.h>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -28,6 +29,8 @@ static gs_texrender_t *texrender;
 static gs_stagesurf_t *stage;
 static video_t *queue;
 static bool rgb444, full_output;
+// sdr, pq or hlg: the receiver's colour mode, the canvas and the output's transfer.
+static pixelview_v210::Mode draw_mode = pixelview_v210::Mode::SDR;
 static std::atomic<long> pushed{0};
 
 static void rendered(void *)
@@ -43,8 +46,8 @@ static void rendered(void *)
 	gs_texrender_reset(texrender);
 	if (!gs_texrender_begin(texrender, words, H))
 		return;
-	const bool drawn = rgb444 ? pixelview_v210::draw_r10l(tex, W, H, pixelview_v210::Mode::SDR, full_output)
-				  : pixelview_v210::draw(tex, W, H, pixelview_v210::Mode::SDR, full_output);
+	const bool drawn = rgb444 ? pixelview_v210::draw_r10l(tex, W, H, draw_mode, full_output)
+				  : pixelview_v210::draw(tex, W, H, draw_mode, full_output);
 	gs_texrender_end(texrender);
 	if (!drawn)
 		return;
@@ -115,13 +118,15 @@ static bool choose(obs_properties_t *props, obs_data_t *settings, const char *ke
 int main(int argc, char **argv)
 {
 	QCoreApplication app(argc, argv);
-	if (argc != 14)
+	if (argc != 14 && argc != 15)
 		return 2;
 	const uint32_t fps_num = (uint32_t)atoi(argv[12]), fps_den = (uint32_t)atoi(argv[13]);
 	setbuf(stdout, nullptr);
 	rgb444 = !strcmp(argv[8], "rgb444");
 	const bool full = !strcmp(argv[9], "full");
 	const int seconds = atoi(argv[10]);
+	const char *color = argc > 14 ? argv[14] : "sdr";
+	draw_mode = !strcmp(color, "pq") ? pixelview_v210::Mode::PQ : !strcmp(color, "hlg") ? pixelview_v210::Mode::HLG : pixelview_v210::Mode::SDR;
 	std::string input;
 	std::getline(std::cin, input);
 	auto credentials = QJsonDocument::fromJson(QByteArray::fromStdString(input)).object();
@@ -136,12 +141,13 @@ int main(int argc, char **argv)
 	vi.base_width = vi.output_width = W;
 	vi.base_height = vi.output_height = H;
 	vi.output_format = VIDEO_FORMAT_P010;
-	vi.colorspace = VIDEO_CS_709;
+	vi.colorspace = draw_mode == pixelview_v210::Mode::PQ ? VIDEO_CS_2100_PQ : draw_mode == pixelview_v210::Mode::HLG ? VIDEO_CS_2100_HLG : VIDEO_CS_709;
 	vi.range = VIDEO_RANGE_PARTIAL;
 	vi.gpu_conversion = true;
 	vi.scale_type = OBS_SCALE_DISABLE;
 	if (obs_reset_video(&vi) != OBS_VIDEO_SUCCESS)
 		return 4;
+	obs_set_video_levels(300.f, 1000.f); // the application's SDR white and 1000-nit HDR peak
 	obs_audio_info ai = {48000, SPEAKERS_STEREO};
 	if (!obs_reset_audio(&ai))
 		return 5;
@@ -154,6 +160,16 @@ int main(int argc, char **argv)
 		pump(); // device arrival callbacks
 
 	obs_source_t *source = obs_source_create_private("pixelview_whep_source", "receive-sdi-live", nullptr);
+	// Diagnostics: the plugin silences its bundled GStreamer (GST_DEBUG=0); a threshold
+	// string in PIXELVIEW_GST_DEBUG is applied after it initialised.
+	if (const char *threshold = getenv("PIXELVIEW_GST_DEBUG")) {
+		using SetActive = void (*)(int);
+		using SetThreshold = void (*)(const char *, int);
+		auto active = (SetActive)dlsym(RTLD_DEFAULT, "gst_debug_set_active");
+		auto set = (SetThreshold)dlsym(RTLD_DEFAULT, "gst_debug_set_threshold_from_string");
+		if (active && set) { active(1); set(threshold, 1); }
+		printf("GStreamer debug %s: %s\n", active && set ? "enabled" : "unavailable", threshold);
+	}
 	if (!source)
 		return 8;
 	struct obs_source_info audit = {};
@@ -214,7 +230,7 @@ int main(int argc, char **argv)
 		calldata_init(&cd);
 		calldata_set_string(&cd, "endpoint", endpoint.toUtf8().constData());
 		calldata_set_int(&cd, "latency", 100);
-		calldata_set_string(&cd, "color", "sdr");
+		calldata_set_string(&cd, "color", color);
 		proc_handler_call(ph, "connect", &cd);
 		calldata_free(&cd);
 		delivered = true;

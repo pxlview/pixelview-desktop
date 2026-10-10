@@ -1699,6 +1699,7 @@ vector<pair<string, string>> GetLocaleNames()
 #endif
 
 #include <utility/PixelviewConfig.hpp>
+#include "utility/PixelviewP3Filter.hpp"
 
 int GetAppConfigPath(char *path, size_t size, const char *name)
 {
@@ -2035,6 +2036,8 @@ void OBSApp::loadAppModules(struct obs_module_failure_info &mfi)
 	obs_log_loaded_modules();
 	blog(LOG_INFO, "---------------------------------");
 	obs_post_load_modules();
+	// Pixelview: the P3-D65 conversion filter must exist before a scene collection loads.
+	pixelview::registerP3Filter();
 	pluginManager_->postLoad();
 }
 

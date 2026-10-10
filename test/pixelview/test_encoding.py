@@ -155,7 +155,7 @@ int main() {
             bad_json = tmp / 'streamEncoder.json'
             bad_json.mkdir()
             (bad_json / 'keep').write_text('not removable as a file')
-            for case in ('unpaired', 'rescale-initialize', 'pending', 'lifecycle', 'rescale', 'rescale-main', 'rescale-main42210', 'region-blocked', 'json-video-rollback', 'config-delete-rollback', 'construct', 'construct-rollback', 'config', 'json-partial', 'json-partial-rollback'):
+            for case in ('unpaired', 'rescale-initialize', 'pending', 'lifecycle', 'rescale', 'rescale-main', 'rescale-main42210', 'region-blocked', 'hdr-main', 'json-video-rollback', 'config-delete-rollback', 'construct', 'construct-rollback', 'config', 'json-partial', 'json-partial-rollback'):
                 with self.subTest(case=case):
                     profile = tmp
                     if case.startswith('json-partial'):
@@ -190,6 +190,17 @@ int main() {
  assert(implicitProfileFormat("P010") == "P010");
  assert(implicitProfileFormat("P216") == "NV12");
  assert(implicitProfileFormat("I444") == "NV12");
+ assert(implicitProfileFormat("NV12", true) == "P010");
+ assert(std::string(nodeColor("REC_709").space) == "709" && !nodeColor("REC_709").hdr);
+ assert(std::string(nodeColor("REC_2020_PQ").space) == "2100PQ" && nodeColor("REC_2020_PQ").hdr);
+ assert(std::string(nodeColor("P3D65_PQ").space) == "2100PQ" && nodeColor("P3D65_PQ").hdr && !nodeColor("P3D65_PQ").p3);
+ assert(std::string(nodeColor("P3D65_PQ_DESKTOP").space) == "2100PQ" && nodeColor("P3D65_PQ_DESKTOP").p3);
+ assert(!nodeColor("REC_2020_PQ").p3 && !nodeColor("REC_709").p3);
+ assert(std::string(nodeColor("REC_2020_HLG").space) == "2100HLG" && nodeColor("REC_2020_HLG").hdr);
+ assert(std::string(nodeColor("UNKNOWN").space) == "709" && !nodeColor("").hdr);
+ assert(HDR_NOMINAL_PEAK_NITS == 1000);
+ assert(profileCarriesHdr("hevc", "main10") && profileCarriesHdr("hevc", "main44410") && profileCarriesHdr("hevc", ""));
+ assert(!profileCarriesHdr("hevc", "main") && !profileCarriesHdr("h264", "high"));
  assert(profileRangeSupported("main42210", "Partial"));
  assert(!profileRangeSupported("main42210", "Full"));
  assert(profileRangeSupported("main44410", "Partial"));

@@ -37,6 +37,11 @@ public:
  // with a profile_blocked refusal; an older backend sends none (nothing blocked).
  QStringList blockedProfiles;
  std::function<void()> policy=[]{};
+ // The node's input colour profile (REC_709, REC_2020_PQ, REC_2020_HLG,
+ // P3D65_PQ), sent with DESKTOP_READY, DESKTOP_STARTED and DESKTOP_COLOR. An
+ // older backend sends none and the canvas stays as it is.
+ QString colorProfile;
+ std::function<void()> colorChanged=[]{};
  std::function<QString()> profile=[]{return QString();};
  bool ready=false, pending=false, started=false;
  bool mediaDraining=false;
@@ -123,6 +128,14 @@ public:
   if(next==blockedProfiles) return false;
   blockedProfiles=next; policy(); return true;
  }
+ // Returns whether the profile changed (and the callback ran).
+ bool acceptColor(const QJsonObject &data) {
+  const QJsonValue color=data["color"];
+  if(!color.isObject()) return false;
+  const QString next=color.toObject()["profile"].toString();
+  if(next.isEmpty() || next==colorProfile) return false;
+  colorProfile=next; colorChanged(); return true;
+ }
  void receive(const QJsonObject &o, qint64 now) {
   const auto name=o["mutation"].toString();
   const auto data=o["data"].toObject();
@@ -130,6 +143,7 @@ public:
    if(ready) return;
    ready=true; pingDeadline=now+PING_SILENCE_MS;
    acceptPolicy(data);
+   acceptColor(data);
    if(intent && !started && retryAt<0) requestStart(now);
   } else if(name=="SOCKET_SEND_PING") {
    // The server's ping loop can run ahead of DESKTOP_READY; a pong is always
@@ -140,6 +154,8 @@ public:
    if(!ready || !pending) return;
    pending=false;
    if(data.contains("blocked_profiles")) acceptPolicy(data);
+   // Before publish: the canvas follows the profile the stream starts with.
+   acceptColor(data);
    if(mediaDraining) return; // Cancelled attempt, not fresh authority.
    const auto whip=data["config"].toObject()["whip"].toObject();
    QUrl endpoint(whip["endpoint"].toString());
@@ -149,6 +165,9 @@ public:
    }
    started=true;
    publish(endpoint.toString(),whip["bearer_token"].toString());
+  } else if(name=="DESKTOP_COLOR") {
+   // Changed in Pixelview admin; a live stream keeps its canvas until it stops.
+   acceptColor(data);
   } else if(name=="DESKTOP_ERROR") {
    // A refused start. unknown_message only means the backend is older than
    // this message (e.g. DESKTOP_STATE); it never touches the stream.

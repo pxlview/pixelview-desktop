@@ -120,4 +120,27 @@ int main() {
   Fixture old; int oldPolicies = 0; old.d.policy = [&] { ++oldPolicies; };
   old.stream(); assert(old.d.blockedProfiles.isEmpty() && oldPolicies == 0);
  }
+ // Node colour profile: READY, STARTED (before publish) and DESKTOP_COLOR; changes only.
+ {
+  Fixture p; QStringList seen; bool publishedAfterColor = false;
+  p.d.colorChanged = [&] { seen.append(p.d.colorProfile); };
+  const auto publish = p.d.publish;
+  p.d.publish = [&](QString e, QString b) { publishedAfterColor = p.d.colorProfile == "REC_2020_HLG"; publish(e, b); };
+  auto color = [](const char *profile) { return QJsonObject{{"profile", profile}, {"max_luminance", 1000}}; };
+  p.d.receive(mutation("DESKTOP_READY", {{"desktop_id", "desktop-a"}, {"node_id", "node-a"}, {"color", color("REC_2020_PQ")}}), 0);
+  assert(p.d.colorProfile == "REC_2020_PQ" && seen == QStringList({"REC_2020_PQ"}));
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", color("REC_2020_PQ")}}), 1);
+  assert(seen.size() == 1); // unchanged: no callback
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", color("P3D65_PQ")}}), 2);
+  assert(seen == QStringList({"REC_2020_PQ", "P3D65_PQ"}));
+  assert(p.d.requestStart(3));
+  p.d.receive(mutation("DESKTOP_STARTED", {{"config", QJsonObject{{"whip", QJsonObject{{"endpoint", "https://example.com/whip"}, {"bearer_token", "secret"}}}}}, {"color", color("REC_2020_HLG")}}), 4);
+  assert(p.d.started && publishedAfterColor && seen.last() == "REC_2020_HLG");
+  // Malformed or missing colour leaves the profile as it is.
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", "REC_709"}}), 5);
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", QJsonObject{{"profile", ""}}}}), 6);
+  assert(p.d.colorProfile == "REC_2020_HLG" && seen.size() == 3);
+  Fixture old; int oldColors = 0; old.d.colorChanged = [&] { ++oldColors; };
+  old.stream(); assert(old.d.colorProfile.isEmpty() && oldColors == 0);
+ }
 }

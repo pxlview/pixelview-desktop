@@ -191,7 +191,9 @@ QJsonObject OBSBasic::PixelviewControlState()
 			     {"bitrate_kbps", (double)obs_data_get_int(encoderData, "bitrate")},
 			     {"bitrate_mbps_min", 1}, {"bitrate_mbps_max", 12},
 			     {"profiles", profiles}, {"profile", QString::fromUtf8(obs_data_get_string(encoderData, "profile"))},
-			     {"fps_options", rates}, {"fps", QJsonObject{{"num", (int)fpsNum}, {"den", (int)fpsDen}}}};
+			     {"fps_options", rates}, {"fps", QJsonObject{{"num", (int)fpsNum}, {"den", (int)fpsDen}}},
+			     // The canvas colour space the node's colour profile selected (709, 2100PQ, 2100HLG).
+			     {"color_space", QString::fromUtf8(config_get_string(activeConfiguration, "Video", "ColorSpace"))}};
 
 	QJsonObject audio{{"available", false}, {"muted", false}};
 	if (!pixelviewReceiving) {

@@ -5,16 +5,19 @@ static GstStaticCaps route_caps = GST_STATIC_CAPS("video/x-h265,stream-format=hv
 /* request-encoded-filter receives downstream RAW caps, not the selected codec.
  * Inspect the first parsed CAPS event using the supported pad-probe API. The
  * route is a stock capsfilter: no AU callback, decoder or queue, and compressed
- * buffers are never dropped or moved. A profile change requires a new attempt. */
+ * buffers after the first parameter sets are never dropped or moved. A profile
+ * change requires a new attempt. */
 struct route_selector {
  gint refs;
  GstElement *bin, *policy; /* borrowed while the event probe is installed */
  gboolean selected, admit_main422, admit_main444;
+ gint waiting; /* H.265 caps without a profile yet: hold until the parser has an SPS */
+ GstEvent *held_segment; /* streaming thread only: replayed after the real caps */
 };
 static void selector_unref(gpointer opaque)
 {
  struct route_selector *s=opaque;
- if(g_atomic_int_dec_and_test(&s->refs)) g_free(s);
+ if(g_atomic_int_dec_and_test(&s->refs)) { if(s->held_segment) gst_event_unref(s->held_segment); g_free(s); }
 }
 static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
 {
@@ -24,10 +27,28 @@ static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer
  GST_PAD_PROBE_INFO_FLOW_RETURN(info)=GST_FLOW_NOT_NEGOTIATED;
  return GST_PAD_PROBE_HANDLED;
 }
+/* Access units before the parameter sets cannot be decoded; drop them while waiting. */
+static GstPadProbeReturn hold_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
+{
+ (void)info;
+ struct route_selector *s=opaque;
+ if(g_atomic_int_get(&s->waiting)) return GST_PAD_PROBE_DROP;
+ /* The segment held back with the early caps follows the real caps, in order.
+  * This probe sits on the upstream pad, so the route never sees data first. */
+ GstEvent *segment=s->held_segment;s->held_segment=NULL;
+ /* A copy: the upstream pad still stores the original as already sent. */
+ if(segment) { gst_pad_push_event(pad,gst_event_copy(segment)); gst_event_unref(segment); }
+ return GST_PAD_PROBE_REMOVE;
+}
 static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
 {
- if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))!=GST_EVENT_CAPS) return GST_PAD_PROBE_OK;
  struct route_selector *s=opaque;
+ if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))==GST_EVENT_SEGMENT && g_atomic_int_get(&s->waiting)) {
+  if(s->held_segment) gst_event_unref(s->held_segment);
+  s->held_segment=gst_event_ref(GST_PAD_PROBE_INFO_EVENT(info));
+  return GST_PAD_PROBE_DROP;
+ }
+ if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))!=GST_EVENT_CAPS) return GST_PAD_PROBE_OK;
  const char *unsupported=NULL;
  GstCaps *caps;gst_event_parse_caps(GST_PAD_PROBE_INFO_EVENT(info),&caps);
  const GstStructure *wire=gst_caps_is_fixed(caps)?gst_caps_get_structure(caps,0):NULL;
@@ -38,6 +59,22 @@ static GstPadProbeReturn select_route(GstPad *pad,GstPadProbeInfo *info,gpointer
   if(!accepted) goto failed;
   return GST_PAD_PROBE_OK;
  }
+ if(gst_structure_has_name(wire,"video/x-h265") && !gst_structure_get_string(wire,"profile")) {
+  /* h265parse announces caps before it has seen an SPS when the stream opens
+   * with another NAL (VideoToolbox HLG puts a prefix SEI first); its next caps
+   * carry the profile. Wait for them instead of refusing the route. */
+  if(!g_atomic_int_get(&s->waiting)) {
+   g_atomic_int_set(&s->waiting,1);
+   GstPad *upstream=gst_pad_get_peer(pad);
+   if(upstream) {
+    g_atomic_int_inc(&s->refs);
+    gst_pad_add_probe(upstream,GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST,hold_route,s,selector_unref);
+    gst_object_unref(upstream);
+   }
+  }
+  return GST_PAD_PROBE_DROP;
+ }
+ g_atomic_int_set(&s->waiting,0);
  s->selected=TRUE;
  GstCaps *policy=gst_caps_new_empty_simple(gst_structure_get_name(wire));
  if(gst_structure_has_name(wire,"video/x-h265")) {
