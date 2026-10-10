@@ -3,7 +3,7 @@
 
   PIXELVIEW_DEV_ADMIN_PASSWORD=... python3 test/pixelview/windows_vm_e2e.py [--update] [--seconds 150] [--keep]
 
---update sends the commits the VM's checkout lacks as a git bundle and runs an incremental
+--update sends the commits the VM's checkout lacks as a git bundle (from the merge base, so it can also switch branches) and runs an incremental
 `cmake/windows/pixelview-build.py` there (HEAD must be committed). The run then launches the VM's
 development build with `cmake/windows/pixelview-launch.py` into a new settings root, pairs it from
 the environment with a fresh one-time code, selects a test pattern and streams through the
@@ -109,18 +109,26 @@ def update(vm, repo):
     head = git('rev-parse', 'HEAD')
     there = vm.ps(f'{PATH}; git -C {repo} rev-parse HEAD')['stdout'].strip()
     if there != head:
-        if subprocess.run(['git', 'merge-base', '--is-ancestor', there, head], cwd=ROOT).returncode != 0:
-            raise RuntimeError(f'VM checkout {there[:9]} is not an ancestor of HEAD; reset it by hand')
-        with tempfile.TemporaryDirectory() as temp:
-            bundle = pathlib.Path(temp) / f'pixelview-{head[:9]}.bundle'
-            git('bundle', 'create', str(bundle), 'HEAD', '--not', there)
-            vm.tool('vmpal_send_files', paths=[str(bundle)])
-            landed = rf'$env:USERPROFILE\Desktop\{bundle.name}'
-            moved = vm.ps(f'$n = 0; while (-not (Test-Path "{landed}") -and $n -lt 120) {{ Start-Sleep 1; $n++ }}; '
-                  f'{PATH}; Set-Location {repo}; git fetch "{landed}" HEAD 2>&1 | Out-Null; git checkout --detach FETCH_HEAD 2>&1 | Out-Null; '
-                  f'Remove-Item "{landed}"; git rev-parse HEAD', timeout=300)['stdout'].strip()
+        # The VM has every ancestor of its checkout, so a bundle from the merge base also moves it
+        # between branches (any local changes in the VM checkout make the checkout fail).
+        if subprocess.run(['git', 'cat-file', '-e', f'{there}^{{commit}}'], cwd=ROOT).returncode != 0:
+            raise RuntimeError(f'VM checkout {there[:9]} is unknown here; fetch it or reset the VM checkout by hand')
+        base = git('merge-base', there, head)
+        if base == head:  # going back: the VM already has HEAD
+            moved = vm.ps(f'{PATH}; Set-Location {repo}; git checkout --detach {head} 2>&1 | Out-Null; git rev-parse HEAD')['stdout'].strip()
             if moved != head:
                 raise RuntimeError(f'VM checkout is at {moved[:9]}, expected {head[:9]}')
+        else:
+            with tempfile.TemporaryDirectory() as temp:
+                bundle = pathlib.Path(temp) / f'pixelview-{head[:9]}.bundle'
+                git('bundle', 'create', str(bundle), 'HEAD', '--not', base)
+                vm.tool('vmpal_send_files', paths=[str(bundle)])
+                landed = rf'$env:USERPROFILE\Desktop\{bundle.name}'
+                moved = vm.ps(f'$n = 0; while (-not (Test-Path "{landed}") -and $n -lt 120) {{ Start-Sleep 1; $n++ }}; '
+                      f'{PATH}; Set-Location {repo}; git fetch "{landed}" HEAD 2>&1 | Out-Null; git checkout --detach FETCH_HEAD 2>&1 | Out-Null; '
+                      f'Remove-Item "{landed}"; git rev-parse HEAD', timeout=300)['stdout'].strip()
+                if moved != head:
+                    raise RuntimeError(f'VM checkout is at {moved[:9]}, expected {head[:9]}')
         say('VM checkout moved', there[:9], '->', head[:9])
     started = time.time()
     result = vm.ps(f'{PATH}; Set-Location {repo}; python cmake\\windows\\pixelview-build.py *> C:\\pv\\build.log; $code = $LASTEXITCODE; '
