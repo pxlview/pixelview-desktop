@@ -251,13 +251,13 @@ python3 cmake/macos/pixelview_sources.py \
 
 ## 6. Windows (x64)
 
-The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64, Visual Studio Build Tools 2026 18.10, CMake 4.4.3, Python 3.13). `--validate-config`, `--fetch-sources` and `--prepare` (6.2) ran on 2026-10-09 for 0.0.12 on a Windows 11 machine; `--publish` and `--publish-latest` have not run yet. The logic is also covered offline by `test/pixelview/test_windows_release.py`. Windows releases are cut from the same tag as macOS and publish to `desktop/windows/` in the same bucket. See `docs/features.md`, "Windows port".
+The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64, Visual Studio Build Tools 2026 18.10, CMake 4.4.3, Python 3.13). `--validate-config`, `--fetch-sources` and `--prepare` (6.2) ran on 2026-10-09 for 0.0.12 on a Windows 11 machine; `--publish` and `--publish-latest` have not run yet. The logic is also covered offline by `test/pixelview/test_windows_release.py`. Windows releases are cut from the same tag as macOS and publish to `desktop/windows/` in the same bucket. Section 6.4 runs a development build end to end in a local VM. See `docs/features.md`, "Windows port".
 
 ### 6.1 Toolchain and build
 
 - **Toolchain:**
   - Windows 10 22H2 or 11, x64 or ARM64; ARM64 hosts cross-compile x64, e.g. Windows 11 in Parallels.
-  - Visual Studio 2026 with the C++ desktop workload and Windows SDK 10.0.26100 (the preset's `Visual Studio 18 2026` generator).
+  - Visual Studio 2026 with the C++ desktop workload, C++ ATL (`Microsoft.VisualStudio.Component.VC.ATL`; Build Tools' C++ workload leaves it out and `frontend-tools`, `obs-qsv11` and `win-dshow` then fail on `atlbase.h`) and Windows SDK 10.0.26100 (the preset's `Visual Studio 18 2026` generator). Unattended: `winget install --id Microsoft.VisualStudio.BuildTools -e --override "--wait --quiet --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --includeRecommended"`.
   - CMake 4.2 or newer (the first release with the `Visual Studio 18 2026` generator), Git and Python 3.12 or newer. Visual Studio Build Tools 2026 is enough; the full IDE is not needed.
   - At least 15 GiB of free disk (a complete RelWithDebInfo tree in `build_x64` and `build_x86` is about 1.8 GiB; `.deps` about 1.7 GiB).
 - **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule and its nested `capture-device-support` submodule, which the helper initializes recursively. On x64 the configure also generates a Win32 child build in `build_x86` (32-bit capture helpers); it receives the same `OBS_VERSION_OVERRIDE`.
@@ -324,3 +324,21 @@ python cmake\windows\pixelview-release.py --staging-serve        # 127.0.0.1:873
 - `--staging-serve` re-verifies each staged installer's EdDSA signature, writes `dist/windows-staging/appcast-x64.xml` (newest first; `--staging-up-to <n>` hides newer builds) and serves the folder on 127.0.0.1 only, logging each request.
 - Install the older build silently (`…-staging9001-x64-setup.exe /SILENT /SP- /NOCANCEL /NORESTART`), start the feed, launch the app: the startup check should open **Software Update** offering the newer build; **Install update** downloads, closes the app, installs silently and relaunches it. Check that the installed `Pixelview.exe` matches the newer build and that settings and the pairing remain.
 - A staging build never updates from production. Afterwards install a real release over it (same AppId) before using the machine normally.
+
+### 6.4 Windows VM end-to-end test
+
+`test/pixelview/windows_vm_e2e.py` runs the Windows build end to end from the Mac, in a VMPal Windows 11 VM on the same Mac, against the local backend, engine and Loki, with no clicks: it launches the build with `pixelview-launch.py` into a new settings root, pairs it from the environment, selects a test pattern and streams through the backend's remote control, reads the connection reports from Loki, saves a screenshot and the app log, quits through the main window and removes the pairing again (Credential Manager entry and backend device). `--update` first sends the commits the VM lacks as a git bundle and builds incrementally. It never starts or stops servers.
+
+```bash
+PIXELVIEW_DEV_ADMIN_PASSWORD=<local node admin password> python3 test/pixelview/windows_vm_e2e.py --update --seconds 150
+```
+
+One-time VM setup (VMPal with agent control on for the VM; commands run through VMPal's MCP server):
+
+- **Toolchain** as in 6.1, installed with winget as administrator, including the ATL component. On an ARM64 VM the build uses Visual Studio's ARM64-hosted x64 compiler and the app runs under x64 emulation.
+- **Checkout** cloned from a git bundle of the Mac checkout (the repository is private): `git clone --branch master <bundle> C:\pv\pixelview-desktop`. Later commits arrive through `--update`.
+- **3D acceleration off** (`gpuAcceleration: false`). With the VirtIO 3D GPU, D3D11 loads at feature level 11.0 but creating NV12 textures fails with `8007000E` and the app stops with "Failed to initialize video"; without it D3D11 runs on the Microsoft Basic Render Driver and x264 is the only encoder.
+- **Backend as localhost:** the dev backend advertises `http://localhost:<port>` for WHIP and the control socket, so the VM forwards it to the Mac, which the VM reaches as `192.168.128.1`: `netsh interface portproxy add v4tov4 listenport=8010 listenaddress=127.0.0.1 connectport=8010 connectaddress=192.168.128.1`, the same for `v6tov4` on `::1`, and the `iphlpsvc` service set to automatic. Media goes directly over UDP to the engine.
+- **Snapshots:** take one with the VM shut down after the toolchain and first build, before the app's first launch, as the clean starting point; each run uses its own settings root, so runs do not need a revert.
+
+VMPal ends a job's process tree when the MCP connection that started it closes, so the launch keeps its job (and the app) alive with `--wait` and the script quits the app before disconnecting. The VM shows software rendering and emulation load (the report's whole-computer CPU near 100 %, frames missed in rendering); use real Windows hardware for performance, encoders and DeckLink.

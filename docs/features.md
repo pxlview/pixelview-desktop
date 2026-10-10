@@ -831,6 +831,16 @@ gate) fail in the current environment regardless of changes.
   dump). Not run on Windows: the clang-compiled unit tests (no clang++ there), so
   `GetSystemTimes` was exercised only live; DeckLink capture; a loaded computer. At the default
   log level the Windows log names neither the WHIP request nor the selected ICE pair.
+- Connection report in a Windows VM (2026-10-10, `master` 86072efe8 and `feat/hevc-444` 3a23317fd on it, VMPal
+  Windows 11 ARM64 VM on the Mac, x64 build under emulation, Microsoft Basic Render Driver, x264;
+  `test/pixelview/windows_vm_e2e.py`, no clicks and no other machine): three runs paired from the
+  environment, streamed a test pattern 75-150 s over WHIP to the Mac's engine (0 % loss, media
+  round trip 3-37 ms), stopped, quit through the main window (exit 0, "Number of memory leaks: 1",
+  no crash dump) and removed their pairing. The VM is overloaded by software rendering and
+  emulation, and the report shows it as intended: whole-computer CPU 81-100 % against 95-96 % from
+  `% Processor Utility`, memory 34.0 % against 34.3 %, about 40 % of frames missed in rendering
+  and none skipped in encoding, with no network loss. The app's own CPU read up to 104.8 % in
+  one 2 s interval (OBS's process CPU measure, not clamped).
 - Windows update from one signed build to the next (2026-10-09, `master` c7efdacd8, same laptop),
   through the local staging feed (`docs/build-and-release.md` 6.3): staging build 9001 was installed
   silently; on launch its automatic check fetched the 127.0.0.1 feed and opened Software Update
