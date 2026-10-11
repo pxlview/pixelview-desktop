@@ -151,7 +151,7 @@ inline NodeColor nodeColor(const std::string &profile)
 	// Sending with OBS: streamed as Rec.2100 PQ; the engine converts P3 with a LUT.
 	if (profile == "P3D65_PQ") return {"2100PQ", true, "P3-D65 PQ (converted by the server)", false};
 	// Sending with Pixelview Desktop: converted here, the stream is true Rec.2100 PQ.
-	if (profile == "P3D65_PQ_DESKTOP") return {"2100PQ", true, "P3-D65 PQ (converted to Rec.2100 PQ here)", true};
+	if (profile == "P3D65_PQ_DESKTOP") return {"2100PQ", true, "P3-D65 PQ", true};
 	if (profile == "REC_2020_HLG") return {"2100HLG", true, "Rec.2100 HLG", false};
 	// A newer backend's profile must not turn an HDR node into an SDR stream.
 	return {"", false, "not supported by this version", false, false};
