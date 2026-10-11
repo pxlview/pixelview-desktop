@@ -1157,8 +1157,10 @@ gate) fail in the current environment regardless of changes.
   | Main 4:2:2 10 | Y'CbCr 4:2:2 | 0.0, 55 | 0.0, 48 |
   | Main10 | Y'CbCr 4:2:2 | 0.0, 55 | 0.0, 48 |
 
-  The saturated errors sit in the near-zero channel of the pure primaries (the linear float
-  canvas, see Known limitations). `P3D65_PQ_DESKTOP` with the RGB picture read as P3: every patch
+  The "saturated" figures are the channel that should be black in a pure BT.2020 primary next to
+  ~983-nit channels: the worst, 78 codes, is 0.24 nit (0.02 % of the pixel), from the half-float
+  Rec.709 canvas round trip (a gamut clip would put ~100 nits there). Bright channels are within
+  one code; every patch without an exactly-zero channel is exact. `P3D65_PQ_DESKTOP` with the RGB picture read as P3: every patch
   within 1.2 codes of the computed P3-to-BT.2020 result and neutrals exact, except pure red's blue
   channel (expected black, 139 codes, the same near-zero limit). SDR rerun on the same build:
   unchanged (4:4:4 within 1 code, 8-bit Main within 2, 159 ramp codes). The runs found and fixed:
