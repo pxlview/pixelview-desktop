@@ -442,13 +442,21 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					return;
 				}
 				StopPixelviewReceive(true);
+				// HDR cannot change while the DeckLink output runs: say so up front.
+				const QString first = PixelviewReceiveVideoBusy()
+					? QStringLiteral("Open DeckLink output settings…, stop the output, then ") : QString();
+				const auto colour = [&first](const char *rest) {
+					QString text = QString::fromUtf8(rest);
+					if (!first.isEmpty()) text[0] = text[0].toLower();
+					return first + text;
+				};
 				SetPixelviewReceiveStatus(
 					is("hdr-source-needs-hdr-receive") ?
-					QStringLiteral("The sender is streaming HDR. Tick HDR, choose the sender's PQ or HLG, and start receiving again.") :
+					QStringLiteral("The sender is streaming HDR. ") + colour("Tick HDR, choose the sender's PQ or HLG, and start receiving again.") :
 					is("sdr-source-in-hdr-receive") ?
-					QStringLiteral("The sender is streaming SDR (BT.709). Untick HDR and start receiving again.") :
+					QStringLiteral("The sender is streaming SDR (BT.709). ") + colour("Untick HDR and start receiving again.") :
 					is("hdr-transfer-mismatch") ?
-					QStringLiteral("The sender uses the other HDR transfer. Switch between PQ and HLG and start receiving again.") :
+					QStringLiteral("The sender uses the other HDR transfer. ") + colour("Switch between PQ and HLG and start receiving again.") :
 					is("unsupported-colorimetry") ?
 					QStringLiteral("The sender's colour format is not supported. Use limited-range BT.709 SDR or limited-range BT.2020 PQ/HLG on the sender.") :
 					hevc422 ?
@@ -541,7 +549,7 @@ bool OBSBasic::SetPixelviewReceiveHdr(int hdr, int nits, QString &error)
 	if (pixelviewReceivePrecision && hdr != pixelviewReceiveHdr) {
 		obs_video_info current = {};
 		if (isClosing() || pixelviewReceivePrecisionFault || PixelviewReceiveVideoBusy() || !obs_get_video_info(&current)) {
-			error = QStringLiteral("Stop the DeckLink output to change HDR, then start it again.");
+			error = QStringLiteral("Open DeckLink output settings…, stop the output, then change HDR and start it again.");
 			return false;
 		}
 		// Copy the module name: obs_reset_video tears down the previous video state.
