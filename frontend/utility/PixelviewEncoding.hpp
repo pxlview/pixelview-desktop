@@ -149,7 +149,7 @@ inline NodeColor nodeColor(const std::string &profile)
 	if (profile == "REC_709") return {"709", false, "Rec.709 SDR", false};
 	if (profile == "REC_2020_PQ") return {"2100PQ", true, "Rec.2100 PQ", false};
 	// Sending with OBS: streamed as Rec.2100 PQ; the engine converts P3 with a LUT.
-	if (profile == "P3D65_PQ") return {"2100PQ", true, "P3-D65 PQ (converted by the server)", false};
+	if (profile == "P3D65_PQ") return {"2100PQ", true, "P3-D65 PQ", false};
 	// Sending with Pixelview Desktop: converted here, the stream is true Rec.2100 PQ.
 	if (profile == "P3D65_PQ_DESKTOP") return {"2100PQ", true, "P3-D65 PQ", true};
 	if (profile == "REC_2020_HLG") return {"2100HLG", true, "Rec.2100 HLG", false};
