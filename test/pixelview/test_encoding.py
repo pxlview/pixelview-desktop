@@ -197,8 +197,13 @@ int main() {
  assert(std::string(nodeColor("P3D65_PQ_DESKTOP").space) == "2100PQ" && nodeColor("P3D65_PQ_DESKTOP").p3);
  assert(!nodeColor("REC_2020_PQ").p3 && !nodeColor("REC_709").p3);
  assert(std::string(nodeColor("REC_2020_HLG").space) == "2100HLG" && nodeColor("REC_2020_HLG").hdr);
- assert(std::string(nodeColor("UNKNOWN").space) == "709" && !nodeColor("").hdr);
+ assert(nodeColor("REC_709").known && nodeColor("P3D65_PQ_DESKTOP").known);
+ // A newer backend's profile keeps the canvas instead of forcing SDR.
+ assert(!nodeColor("REC_2020_PQ_4000").known && std::string(nodeColor("REC_2020_PQ_4000").space).empty() && !nodeColor("").hdr);
  assert(HDR_NOMINAL_PEAK_NITS == 1000);
+ assert(hdrPeakNits(0) == 1000 && hdrPeakNits(-5) == 1000 && hdrPeakNits(4000) == 4000);
+ assert(hdrPeakNits(100) == 400 && hdrPeakNits(20000) == 10000 && hdrPeakNits(1000) == 1000);
+ assert(hdrPeakNits(4000, "2100HLG") == 1000 && hdrPeakNits(400, "2100HLG") == 1000 && hdrPeakNits(4000, "2100PQ") == 4000);
  assert(profileCarriesHdr("hevc", "main10") && profileCarriesHdr("hevc", "main44410") && profileCarriesHdr("hevc", ""));
  assert(!profileCarriesHdr("hevc", "main") && !profileCarriesHdr("h264", "high"));
  assert(profileRangeSupported("main42210", "Partial"));

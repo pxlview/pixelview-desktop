@@ -193,7 +193,9 @@ QJsonObject OBSBasic::PixelviewControlState()
 			     {"profiles", profiles}, {"profile", QString::fromUtf8(obs_data_get_string(encoderData, "profile"))},
 			     {"fps_options", rates}, {"fps", QJsonObject{{"num", (int)fpsNum}, {"den", (int)fpsDen}}},
 			     // The canvas colour space the node's colour profile selected (709, 2100PQ, 2100HLG).
-			     {"color_space", QString::fromUtf8(config_get_string(activeConfiguration, "Video", "ColorSpace"))}};
+			     {"color_space", QString::fromUtf8(config_get_string(activeConfiguration, "Video", "ColorSpace"))},
+			     // Its HDR nominal peak in nits (the node's max luminance).
+			     {"hdr_peak_nits", (qint64)config_get_uint(activeConfiguration, "Video", "HdrNominalPeakLevel")}};
 
 	QJsonObject audio{{"available", false}, {"muted", false}};
 	if (!pixelviewReceiving) {

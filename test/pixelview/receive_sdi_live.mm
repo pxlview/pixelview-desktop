@@ -118,7 +118,7 @@ static bool choose(obs_properties_t *props, obs_data_t *settings, const char *ke
 int main(int argc, char **argv)
 {
 	QCoreApplication app(argc, argv);
-	if (argc != 14 && argc != 15)
+	if (argc < 14 || argc > 16)
 		return 2;
 	const uint32_t fps_num = (uint32_t)atoi(argv[12]), fps_den = (uint32_t)atoi(argv[13]);
 	setbuf(stdout, nullptr);
@@ -126,6 +126,7 @@ int main(int argc, char **argv)
 	const bool full = !strcmp(argv[9], "full");
 	const int seconds = atoi(argv[10]);
 	const char *color = argc > 14 ? argv[14] : "sdr";
+	const float nits = argc > 15 ? (float)atof(argv[15]) : 1000.f; // the node's max luminance
 	draw_mode = !strcmp(color, "pq") ? pixelview_v210::Mode::PQ : !strcmp(color, "hlg") ? pixelview_v210::Mode::HLG : pixelview_v210::Mode::SDR;
 	std::string input;
 	std::getline(std::cin, input);
@@ -147,7 +148,7 @@ int main(int argc, char **argv)
 	vi.scale_type = OBS_SCALE_DISABLE;
 	if (obs_reset_video(&vi) != OBS_VIDEO_SUCCESS)
 		return 4;
-	obs_set_video_levels(300.f, 1000.f); // the application's SDR white and 1000-nit HDR peak
+	obs_set_video_levels(300.f, nits); // the application's SDR white and the HDR nominal peak
 	obs_audio_info ai = {48000, SPEAKERS_STEREO};
 	if (!obs_reset_audio(&ai))
 		return 5;

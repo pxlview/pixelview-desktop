@@ -151,12 +151,16 @@ class Backend:
         return self.ctl(action='get_state').get('state') or {}
 
     def color_profile(self):
-        return (self.call('GET', f'/node/{self.node}') or {}).get('input_color_profile')
+        settings = (self.call('GET', f'/node/{self.node}') or {}).get('settings') or {}
+        nits = settings.get('max_luminance')  # sent as a string
+        return settings.get('input_color_profile'), int(nits) if nits else None
 
-    def set_color_profile(self, profile):
-        result = self.call('PATCH', f'/node/{self.node}', {'input_color_profile': profile})
-        if 'http' in result:
-            raise SystemExit(f'could not set the node colour profile {profile}: {result}')
+    def set_color_profile(self, profile, nits=None):
+        # The node route applies one field per request.
+        for body in [{'input_color_profile': profile}] + ([{'max_luminance': nits}] if nits else []):
+            result = self.call('PATCH', f'/node/{self.node}', body)
+            if 'http' in result:
+                raise SystemExit(f'could not set the node colour {body}: {result}')
 
 
 # ---------- processes ----------
@@ -238,9 +242,17 @@ def judge(run, fmt, expect, stats, log, codec):
             target = (lambda e: p3_expected(e)) if run == 'p3' else (lambda e: e)
             dark = [m for k, (e, got) in found.items() if k not in NEUTRAL for m, x in zip(got, target(e)) if x <= 70]
             detail['black_channel_max_nits'] = round(max((nits(m) for m in dark), default=0.0), 3)
+            if expect['exact'] is not None:
+                # Full chroma (4:4:4 RGB): black channels hold only the half-float residue
+                # (measured up to 0.24 nit next to ~980-nit channels); a mirrored negative
+                # or a gamut clip puts a nit or more there.
+                checks['black_channels'] = detail['black_channel_max_nits'] <= 0.5
     if run == 'p3' and rgb:
-        # Every channel the conversion leaves above near-black matches the computed result.
-        errors = [abs(got[i] - p3_expected(e)[i]) for k, (e, got) in found.items() for i in range(3) if p3_expected(e)[i] > 100]
+        # Every channel the conversion leaves above near-black matches the computed result
+        # in codes; near-black ones are judged in nits, where PQ is steep (0.01 nit is ~19
+        # codes). P3 red's blue lies outside BT.2020 and must clamp to black: the PQ curve's
+        # abs() once mirrored it into 1.2 nits (code 203).
+        errors = [abs(got[i] - p3_expected(e)[i]) for k, (e, got) in found.items() for i in range(3) if p3_expected(e)[i] > 70]
         detail['p3_worst'] = round(max(errors, default=math.inf), 2)
         checks['p3_conversion'] = detail['p3_worst'] <= 3
     return all(checks.values()), dict(detail, checks=checks)
@@ -292,7 +304,8 @@ def run_case(backend, args, run, name, out, credentials):
     time.sleep(6)
     recv_log = out / f'{run}-{name}-recv.log'
     receiver = spawn([RECV, '--credentials', credentials, '--output', args.output, '--mode', args.mode, '--format', fmt,
-                      '--range', sdi_range, '--seconds', '75', '--origin', args.origin, '--color', RUNS[run][1]], recv_log)
+                      '--range', sdi_range, '--seconds', '75', '--origin', args.origin, '--color', RUNS[run][1],
+                      '--nits', str(1000 if RUNS[run][1] == 'hlg' else args.nits)], recv_log)
     time.sleep(15)
     capture = subprocess.run([PY, TOOL, '--capture', args.analyser, '--format', fmt, '--mode', args.mode, '--skip-frames', '125',
                               '--seconds', '25', '--source-range', sdi_range, '--expect', sdi_range], capture_output=True, text=True)
@@ -321,6 +334,7 @@ def main():
     parser.add_argument('--desktop', help='desktop id, when more than one is online')
     parser.add_argument('--mode', choices=sorted(MODES), default='1080p25')
     parser.add_argument('--mbps', type=int, default=12)
+    parser.add_argument('--nits', type=int, default=1000, help="the node's max luminance (HDR nominal peak) for HDR runs; the receiver matches it")
     parser.add_argument('--generator', default='4K Mini', help='pattern output (feeds the sender capture)')
     parser.add_argument('--capture-device', default='Recorder 3G', help='sender capture input')
     parser.add_argument('--output', default='Monitor 3G', help='receiver DeckLink output')
@@ -341,7 +355,7 @@ def main():
         raise SystemExit('cable preflight failed; fix the cabling or the cards first')
     backend = Backend(args.origin, args.node, password)
     backend.find_desktop(args.desktop)
-    original = backend.color_profile()
+    original, original_nits = backend.color_profile()
     results, generator, generator_key = {}, None, None
     with tempfile.TemporaryDirectory(prefix='pixelview-sdi-') as tmp:
         credentials = credentials_file(link, tmp)
@@ -350,15 +364,19 @@ def main():
                 profile, _, canvas, sdi_range = RUNS[run]
                 backend.ctl(action='stop')
                 time.sleep(3)  # a live stream defers a colour change
-                backend.set_color_profile(profile)
+                backend.set_color_profile(profile, args.nits)
+                hdr = canvas != '709'
                 for _ in range(30):
-                    current = backend.state().get('encoding', {}).get('color_space')
-                    if current == canvas:
+                    encoding = backend.state().get('encoding', {})
+                    current, peak = encoding.get('color_space'), encoding.get('hdr_peak_nits')
+                    # HLG keeps the 1000-nit reference whatever the node's max luminance.
+                    expected_peak = 1000 if canvas == '2100HLG' else args.nits
+                    if current == canvas and (not hdr or peak == expected_peak):
                         break
                     time.sleep(1)
                 else:
-                    raise SystemExit(f'the sender canvas stayed {current} for node colour {profile}')
-                print(f'== {run}: node {profile}, sender canvas {canvas}, {sdi_range} range', flush=True)
+                    raise SystemExit(f'the sender canvas stayed {current} at {peak} nits for node colour {profile}, {expected_peak} nits')
+                print(f'== {run}: node {profile}, sender canvas {canvas}{f" at {peak} nits" if hdr else ""}, {sdi_range} range', flush=True)
                 for name in cases:
                     fmt = CASES[name][1]
                     if generator_key != (fmt, sdi_range):
@@ -379,7 +397,7 @@ def main():
             stop(generator)
             backend.ctl(action='stop')
             if original:
-                backend.set_color_profile(original)
+                backend.set_color_profile(original, original_nits)
             (args.out / 'results.json').write_text(json.dumps(results, indent=1))
             lines = ['| run | case | result | worst | neutral | ramp | alternation | codec |', '|---|---|---|---|---|---|---|---|']
             for key, r in results.items():

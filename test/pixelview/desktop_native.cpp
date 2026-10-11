@@ -140,6 +140,12 @@ int main() {
   p.d.receive(mutation("DESKTOP_COLOR", {{"color", "REC_709"}}), 5);
   p.d.receive(mutation("DESKTOP_COLOR", {{"color", QJsonObject{{"profile", ""}}}}), 6);
   assert(p.d.colorProfile == "REC_2020_HLG" && seen.size() == 3);
+  // The max luminance alone is a change; a missing one reads as 0 (1000 nits).
+  assert(p.d.colorPeakNits == 1000);
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", QJsonObject{{"profile", "REC_2020_HLG"}, {"max_luminance", 4000}}}}), 7);
+  assert(p.d.colorPeakNits == 4000 && seen.size() == 4);
+  p.d.receive(mutation("DESKTOP_COLOR", {{"color", QJsonObject{{"profile", "REC_2020_HLG"}}}}), 8);
+  assert(p.d.colorPeakNits == 0 && seen.size() == 5);
   Fixture old; int oldColors = 0; old.d.colorChanged = [&] { ++oldColors; };
   old.stream(); assert(old.d.colorProfile.isEmpty() && oldColors == 0);
  }

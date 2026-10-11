@@ -223,11 +223,14 @@ float PS_Y(FragPos frag_in) : TARGET
 	return y;
 }
 
+// Pixelview: colours outside BT.2020 (P3 red, half-float residue on BT.2020
+// primaries) are negative here; the PQ curve takes abs(), which turned them into
+// positive light (P3 red's blue: -1.2 nits became +1.2 nits). Clamp to zero.
 float PS_P010_PQ_Y_709_2020(FragPos frag_in) : TARGET
 {
 	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float y = dot(color_vec0.xyz, rgb) + color_vec0.w;
 	y = floor(saturate(y) * 1023. + 0.5) * (64. / 65535.);
 	return y;
@@ -256,7 +259,7 @@ float PS_P216_PQ_Y_709_2020(FragPos frag_in) : TARGET
 {
 	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float y = dot(color_vec0.xyz, rgb) + color_vec0.w;
 	return y;
 }
@@ -282,7 +285,7 @@ float PS_P416_PQ_Y_709_2020(FragPos frag_in) : TARGET
 {
 	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float y = dot(color_vec0.xyz, rgb) + color_vec0.w;
 	return y;
 }
@@ -308,7 +311,7 @@ float PS_I010_PQ_Y_709_2020(FragPos frag_in) : TARGET
 {
 	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float y = dot(color_vec0.xyz, rgb) + color_vec0.w;
 	return y * (1023. / 65535.);
 }
@@ -358,7 +361,7 @@ float2 pv_chroma_srgb(int x, int y)
 float2 pv_chroma_pq(int x, int y)
 {
 	float3 rgb = image.Load(int3(x, y, 0)).rgb * sdr_white_nits_over_maximum;
-	rgb = linear_to_st2084(rec709_to_rec2020(rgb));
+	rgb = linear_to_st2084(max(rec709_to_rec2020(rgb), 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	return float2(dot(color_vec1.xyz, rgb) + color_vec1.w, dot(color_vec2.xyz, rgb) + color_vec2.w);
 }
 
@@ -423,7 +426,7 @@ float2 PS_P216_PQ_UV_709_2020_Cosited(FragPos frag_in) : TARGET
 {
 	float3 rgb = image.Load(int3(int(frag_in.pos.x) * 2, int(frag_in.pos.y), 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
 	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
 	float2 uv = float2(u, v);
@@ -457,7 +460,7 @@ float2 PS_P416_PQ_UV_709_2020(FragPos frag_in) : TARGET
 	// which over-saturated every 4:4:4 PQ/HLG colour while greys stayed exact).
 	float3 rgb = image.Load(int3(frag_in.pos.xy, 0)).rgb * sdr_white_nits_over_maximum;
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
 	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
 	float2 uv = float2(u, v);
@@ -527,7 +530,7 @@ float PS_I010_PQ_U_709_2020_WideWide(FragTexWideWide frag_in) : TARGET
 	float3 rgb_bottomright = image.Sample(def_sampler, frag_in.uuvv.yw).rgb;
 	float3 rgb = (rgb_topleft + rgb_topright + rgb_bottomleft + rgb_bottomright) * (0.25 * sdr_white_nits_over_maximum);
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float u = dot(color_vec1.xyz, rgb) + color_vec1.w;
 	return u * (1023. / 65535.);
 }
@@ -563,7 +566,7 @@ float PS_I010_PQ_V_709_2020_WideWide(FragTexWideWide frag_in) : TARGET
 	float3 rgb_bottomright = image.Sample(def_sampler, frag_in.uuvv.yw).rgb;
 	float3 rgb = (rgb_topleft + rgb_topright + rgb_bottomleft + rgb_bottomright) * (0.25 * sdr_white_nits_over_maximum);
 	rgb = rec709_to_rec2020(rgb);
-	rgb = linear_to_st2084(rgb);
+	rgb = linear_to_st2084(max(rgb, 0.)); // Pixelview: see PS_P010_PQ_Y_709_2020
 	float v = dot(color_vec2.xyz, rgb) + color_vec2.w;
 	return v * (1023. / 65535.);
 }

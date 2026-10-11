@@ -47,11 +47,22 @@ static void test_profile(const char *profile)
 /* Caps without a profile (the parser has not seen an SPS yet) hold the route:
  * no error, the access units before the parameter sets are dropped, and the
  * next caps carrying the profile select and pin it as usual. */
+/* Order of what reaches the sink: c = caps, s = segment, b = buffer. */
+static GstPadProbeReturn record_order(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
+{
+ (void)pad;GString *order=opaque;
+ if(info->type&GST_PAD_PROBE_TYPE_BUFFER) g_string_append_c(order,'b');
+ else if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))==GST_EVENT_CAPS) g_string_append_c(order,'c');
+ else if(GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info))==GST_EVENT_SEGMENT) g_string_append_c(order,'s');
+ return GST_PAD_PROBE_OK;
+}
 static void missing_profile_waits(void)
 {
  GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
  GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
  gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));gst_element_set_state(pipe,GST_STATE_PLAYING);
+ GString *order=g_string_new(NULL);GstPad *sinkpad=gst_element_get_static_pad(sink,"sink");
+ gst_pad_add_probe(sinkpad,GST_PAD_PROBE_TYPE_BUFFER|GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,record_order,order,NULL);gst_object_unref(sinkpad);
  GstPad *input=gst_element_get_static_pad(filter,"sink");gst_pad_send_event(input,gst_event_new_stream_start("late-sps"));
  GstCaps *caps=gst_caps_from_string("video/x-h265,stream-format=hvc1,alignment=au");
  gst_pad_send_event(input,gst_event_new_caps(caps));gst_caps_unref(caps);
@@ -68,7 +79,31 @@ static void missing_profile_waits(void)
  GstSample *sample=gst_app_sink_try_pull_sample(GST_APP_SINK(sink),GST_SECOND);assert(sample && gst_sample_get_buffer(sample)==original);
  gst_sample_unref(sample);gst_buffer_unref(original);
  GstBus *bus=gst_element_get_bus(pipe);assert(!gst_bus_pop_filtered(bus,GST_MESSAGE_ERROR));gst_object_unref(bus);
+ /* Only the real caps pass, then the held segment, then the first buffer. */
+ assert(!strcmp(order->str,"csb"));g_string_free(order,TRUE);
  gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
+}
+/* A stream that never announces its profile fails after ten seconds of PTS. */
+static void missing_profile_times_out(void)
+{
+ GstElement *pipe=gst_pipeline_new(NULL),*filter=pv_codec_route_new();
+ GstElement *sink=gst_element_factory_make("appsink",NULL);g_object_set(sink,"sync",FALSE,"async",FALSE,NULL);
+ gst_bin_add_many(GST_BIN(pipe),filter,sink,NULL);assert(gst_element_link(filter,sink));gst_element_set_state(pipe,GST_STATE_PLAYING);
+ GstPad *input=gst_element_get_static_pad(filter,"sink");gst_pad_send_event(input,gst_event_new_stream_start("no-sps"));
+ GstCaps *caps=gst_caps_from_string("video/x-h265,stream-format=hvc1,alignment=au");
+ gst_pad_send_event(input,gst_event_new_caps(caps));gst_caps_unref(caps);
+ GstSegment segment;gst_segment_init(&segment,GST_FORMAT_TIME);gst_pad_send_event(input,gst_event_new_segment(&segment));
+ GstBus *bus=gst_element_get_bus(pipe);
+ for(int i=0;i<=10;++i) {
+  GstBuffer *b=gst_buffer_new_allocate(NULL,1,NULL);GST_BUFFER_PTS(b)=i*GST_SECOND;
+  assert(gst_pad_chain(input,b)==GST_FLOW_OK);
+  assert(!gst_bus_pop_filtered(bus,GST_MESSAGE_ERROR)); /* ten seconds is still waiting */
+ }
+ GstBuffer *b=gst_buffer_new_allocate(NULL,1,NULL);GST_BUFFER_PTS(b)=10*GST_SECOND+1;
+ assert(gst_pad_chain(input,b)==GST_FLOW_OK);
+ GstMessage *error=gst_bus_pop_filtered(bus,GST_MESSAGE_ERROR);assert(error);gst_message_unref(error);
+ assert(!gst_app_sink_try_pull_sample(GST_APP_SINK(sink),0));
+ gst_object_unref(bus);gst_object_unref(input);gst_element_set_state(pipe,GST_STATE_NULL);gst_object_unref(pipe);
 }
 /* Without a probed 4:2:2 (or 4:4:4) decoder, a sender on HEVC 4:2:2 (or 4:4:4)
  * 10-bit, and always any other non-Main profile, is refused before its first AU
@@ -100,11 +135,11 @@ static void unsupported_profile_refusal(const char *profile,const char *reason,g
 }
 int main(void)
 {
- gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");test_profile("main-444-10");missing_profile_waits();
+ gst_init(NULL,NULL);test_profile("main");test_profile("main-10");test_profile("main-422-10");test_profile("main-444-10");missing_profile_waits();missing_profile_times_out();
  unsupported_profile_refusal("main-422-10",PV_UNSUPPORTED_HEVC_MAIN_422_10,FALSE);
  unsupported_profile_refusal("main-422-12",PV_UNSUPPORTED_HEVC_PROFILE,FALSE);
  unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_MAIN_444_10,FALSE);
  unsupported_profile_refusal("main-444-10",PV_UNSUPPORTED_HEVC_MAIN_444_10,TRUE); /* the 4:2:2 admission does not cover 4:4:4 */
  unsupported_profile_refusal("main-444-12",PV_UNSUPPORTED_HEVC_PROFILE,TRUE);
- puts("Main/Main10 and probed Main 4:2:2 10 / Main 4:4:4 10: stock capsfilter route, all 128 compressed AUs unchanged, profile pinned; caps before the SPS wait for the profile; unprobed 4:2:2, 4:4:4 and other profiles refused with typed Main/Main10 guidance");
+ puts("Main/Main10 and probed Main 4:2:2 10 / Main 4:4:4 10: stock capsfilter route, all 128 compressed AUs unchanged, profile pinned; caps before the SPS wait for the profile (10 s bound); unprobed 4:2:2, 4:4:4 and other profiles refused with typed Main/Main10 guidance");
 }

@@ -134,25 +134,40 @@ inline std::string implicitProfileFormat(const std::string &current, bool hdr = 
 	return hdr || current == "P010" ? "P010" : "NV12";
 }
 // The paired node's input colour profile (set in Pixelview admin) decides the
-// sender canvas: Rec.709 SDR, or Rec.2100 PQ/HLG at a 1000-nit nominal peak.
-// P3-D65 PQ is streamed as Rec.2100 PQ; the engine converts it with a LUT.
+// sender canvas: Rec.709 SDR, or Rec.2100 PQ/HLG at the node's max luminance.
+// P3-D65 PQ sent with OBS is streamed as Rec.2100 PQ and the engine converts it
+// with a LUT; sent with Pixelview Desktop, it is converted here.
 struct NodeColor {
-	const char *space; // OBS Video/ColorSpace
+	const char *space; // OBS Video/ColorSpace; empty when the profile is unknown
 	bool hdr;
 	const char *label;
 	bool p3; // the sender converts P3-D65 to Rec.2020 (the engine adds no LUT)
+	bool known = true; // false: a profile newer than this app, the canvas is kept
 };
 inline NodeColor nodeColor(const std::string &profile)
 {
+	if (profile == "REC_709") return {"709", false, "Rec.709 SDR", false};
 	if (profile == "REC_2020_PQ") return {"2100PQ", true, "Rec.2100 PQ", false};
 	// Sending with OBS: streamed as Rec.2100 PQ; the engine converts P3 with a LUT.
 	if (profile == "P3D65_PQ") return {"2100PQ", true, "P3-D65 PQ (converted by the server)", false};
 	// Sending with Pixelview Desktop: converted here, the stream is true Rec.2100 PQ.
 	if (profile == "P3D65_PQ_DESKTOP") return {"2100PQ", true, "P3-D65 PQ (converted to Rec.2100 PQ here)", true};
 	if (profile == "REC_2020_HLG") return {"2100HLG", true, "Rec.2100 HLG", false};
-	return {"709", false, "Rec.709 SDR", false};
+	// A newer backend's profile must not turn an HDR node into an SDR stream.
+	return {"", false, "not supported by this version", false, false};
 }
+// The node's max luminance (admin) becomes a PQ canvas's HDR nominal peak: the
+// stream's mastering-display and content-light metadata (PQ pixels do not
+// depend on it). Missing (older backend) is 1000 nits; OBS accepts 400 to 10000.
+// HLG stays at 1000: it is scene-referred with a 1000-nit reference display, and
+// libobs decodes HLG at no more than 1000 nits while encoding with the peak, so
+// any other value changes the picture (measured: white 940 -> 502 at 4000).
 constexpr uint32_t HDR_NOMINAL_PEAK_NITS = 1000;
+inline uint32_t hdrPeakNits(long long backend, const std::string &space = "2100PQ")
+{
+	if (backend <= 0 || space == "2100HLG") return HDR_NOMINAL_PEAK_NITS;
+	return backend < 400 ? 400 : backend > 10000 ? 10000 : (uint32_t)backend;
+}
 // HDR needs ten bits: HEVC Main10, Main 4:2:2 10 or Main 4:4:4 10 (or an HEVC
 // encoder without a profile property, which follows a P010 canvas).
 inline bool profileCarriesHdr(const std::string &codec, const std::string &profile)

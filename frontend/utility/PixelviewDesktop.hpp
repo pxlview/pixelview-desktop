@@ -38,9 +38,11 @@ public:
  QStringList blockedProfiles;
  std::function<void()> policy=[]{};
  // The node's input colour profile (REC_709, REC_2020_PQ, REC_2020_HLG,
- // P3D65_PQ), sent with DESKTOP_READY, DESKTOP_STARTED and DESKTOP_COLOR. An
- // older backend sends none and the canvas stays as it is.
+ // P3D65_PQ, P3D65_PQ_DESKTOP) and max luminance in nits, sent with
+ // DESKTOP_READY, DESKTOP_STARTED and DESKTOP_COLOR. An older backend sends
+ // none and the canvas stays as it is; a missing luminance is 0 (1000 nits).
  QString colorProfile;
+ qint64 colorPeakNits=0;
  std::function<void()> colorChanged=[]{};
  std::function<QString()> profile=[]{return QString();};
  bool ready=false, pending=false, started=false;
@@ -133,8 +135,9 @@ public:
   const QJsonValue color=data["color"];
   if(!color.isObject()) return false;
   const QString next=color.toObject()["profile"].toString();
-  if(next.isEmpty() || next==colorProfile) return false;
-  colorProfile=next; colorChanged(); return true;
+  const qint64 nits=color.toObject()["max_luminance"].toInteger(0);
+  if(next.isEmpty() || (next==colorProfile && nits==colorPeakNits)) return false;
+  colorProfile=next; colorPeakNits=nits; colorChanged(); return true;
  }
  void receive(const QJsonObject &o, qint64 now) {
   const auto name=o["mutation"].toString();

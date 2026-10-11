@@ -13,7 +13,12 @@ struct route_selector {
  gboolean selected, admit_main422, admit_main444;
  gint waiting; /* H.265 caps without a profile yet: hold until the parser has an SPS */
  GstEvent *held_segment; /* streaming thread only: replayed after the real caps */
+ GstClockTime held_first; guint held_count; gboolean held_failed; /* streaming thread only */
 };
+/* A sender sends parameter sets with every keyframe; ten seconds without any
+ * means the stream cannot be decoded (counted in buffers when there is no PTS). */
+#define PV_ROUTE_HOLD_LIMIT (10*GST_SECOND)
+#define PV_ROUTE_HOLD_BUFFERS 600
 static void selector_unref(gpointer opaque)
 {
  struct route_selector *s=opaque;
@@ -30,9 +35,22 @@ static GstPadProbeReturn refuse_route(GstPad *pad,GstPadProbeInfo *info,gpointer
 /* Access units before the parameter sets cannot be decoded; drop them while waiting. */
 static GstPadProbeReturn hold_route(GstPad *pad,GstPadProbeInfo *info,gpointer opaque)
 {
- (void)info;
  struct route_selector *s=opaque;
- if(g_atomic_int_get(&s->waiting)) return GST_PAD_PROBE_DROP;
+ if(g_atomic_int_get(&s->waiting)) {
+  if(s->held_failed) return GST_PAD_PROBE_DROP;
+  GstClockTime pts=GST_CLOCK_TIME_NONE;
+  if(info->type&GST_PAD_PROBE_TYPE_BUFFER) pts=GST_BUFFER_PTS(GST_PAD_PROBE_INFO_BUFFER(info));
+  if(GST_CLOCK_TIME_IS_VALID(pts) && !GST_CLOCK_TIME_IS_VALID(s->held_first)) s->held_first=pts;
+  const gboolean expired=++s->held_count>PV_ROUTE_HOLD_BUFFERS ||
+   (GST_CLOCK_TIME_IS_VALID(pts) && GST_CLOCK_TIME_IS_VALID(s->held_first) && pts>s->held_first+PV_ROUTE_HOLD_LIMIT);
+  if(expired) {
+   /* Never stall silently: the receiver reports the failure and tears down. */
+   s->held_failed=TRUE;
+   GST_ELEMENT_ERROR(s->bin,STREAM,DECODE,("Receive codec route refused: the HEVC stream never announced its profile"),
+    ("no parameter sets after %u access units",s->held_count));
+  }
+  return GST_PAD_PROBE_DROP;
+ }
  /* The segment held back with the early caps follows the real caps, in order.
   * This probe sits on the upstream pad, so the route never sees data first. */
  GstEvent *segment=s->held_segment;s->held_segment=NULL;
@@ -111,7 +129,7 @@ GstElement *pv_codec_route_new(void)
  GstElement *policy=gst_element_factory_make("capsfilter","codec-route");
  if(!policy) return NULL;
  struct route_selector *s=g_new0(struct route_selector,1);
- s->refs=2;s->bin=gst_bin_new(NULL);s->policy=policy;
+ s->refs=2;s->bin=gst_bin_new(NULL);s->policy=policy;s->held_first=GST_CLOCK_TIME_NONE;
  GstCaps *caps=gst_static_caps_get(&route_caps);
  g_object_set(s->policy,"caps",caps,NULL);gst_caps_unref(caps);
  gst_bin_add(GST_BIN(s->bin),s->policy);

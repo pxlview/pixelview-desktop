@@ -155,12 +155,14 @@ python3 test/pixelview/run_sdi_matrix.py --node 707880 --suite sdr --preflight  
 Suites: `quick` (SDR limited 4:4:4/4:2:2/Main10/Main, PQ 4:4:4 and Main10, HLG Main10), `sdr`
 (limited and full, six cases each), `hdr` (PQ and HLG over the five 10-bit cases, P3 Desktop over
 4:4:4 RGB and 4:2:2), `full` (both). Runs set the node's input colour profile through the admin API
-(the sender follows) and restore it at the end. `--preflight` first checks both cable legs in both
+(the sender follows) and restore it and the max luminance at the end. `--preflight` first checks both cable legs in both
 picture formats with no stream (it needs the sender application closed, which holds the Recorder
 3G input). Pass marks: SDR worst patch ≤1.5 codes (full range +0.5, 8-bit Main ≤2.5); HDR neutral
-patches ≤2.5 codes, with saturated primaries reported in nits (the half-float canvas leaves a
-fraction of a nit in a pure primary's black channel); P3 colour channels ≤3 codes from the
-computed result. Results: `~/pixelview-sdi-results/<time>/` (`summary.md`, `results.json`, every
+patches ≤2.5 codes; on 4:4:4 RGB, black channels of saturated patches ≤0.5 nit (the half-float
+canvas leaves up to ~0.24 nit; a mirrored negative or a gamut clip puts a nit or more there); P3
+channels above near-black ≤3 codes from the computed result. `--nits` sets the node's max
+luminance for the run (PQ canvases take it as their peak; HLG stays at 1000 and the receiver
+matches either). Results: `~/pixelview-sdi-results/<time>/` (`summary.md`, `results.json`, every
 generator, receiver and analyser log). Device names are options (`--generator`, `--capture-device`,
 `--output`, `--analyser`) for other cabling; `--mode` 1080p24/25/30.
 

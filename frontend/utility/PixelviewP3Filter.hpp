@@ -110,7 +110,8 @@ inline void registerP3Filter()
 	struct obs_source_info info = {};
 	info.id = P3_FILTER_ID;
 	info.type = OBS_SOURCE_TYPE_FILTER;
-	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_SRGB;
+	// Hidden from the Filters dialog: the app adds and removes it for the node.
+	info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_SRGB | OBS_SOURCE_CAP_DISABLED;
 	info.get_name = p3filter::name;
 	info.create = p3filter::create;
 	info.destroy = p3filter::destroy;

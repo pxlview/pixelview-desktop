@@ -332,21 +332,30 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
   without 10-bit HEVC. An HEVC encoder without a profile property keeps a P010 canvas and otherwise
   uses NV12 (Windows 2026-10-04: first launch selects `h265_texture_amf` Main/NV12). Main/Main10 default to limited range but honor a saved Full setting. Saves are
   in-process transactions: `basic.ini` and `streamEncoder.json` roll back on failure.
-- **Colour profile from the node.** The node's input colour profile in Pixelview admin decides the
-  canvas, with no control on the Desktop (the sidebar shows it read-only, e.g. "Colour: Rec.2100 PQ
-  · 1000 nits"). The backend sends it with `DESKTOP_READY`, `DESKTOP_STARTED` and, when an admin
-  changes it, `DESKTOP_COLOR` (`{"color": {"profile", "max_luminance"}}`); a change while streaming
-  or receiving applies once the sender is idle, and every start re-applies it before the output
-  exists. `REC_709` gives a Rec.709 SDR canvas; `REC_2020_PQ` and `REC_2020_HLG` a Rec.2100 PQ or
-  HLG canvas at a fixed 1000-nit nominal peak, which the VideoToolbox encoder writes into the HEVC
-  VUI and HDR10 metadata for every profile. `P3D65_PQ` ("sending with OBS") streams as Rec.2100 PQ
-  and the engine converts P3 with its LUT; `P3D65_PQ_DESKTOP` ("sending with Pixelview Desktop")
-  converts P3-D65 to BT.2020 on the sender: a filter on the capture applies the exact 3x3 in the
+- **Colour profile from the node.** The node's input colour profile and max luminance in
+  Pixelview admin decide the canvas, with no control on the Desktop (the sidebar shows them
+  read-only, e.g. "Colour: Rec.2100 PQ · 1000 nits", with "· after this stream" while a change
+  waits). The backend sends them with `DESKTOP_READY`, `DESKTOP_STARTED` and, when an admin
+  changes either, `DESKTOP_COLOR` (`{"color": {"profile", "max_luminance"}}`); a change while
+  streaming or receiving applies once the sender is idle, and every start re-applies it before the
+  output exists. `REC_709` gives a Rec.709 SDR canvas; `REC_2020_PQ` and `REC_2020_HLG` a Rec.2100
+  PQ or HLG canvas. For PQ the HDR nominal peak is the node's max luminance (clamped to 400-10000
+  nits; 1000 when the backend sends none), which the VideoToolbox encoder writes into the HDR10
+  mastering-display and content-light metadata; PQ pixel values do not depend on it. HLG always
+  uses 1000: it is scene-referred with a 1000-nit reference display, and libobs decodes HLG at no
+  more than 1000 nits while encoding with the nominal peak, so any other value changes the picture
+  (measured at 4000: white 940 came out as 502). `P3D65_PQ` ("sending with OBS") streams as Rec.2100 PQ and the
+  engine converts P3 with its LUT; `P3D65_PQ_DESKTOP` ("sending with Pixelview Desktop") converts
+  P3-D65 to BT.2020 on the sender: a filter on the DeckLink capture applies the exact 3x3 in the
   canvas's linear light, so the stream is true Rec.2100 PQ, the engine adds no LUT, and
-  passthrough stays possible. HDR needs ten bits: 8-bit Main is hidden and replaced by Main10, a
-  non-HEVC encoder by the HEVC one, and saving either is refused. The DeckLink capture's colour
-  space follows (Rec. 2100 PQ or HLG; back to Default for SDR). A backend without colour profiles
-  leaves the canvas as it is.
+  passthrough stays possible. The filter is hidden from the Filters dialog and found by type, so a
+  duplicate is removed rather than converting twice; with a capture other than DeckLink the
+  Desktop warns once that nothing is converted. HDR needs ten bits: 8-bit Main is hidden and
+  replaced by Main10, a non-HEVC encoder (or a saved encoder that is not available) by the HEVC
+  one, an HEVC encoder without a profile property gets a P010 canvas, and saving 8-bit Main or a
+  non-HEVC encoder is refused. The DeckLink capture's colour space follows (Rec. 2100 PQ or HLG;
+  back to Default for SDR). A backend without colour profiles, or a profile this version does not
+  know, leaves the canvas as it is (logged).
 - Every profile encodes the same 10-bit 4:2:2 capture; only the stream format differs. The canvas
   is a linear float texture for all SDR outputs (a Pixelview change in `obs_init_textures`: upstream
   rendered NV12 through an 8-bit RGB canvas, which clipped sub-black, super-white and out-of-gamut
@@ -603,7 +612,8 @@ nominal peak (100-10000 nits, default 1000), persisted as `PixelviewReceive/HDR`
 In receive mode a change resets the canvas immediately and is refused while the DeckLink output or
 any other output is running. The nits value becomes the OBS HDR nominal peak: the HLG reference
 peak for decode and re-encode and the DeckLink mastering/MaxCLL/MaxFALL metadata. Backend session
-status also exposes `color_profile`/`max_luminance`; the Desktop does not read them yet.
+status also exposes `color_profile`/`max_luminance`; the receiving side does not read them yet, so
+for HLG the nits value must be set to the node's max luminance by hand.
 
 The receive canvas frame rate is independent of the Sending FPS (which is locked while unpaired):
 the DeckLink output mode is the single receive frame-rate setting. Before a receive Start the output
@@ -1159,18 +1169,29 @@ gate) fail in the current environment regardless of changes.
   | Main10 | Y'CbCr 4:2:2 | 0.0, 55 | 0.0, 48 |
 
   The "saturated" figures are the channel that should be black in a pure BT.2020 primary next to
-  ~983-nit channels: the worst, 78 codes, is 0.24 nit (0.02 % of the pixel), from the half-float
-  Rec.709 canvas round trip (a gamut clip would put ~100 nits there). Bright channels are within
-  one code; every patch without an exactly-zero channel is exact. `P3D65_PQ_DESKTOP` with the RGB picture read as P3: every patch
-  within 1.2 codes of the computed P3-to-BT.2020 result and neutrals exact, except pure red's blue
-  channel (expected black, 139 codes, the same near-zero limit). SDR rerun on the same build:
+  ~983-nit channels: the worst, 78 codes, is 0.24 nit (0.02 % of the pixel), a positive residue of
+  the half-float Rec.709 canvas round trip (PQ is steep near black; a gamut clip would put ~100
+  nits there). Bright channels are within one code; every patch without an exactly-zero channel is
+  exact. `P3D65_PQ_DESKTOP` with the RGB picture read as P3: every channel above near-black within
+  1.2 codes of the computed P3-to-BT.2020 result, neutrals exact, and every near-black channel at
+  most 0.01 nit. Pure P3 red's blue lies slightly outside BT.2020 (-1.2 nits); libobs's PQ encoder
+  takes `abs()` and sent it as +1.2 nits (code 203). The PQ output shaders now clamp negatives to
+  zero first (2026-10-11; HLG already saturated), and the matrix runner fails a 4:4:4 RGB HDR case
+  with more than 0.5 nit in a black channel. SDR rerun on the same build:
   unchanged (4:4:4 within 1 code, 8-bit Main within 2, 159 ramp codes). The runs found and fixed:
   libobs's P416 PQ/HLG output shaders computed chroma without the HDR scale their luma uses
   (upstream since P416 was added), which over-saturated every 4:4:4 HDR colour by up to 200
   codes while greys stayed exact; and the receive codec route refused a stream whose first NAL
   unit precedes the parameter sets (VideoToolbox HLG Main10 opens with a prefix SEI), because the
   parser's first caps carry no profile. The route now holds such caps and the access units before
-  the parameter sets, and selects on the parser's next caps. Not verified: the receiving
+  the parameter sets, and selects on the parser's next caps; after ten seconds of access units
+  without them it fails the session with a stated reason instead of waiting. Rerun 2026-10-11 after
+  the review fixes (`run_sdi_matrix.py`): `hdr` 11/12 with the earlier P3 code threshold, then P3
+  4:4:4 RGB passing under the nit-based black-channel check; `sdr` 12/12; a node at 4000 nits: PQ
+  4:4:4 RGB and Main10 unchanged pixel for pixel with the sender canvas at a 4000-nit peak, HLG
+  4:4:4 RGB and Main10 passing with the canvas kept at 1000. The 4000-nit metadata itself was not
+  read back from the bitstream (the receiver's parser sees the prefix SEI but does not log its
+  values). Not verified: the receiving
   application's HDR window, HLG or PQ by eye on a monitor, 24/30 fps, other Macs, production.
 - By eye with the receiving application (2026-10-10, same build and engine, two Macs): Resolve
   played a 10-bit test chart (pv-engine `docs/depth-chart`, plus a 4:4:4 variant whose middle band
