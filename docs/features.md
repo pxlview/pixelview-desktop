@@ -1123,7 +1123,8 @@ gate) fail in the current environment regardless of changes.
   same receiver class, plugin, shaders and output plugin), the sender's sidebar label and tooltip
   on screen, 23.976 and 30 fps, a monitor's picture, any Mac other than this M1 Pro,
   two separate Macs, the engine's VP9 transcode of a 4:4:4 sender for other viewers, production.
-- Every HEVC profile on SDI hardware (2026-10-10, M1 Pro, signed development build of
+- Every HEVC profile on SDI hardware (repeatable with `test/pixelview/run_sdi_matrix.py`, see
+  `docs/build-and-release.md` 3.4; 2026-10-10, M1 Pro, signed development build of
   `feat/hevc-444` rebased on master, local backend, local pv-engine `main` with pxlview/pv-engine#67,
   1080p25, 12 Mbit/s). The same loop as above: 4K Mini pattern into the Recorder 3G, the sender
   application driven only by the Desktop control route (paired at startup from

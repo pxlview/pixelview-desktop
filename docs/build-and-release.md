@@ -122,7 +122,49 @@ clang++ -std=c++17 -fobjc-arc -fPIC -I. \
 
 Use a disposable node device and a mode-0600 input file. The harness deletes the origin's Keychain credential afterward unless `--keep-device` is given, so target `127.0.0.1` rather than the app's `localhost` origin. Not a TLS or media-delivery test.
 
-### 3.4 CI
+### 3.4 SDI end-to-end matrix (hardware)
+
+Run after any change to capture, the canvas, encoding, receive, the DeckLink output, colour or HDR.
+It drives the real sender application through the backend's control route, the real receiver
+(headless, `run_receive_sdi_live.py`) and the built DeckLink plugin, and measures the receiver's SDI
+output against the test picture: HEVC passthrough, worst patch error, 10- or 8-bit ramp, chroma
+alternation per row (Y'CbCr) or per pixel (RGB), and for P3 the computed P3-D65 → BT.2020 result.
+
+```text
+4K Mini SDI out  ──► Recorder 3G   (pattern into the sender application)
+Monitor 3G SDI out ──► 4K Mini SDI in  (receiver output into the analyser)
+```
+
+Before running:
+
+- Signed development build (2.1); the sender application running from it with a settings root
+  paired to the local backend, and the only online Desktop on the node.
+- Local backend **without** `SERVER_URL_OVERRIDE` (it makes the WHEP endpoint and the answer's
+  `Location` different origins, which the receiver refuses before any media) and a local engine.
+- Nothing else on the cards: quit Resolve or set its Video I/O to None, no receiving application.
+- `PIXELVIEW_SDI_ADMIN_PASSWORD` (the node's admin password; the local dev seed) and
+  `PIXELVIEW_SDI_PLAY_LINK` (the session's watch link) in the environment; nothing is printed.
+
+```sh
+python3 test/pixelview/run_sdi_matrix.py --node 707880 --suite quick   # ~10 min, 7 cases
+python3 test/pixelview/run_sdi_matrix.py --node 707880 --suite full    # ~45 min, 24 cases
+python3 test/pixelview/run_sdi_matrix.py --node 707880 --runs "pq:444-rgb;sdr-full:420-8-yuv"
+python3 test/pixelview/run_sdi_matrix.py --node 707880 --suite sdr --preflight   # sender app closed
+```
+
+Suites: `quick` (SDR limited 4:4:4/4:2:2/Main10/Main, PQ 4:4:4 and Main10, HLG Main10), `sdr`
+(limited and full, six cases each), `hdr` (PQ and HLG over the five 10-bit cases, P3 Desktop over
+4:4:4 RGB and 4:2:2), `full` (both). Runs set the node's input colour profile through the admin API
+(the sender follows) and restore it at the end. `--preflight` first checks both cable legs in both
+picture formats with no stream (it needs the sender application closed, which holds the Recorder
+3G input). Pass marks: SDR worst patch ≤1.5 codes (full range +0.5, 8-bit Main ≤2.5); HDR neutral
+patches ≤2.5 codes, with saturated primaries reported in nits (the half-float canvas leaves a
+fraction of a nit in a pure primary's black channel); P3 colour channels ≤3 codes from the
+computed result. Results: `~/pixelview-sdi-results/<time>/` (`summary.md`, `results.json`, every
+generator, receiver and analyser log). Device names are options (`--generator`, `--capture-device`,
+`--output`, `--analyser`) for other cabling; `--mode` 1080p24/25/30.
+
+### 3.5 CI
 
 `.github/workflows/ci.yaml` (`contents: read`, `fetch-depth: 0` so `git describe` can check the pinned OBS commit) runs `python3 test/pixelview/test_pixelview_release.py -v`, `python3 test/pixelview/test_pixelview_license.py -v`, `python3 test/pixelview/test_windows_release.py -v`, and `bash -n` on `cmake/macos/pixelview-build.sh` and `cmake/macos/pixelview-release.sh`. A second job, `windows-build` (`windows-2025-vs2026`), runs `python cmake/windows/pixelview-build.py` as an unsigned development build without the updater and checks that `Pixelview.exe` exists and embeds no OBS update endpoint. CI cannot sign, notarize, upload or publish; the contract test asserts `ci.yaml` is the only workflow.
 
