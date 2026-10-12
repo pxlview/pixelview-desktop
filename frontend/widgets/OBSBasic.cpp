@@ -99,6 +99,7 @@ using namespace std;
 #include "OBSBasic_PixelviewControl.inc"
 #include "OBSBasic_PixelviewLogs.inc"
 #include "OBSBasic_PixelviewStats.inc"
+#include "OBSBasic_PixelviewWatermark.inc"
 
 extern bool disable_3p_plugins;
 extern bool opt_studio_mode;
@@ -2161,6 +2162,7 @@ void OBSBasic::applicationShutdown() noexcept
 	pixelviewReceiveScene = nullptr;
 	pixelviewReceiveSource = nullptr;
 	pixelviewSendOutput = nullptr;
+	ShutdownPixelviewWatermark();
 	pixelviewAudioShuttingDown = true;
 	ClearPixelviewAudio();
 	if (pixelviewRefreshTimer)

@@ -149,4 +149,38 @@ int main() {
   Fixture old; int oldColors = 0; old.d.colorChanged = [&] { ++oldColors; };
   old.stream(); assert(old.d.colorProfile.isEmpty() && oldColors == 0);
  }
+ // Session watermark: READY, STARTED (before publish) and DESKTOP_WATERMARK.
+ {
+  Fixture p; int changes = 0; bool knownAtPublish = false, enabledAtPublish = false;
+  p.d.watermarkChanged = [&] { ++changes; };
+  const auto publish = p.d.publish;
+  p.d.publish = [&](QString e, QString b) { knownAtPublish = p.d.watermarkKnown; enabledAtPublish = p.d.watermarkEnabled; publish(e, b); };
+  auto on = [](const char *id) { return QJsonObject{{"enabled", true}, {"id", id}}; };
+  const QJsonObject off{{"enabled", false}, {"id", ""}};
+  p.d.receive(mutation("DESKTOP_READY", {{"desktop_id", "desktop-a"}, {"node_id", "node-a"}, {"watermark", off}}), 0);
+  assert(p.d.watermarkKnown && !p.d.watermarkEnabled && changes == 1);
+  p.d.receive(mutation("DESKTOP_WATERMARK", {{"watermark", off}}), 1);
+  assert(changes == 1); // unchanged: no callback
+  p.d.receive(mutation("DESKTOP_WATERMARK", {{"watermark", on("a1")}}), 2);
+  assert(p.d.watermarkEnabled && p.d.watermarkId == "a1" && changes == 2);
+  // A malformed push changes nothing: enabled without an id, or no object.
+  p.d.receive(mutation("DESKTOP_WATERMARK", {{"watermark", QJsonObject{{"enabled", true}}}}), 3);
+  p.d.receive(mutation("DESKTOP_WATERMARK", {{"watermark", "on"}}), 3);
+  p.d.receive(mutation("DESKTOP_WATERMARK", QJsonObject{}), 3);
+  assert(p.d.watermarkKnown && p.d.watermarkId == "a1" && changes == 2);
+  assert(p.d.requestStart(4));
+  p.d.receive(mutation("DESKTOP_STARTED", {{"config", QJsonObject{{"whip", QJsonObject{{"endpoint", "https://example.com/whip"}, {"bearer_token", "secret"}}}}}, {"watermark", on("b2")}}), 5);
+  assert(p.d.started && knownAtPublish && enabledAtPublish && p.d.watermarkId == "b2" && changes == 3);
+  // While streaming the push still applies (the stream follows it live).
+  p.d.receive(mutation("DESKTOP_WATERMARK", {{"watermark", off}}), 6);
+  assert(!p.d.watermarkEnabled && p.d.watermarkId.isEmpty() && changes == 4);
+  // A STARTED without the field (lookup failed) is unknown: the engine keeps it.
+  Fixture q; q.d.receive(mutation("DESKTOP_READY", {{"desktop_id", "desktop-a"}, {"node_id", "node-a"}, {"watermark", on("c3")}}), 0);
+  assert(q.d.watermarkKnown && q.d.requestStart(1));
+  q.d.receive(started(), 2);
+  assert(q.d.started && !q.d.watermarkKnown && !q.d.watermarkEnabled);
+  // An older backend never sends it.
+  Fixture old; int oldChanges = 0; old.d.watermarkChanged = [&] { ++oldChanges; };
+  old.stream(); assert(!old.d.watermarkKnown && oldChanges == 0);
+ }
 }
