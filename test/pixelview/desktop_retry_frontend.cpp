@@ -116,6 +116,10 @@ public:
  int streamEnds=0; void PixelviewStreamEnded(const QJsonObject &){++streamEnds;}
  int statePushes=0; QByteArray pixelviewPushedState; void QueuePixelviewStatePush(){++statePushes;}
  pixelview::LinkReport pixelviewLinkReport; void InitPixelviewStats(){}
+ // Colour profile and sender watermark are covered by their own suites.
+ bool ApplyPixelviewColor(bool=false){return true;}
+ void InitPixelviewWatermark(){} bool DeclarePixelviewWatermark(){return false;}
+ void PixelviewWatermarkStarted(){} void PixelviewWatermarkStopped(){}
  void PixelviewOutputStopped();
  void QueuePixelviewOutputStopped(int delay=0);
  void CancelPixelviewStart();

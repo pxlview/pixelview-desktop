@@ -44,6 +44,13 @@ public:
  QString colorProfile;
  qint64 colorPeakNits=0;
  std::function<void()> colorChanged=[]{};
+ // The current session's watermark: {"enabled", "id"} with DESKTOP_READY,
+ // DESKTOP_STARTED and DESKTOP_WATERMARK; the PNG comes from
+ // GET /desktop/watermark. Known only while the backend sends it: an older
+ // backend, or a READY/STARTED without it, leaves the watermark to the engine.
+ bool watermarkKnown=false, watermarkEnabled=false;
+ QString watermarkId;
+ std::function<void()> watermarkChanged=[]{};
  std::function<QString()> profile=[]{return QString();};
  bool ready=false, pending=false, started=false;
  bool mediaDraining=false;
@@ -139,6 +146,22 @@ public:
   if(next.isEmpty() || (next==colorProfile && nits==colorPeakNits)) return false;
   colorProfile=next; colorPeakNits=nits; colorChanged(); return true;
  }
+ // Returns whether the watermark state changed (and the callback ran).
+ // missingIsUnknown: READY and STARTED describe the session in full, so no
+ // field there means unknown; a malformed push changes nothing.
+ bool acceptWatermark(const QJsonObject &data, bool missingIsUnknown) {
+  const QJsonValue value=data["watermark"];
+  bool known=false, enabled=false; QString id;
+  if(value.isObject()) {
+   enabled=value.toObject()["enabled"].toBool();
+   id=enabled ? value.toObject()["id"].toString() : QString();
+   known=!enabled || !id.isEmpty();
+  }
+  if(!known && !missingIsUnknown) return false;
+  if(known==watermarkKnown && enabled==watermarkEnabled && id==watermarkId) return false;
+  watermarkKnown=known; watermarkEnabled=known && enabled; watermarkId=known ? id : QString();
+  watermarkChanged(); return true;
+ }
  void receive(const QJsonObject &o, qint64 now) {
   const auto name=o["mutation"].toString();
   const auto data=o["data"].toObject();
@@ -147,6 +170,7 @@ public:
    ready=true; pingDeadline=now+PING_SILENCE_MS;
    acceptPolicy(data);
    acceptColor(data);
+   acceptWatermark(data,true);
    if(intent && !started && retryAt<0) requestStart(now);
   } else if(name=="SOCKET_SEND_PING") {
    // The server's ping loop can run ahead of DESKTOP_READY; a pong is always
@@ -157,8 +181,10 @@ public:
    if(!ready || !pending) return;
    pending=false;
    if(data.contains("blocked_profiles")) acceptPolicy(data);
-   // Before publish: the canvas follows the profile the stream starts with.
+   // Before publish: the canvas follows the profile the stream starts with,
+   // and the stream declares the watermark only from what is known now.
    acceptColor(data);
+   acceptWatermark(data,true);
    if(mediaDraining) return; // Cancelled attempt, not fresh authority.
    const auto whip=data["config"].toObject()["whip"].toObject();
    QUrl endpoint(whip["endpoint"].toString());
@@ -171,6 +197,10 @@ public:
   } else if(name=="DESKTOP_COLOR") {
    // Changed in Pixelview admin; a live stream keeps its canvas until it stops.
    acceptColor(data);
+  } else if(name=="DESKTOP_WATERMARK") {
+   // Changed in Pixelview admin or a new current session; a stream that
+   // burns the watermark in follows it live.
+   acceptWatermark(data,false);
   } else if(name=="DESKTOP_ERROR") {
    // A refused start. unknown_message only means the backend is older than
    // this message (e.g. DESKTOP_STATE); it never touches the stream.
