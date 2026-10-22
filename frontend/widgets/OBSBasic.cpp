@@ -1922,7 +1922,7 @@ void OBSBasic::RefreshPixelviewDevices()
 	pixelviewDevices->setEnabled(!busy && !entries.empty() && !properties);
 	pixelviewSettings->setEnabled(!busy && (testPattern || (aja && ajaPlugin) || (source && list)));
 	pixelviewSettings->setToolTip(testPattern ? QStringLiteral("Test pattern, audio and timecode overlay") : aja ? QStringLiteral("Native AJA device settings") : QStringLiteral("Native Blackmagic device settings"));
-	pixelviewFit->setEnabled(!busy && (testPattern || source != nullptr));
+	pixelviewFit->setEnabled(!busy && (testPattern || aja || source != nullptr));
 	// Keep source-edit/context-menu input disabled: GetCurrentScene is still
 	// the sender. Only local viewport controls bypass the receiver's
 	// configuration lock; they never change source/program framing.

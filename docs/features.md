@@ -267,6 +267,16 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - The stock plugin registers its source only when an AJA card is present at launch, and its list
   never drops a card, so a card connected later needs a restart and a removed one is not reported as
   disconnected. The list is rebuilt every fifth refresh (about 10 s), because it rescans the bus.
+- The stock plugin takes over every AJA card when Pixelview starts, whether or not an AJA input is
+  chosen: it switches the card to SDK-controlled tasks (`NTV2_OEM_TASKS`), acquires it for this
+  process, suspends host audio and clears the card's routing (`plugins/aja/aja-card-manager.cpp`,
+  upstream obs-studio issue #7530); cards first seen later are taken over at the next list rebuild.
+  AJA devices serve one controlling application at a time, so another application (Media Composer
+  through AJA's agent, AJA Control Room) cannot keep using the same card while Pixelview runs, and
+  an AJA output looped back into an input of the same card cannot be captured. A Blackmagic device
+  allows one application to play out while another captures; an AJA card does not.
+- Entering receive mode sets the AJA source to deactivate when not showing, so its capture stops
+  while receiving, as the DeckLink capture does. Fit is available with an AJA input.
 - `select_device` and `get_state` on the control route include AJA cards; `set_capture` offers the
   AJA source's own list and boolean properties except the device.
 
@@ -1346,6 +1356,8 @@ gate) fail in the current environment regardless of changes.
 ## Known limitations and intentionally out of scope
 
 - AJA capture is SDR only, up to 10-bit 4:2:2 (see AJA capture); it has not run on AJA hardware.
+  Launching Pixelview takes over every AJA card on the computer, so it cannot share a card with
+  Media Composer or other AJA software (an Avid output looped into the same DNxIV cannot be captured).
 
 - Admin remote control covers the Sending controls only: no remote receiving, pairing, Advanced
   encoder options, local monitoring or DeckLink output settings.

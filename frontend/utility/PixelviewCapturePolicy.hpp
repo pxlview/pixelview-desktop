@@ -62,6 +62,7 @@ inline constexpr const char *AjaDevicePrefix = "aja:";
 inline constexpr const char *AjaDeviceKey = "ui_prop_device";
 inline constexpr const char *AjaInputKey = "ui_prop_input";
 inline constexpr const char *AjaPixelFormatKey = "ui_prop_pix_fmt";
+inline constexpr const char *AjaDeactivateKey = "ui_prop_deactivate_when_not_showing";
 inline constexpr int64_t AjaInputNone = 22;       // IOSelection::Invalid ("Select...")
 inline constexpr int64_t AjaPixelFormat10Bit = 0; // NTV2_FBF_10BIT_YCBCR (v210)
 inline std::string ajaDeviceId(const std::string &card)

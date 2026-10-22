@@ -602,6 +602,15 @@ void OBSBasic::SelectPixelviewMode(int index)
 			obs_data_set_bool(settings, "deactivate_when_not_showing", true);
 			obs_source_update(capture, settings);
 		}
+		// The AJA capture holds its card while it runs; stop it while receiving.
+		// Only on change: an AJA update reconfigures the card's routing.
+		if (ajaCapture) {
+			OBSDataAutoRelease settings = obs_source_get_settings(ajaCapture);
+			if (!obs_data_get_bool(settings, pixelview::AjaDeactivateKey)) {
+				obs_data_set_bool(settings, pixelview::AjaDeactivateKey, true);
+				obs_source_update(ajaCapture, settings);
+			}
+		}
 		if (!pixelviewReceiveScene) pixelviewReceiveScene = OBSSceneAutoRelease(obs_scene_create_private("Pixelview Receive Canvas"));
 		if (!pixelviewReceiveScene) return;
 		pixelviewSendOutput = OBSSourceAutoRelease(obs_get_output_source(0));
