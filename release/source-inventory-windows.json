@@ -10,8 +10,7 @@
    "Qt 6 (obs-deps-qt6 2026-08-26 x64) exact module sources, notices and relinking materials are incomplete.",
    "WinSparkle 0.9.4 is shipped as the upstream prebuilt DLL; its tag archive excludes the bundled third-party submodules (expat and others), whose notices are carried by COPYING.expat only.",
    "Vendor-signed redistributables in the program tree (MSVC runtime, NVIDIA/AMD/Intel encoder interfaces, Blackmagic DeckLink API) need redistribution review.",
-   "Review modification notices/dates, build/install instructions and codec/patent obligations for the Windows payload.",
-   "libajantv2 (AJA NTV2 SDK, MIT) is statically linked into the aja capture plugin from the OBS dependency bundle, which carries no notice for it: add its MIT notice to the release NOTICES before a release ships the plugin."
+   "Review modification notices/dates, build/install instructions and codec/patent obligations for the Windows payload."
   ]
  },
  "runtime_bindings": [
@@ -121,8 +120,46 @@
     },
     {
      "path": "cmake/windows/pixelview-build.py",
-     "sha256": "e6dc348675f43cd1c7b336c125eadb7c6c462b7881e517950288b01ae3258aae",
-     "size": 7932
+     "sha256": "6ad153d740fcf31b590d9253ddd04d6ebad4f2efc6e081952d8081e354bae382",
+     "size": 7968
+    }
+   ]
+  },
+  {
+   "id": "libajantv2",
+   "version": "17.0.1",
+   "license": "MIT",
+   "sources": [
+    {
+     "name": "libajantv2-b6acce6b135c3d9ae7a2bce966180b159ced619f.tar.gz",
+     "url": "https://github.com/aja-video/libajantv2/archive/b6acce6b135c3d9ae7a2bce966180b159ced619f.tar.gz",
+     "sha256": "0f887595213c0c887f474fcf53b0e7173c6171bb86a1c0e86198f9525131a618",
+     "size": 7287436
+    }
+   ],
+   "notices": [
+    {
+     "path": "release/licenses/libajantv2/LICENSE",
+     "sha256": "451c0a2c515f81414360d7deb8cb4b3745085dce050bad4bd6c1fdcc10f7f08a",
+     "size": 1073
+    }
+   ],
+   "patches": [],
+   "recipes": [
+    {
+     "path": "plugins/aja/CMakeLists.txt",
+     "sha256": "990f2de931c924feefad58621b07e635145b1c329aa03a7c63f9363cbe03dfb5",
+     "size": 1622
+    },
+    {
+     "path": "cmake/finders/FindLibAJANTV2.cmake",
+     "sha256": "38fce31b93782b48dad7f63cf3dfd62e527a94c9980571b0db7716322ec850f8",
+     "size": 6997
+    },
+    {
+     "path": "CMakePresets.json",
+     "sha256": "9e9bd35142b9959336c0049bbe79c8be65c789cd1b064d5d65acff8d47f3acdc",
+     "size": 9386
     }
    ]
   }

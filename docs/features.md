@@ -250,7 +250,10 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 
 - AJA cards are listed after the DeckLink devices (ids `aja:<card id>`), from the stock OBS `aja`
   plugin's own device list, now built on macOS and Windows (`ENABLE_AJA=ON`, with libajantv2 from
-  the pinned OBS dependency bundle; the AJA output frontend plugin stays off). Choosing one creates
+  the pinned OBS dependency bundle, linked statically; the AJA output frontend plugin stays off).
+  libajantv2 17.0.1 (MIT, upstream commit `b6acce6b`, as built by obs-deps 2026-08-26) is a
+  component of both source inventories, so its licence text is in the release NOTICES and its
+  pinned source archive in the corresponding source. Choosing one creates
   a third managed source, `Pixelview AJA Capture` (`aja_source`), shown instead of the DeckLink
   capture and the test pattern, which keep their settings; DeckLink stays the first automatic choice.
 - Kept close to stock, since no AJA hardware was available for testing: the first input the card

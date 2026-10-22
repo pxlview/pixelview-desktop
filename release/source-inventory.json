@@ -12,8 +12,7 @@
       "gst-plugins-bad 1.28.3 applemedia is rebuilt from the pinned tarball with the vtdec patch; meson/ninja build tools are pinned by version but not archived.",
       "rswebrtc 0.15.2 source archive and MPL notice verified, but Cargo static dependency sources/notices and build-tool inputs remain incomplete.",
       "OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.",
-      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations.",
-      "libajantv2 (AJA NTV2 SDK, MIT) is statically linked into the aja capture plugin from the OBS dependency bundle, which carries no notice for it: add its MIT notice to the release NOTICES before a release ships the plugin."
+      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations."
     ]
   },
   "runtime_bindings": [
@@ -124,6 +123,44 @@
           "path": "plugins/pixelview-whep/scripts/UPSTREAM.md",
           "sha256": "1caaa02a48dd76a0f1059bdaa1b9f1586e716d0ea759dd63febde26e16a32115",
           "size": 6480
+        }
+      ]
+    },
+    {
+      "id": "libajantv2",
+      "version": "17.0.1",
+      "license": "MIT",
+      "sources": [
+        {
+          "name": "libajantv2-b6acce6b135c3d9ae7a2bce966180b159ced619f.tar.gz",
+          "url": "https://github.com/aja-video/libajantv2/archive/b6acce6b135c3d9ae7a2bce966180b159ced619f.tar.gz",
+          "sha256": "0f887595213c0c887f474fcf53b0e7173c6171bb86a1c0e86198f9525131a618",
+          "size": 7287436
+        }
+      ],
+      "notices": [
+        {
+          "path": "release/licenses/libajantv2/LICENSE",
+          "sha256": "451c0a2c515f81414360d7deb8cb4b3745085dce050bad4bd6c1fdcc10f7f08a",
+          "size": 1073
+        }
+      ],
+      "patches": [],
+      "recipes": [
+        {
+          "path": "plugins/aja/CMakeLists.txt",
+          "sha256": "990f2de931c924feefad58621b07e635145b1c329aa03a7c63f9363cbe03dfb5",
+          "size": 1622
+        },
+        {
+          "path": "cmake/finders/FindLibAJANTV2.cmake",
+          "sha256": "38fce31b93782b48dad7f63cf3dfd62e527a94c9980571b0db7716322ec850f8",
+          "size": 6997
+        },
+        {
+          "path": "CMakePresets.json",
+          "sha256": "9e9bd35142b9959336c0049bbe79c8be65c789cd1b064d5d65acff8d47f3acdc",
+          "size": 9386
         }
       ]
     }
