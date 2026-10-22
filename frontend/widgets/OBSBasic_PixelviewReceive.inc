@@ -85,11 +85,12 @@ bool OBSBasic::PixelviewModeBusy() const
 OBSSource OBSBasic::PixelviewManagedSource()
 {
 	if (pixelviewReceiving) return pixelviewReceiveSource;
-	// A visible test pattern stands in for the DeckLink input.
+	// A visible test pattern or AJA input stands in for the DeckLink input.
 	const bool testPattern = PixelviewTestPatternActive();
-	OBSSourceAutoRelease source = obs_get_source_by_name(testPattern ? pixelview::TestPatternSourceName : "Pixelview Capture");
+	const bool aja = PixelviewAjaActive();
+	OBSSourceAutoRelease source = obs_get_source_by_name(testPattern ? pixelview::TestPatternSourceName : aja ? pixelview::AjaSourceName : "Pixelview Capture");
 	if (source && (obs_source_removed(source) ||
-		       strcmp(obs_source_get_id(source), testPattern ? pixelview::TestPatternSourceId : "decklink-input") != 0)) return nullptr;
+		       strcmp(obs_source_get_id(source), testPattern ? pixelview::TestPatternSourceId : aja ? pixelview::AjaSourceId : "decklink-input") != 0)) return nullptr;
 	return OBSSource(source.Get());
 }
 
@@ -593,6 +594,8 @@ void OBSBasic::SelectPixelviewMode(int index)
 	ClearPixelviewAudio();
 	OBSSourceAutoRelease capture = obs_get_source_by_name("Pixelview Capture");
 	if (capture) obs_source_set_monitoring_enabled(capture, false);
+	OBSSourceAutoRelease ajaCapture = obs_get_source_by_name(pixelview::AjaSourceName);
+	if (ajaCapture) obs_source_set_monitoring_enabled(ajaCapture, false);
 	if (index == 1) {
 		if (capture) {
 			OBSDataAutoRelease settings = obs_source_get_settings(capture);

@@ -1676,7 +1676,7 @@ void OBSBasic::InitPixelview()
 	pixelviewRefreshTimer = new QTimer(this);
 	connect(pixelviewRefreshTimer, &QTimer::timeout, this, &OBSBasic::RefreshPixelviewDevices);
 	pixelviewRefreshTimer->start(2000);
-	for (auto *item : {obs_scene_find_source(GetCurrentScene(), "Pixelview Capture"), PixelviewTestPatternItem()}) {
+	for (auto *item : {obs_scene_find_source(GetCurrentScene(), "Pixelview Capture"), PixelviewAjaItem(), PixelviewTestPatternItem()}) {
 		if (!item) continue;
 		// Editable, but no drag handles until the operator clicks the preview or
 		// uses Fit: a red outline on an empty canvas reads as an error.
@@ -1687,7 +1687,7 @@ void OBSBasic::InitPixelview()
 	// selection pending until discovery has an input and native state is idle.
 	// A saved test pattern is a choice too: a card appearing must not replace it.
 	OBSSourceAutoRelease savedCapture = obs_get_source_by_name("Pixelview Capture");
-	pixelviewCaptureAutoSelectPending = !savedCapture && !PixelviewTestPatternActive();
+	pixelviewCaptureAutoSelectPending = !savedCapture && !PixelviewAjaItem() && !PixelviewTestPatternActive();
 	RefreshPixelviewDevices();
 }
 
@@ -1700,6 +1700,7 @@ void OBSBasic::RefreshPixelviewStreamHint()
 	if (pixelviewReceiving || pixelviewLease.intent || pixelviewActualStreaming || !pixelviewPairingDurable) hint.clear();
 	else if (pixelviewDevices->currentIndex() <= 0) hint = QStringLiteral("Choose a capture device to stream.");
 	else if (!pixelviewLease.ready) hint = QStringLiteral("Waiting for the Pixelview connection…");
+	else hint = PixelviewAjaStreamRefusal();
 	pixelviewStreamHint->setText(hint);
 	pixelviewStreamHint->setVisible(!hint.isEmpty());
 }
@@ -1863,6 +1864,23 @@ void OBSBasic::RefreshPixelviewDevices()
 				devices.push_back({id, obs_property_list_item_name(list, i)});
 		}
 	}
+	// AJA cards from the stock plugin's own list. Building it rescans the bus, so
+	// it runs on every fifth refresh only. The plugin registers its source only
+	// when a card was present at launch, and keeps a card once it has seen it.
+	const bool ajaPlugin = obs_source_get_display_name(pixelview::AjaSourceId) != nullptr;
+	if (!ajaPlugin) {
+		pixelviewAjaDevices.clear();
+	} else if (pixelviewAjaPoll++ % 5 == 0) {
+		pixelviewAjaDevices.clear();
+		OBSProperties ajaProps = obs_get_source_properties(pixelview::AjaSourceId);
+		auto *ajaList = ajaProps ? obs_properties_get(ajaProps, pixelview::AjaDeviceKey) : nullptr;
+		for (size_t i = 0; ajaList && i < obs_property_list_item_count(ajaList); ++i) {
+			const char *id = obs_property_list_item_string(ajaList, i);
+			if (id && *id && !obs_property_list_item_disabled(ajaList, i))
+				pixelviewAjaDevices.push_back({pixelview::ajaDeviceId(id), obs_property_list_item_name(ajaList, i)});
+		}
+	}
+	devices.insert(devices.end(), pixelviewAjaDevices.begin(), pixelviewAjaDevices.end());
 	OBSSourceAutoRelease source = obs_get_source_by_name("Pixelview Capture");
 	// Test patterns come from the generator's own list, after the devices and a
 	// separator (an entry with an empty id). They need no hardware.
@@ -1876,7 +1894,7 @@ void OBSBasic::RefreshPixelviewDevices()
 	}
 	const bool testPattern = PixelviewTestPatternActive();
 	const std::string selected = PixelviewSelectedCaptureId();
-	const auto status = pixelview::captureStatus(list != nullptr, devices, selected);
+	const auto status = pixelview::captureStatus(list != nullptr || ajaPlugin, devices, selected);
 
 	// Do not tear down an open dropdown on every poll. Rebuild only on changes.
 	bool changed = pixelviewDevices->count() != int(entries.size()) + 1;
@@ -1899,10 +1917,11 @@ void OBSBasic::RefreshPixelviewDevices()
 		int index = selected.empty() ? -1 : pixelviewDevices->findData(QString::fromStdString(selected));
 		pixelviewDevices->setCurrentIndex(index < 0 ? 0 : index);
 	}
+	const bool aja = PixelviewAjaActive();
 	const bool busy = PixelviewConfigurationLocked();
 	pixelviewDevices->setEnabled(!busy && !entries.empty() && !properties);
-	pixelviewSettings->setEnabled(!busy && (testPattern || (source && list)));
-	pixelviewSettings->setToolTip(testPattern ? QStringLiteral("Test pattern, audio and timecode overlay") : QStringLiteral("Native Blackmagic device settings"));
+	pixelviewSettings->setEnabled(!busy && (testPattern || (aja && ajaPlugin) || (source && list)));
+	pixelviewSettings->setToolTip(testPattern ? QStringLiteral("Test pattern, audio and timecode overlay") : aja ? QStringLiteral("Native AJA device settings") : QStringLiteral("Native Blackmagic device settings"));
 	pixelviewFit->setEnabled(!busy && (testPattern || source != nullptr));
 	// Keep source-edit/context-menu input disabled: GetCurrentScene is still
 	// the sender. Only local viewport controls bypass the receiver's
@@ -1916,13 +1935,13 @@ void OBSBasic::RefreshPixelviewDevices()
 	using pixelview::CaptureStatus;
 	switch (status) {
 	case CaptureStatus::PluginUnavailable:
-		captureHelp = QStringLiteral("DeckLink unavailable — check the bundled plugin and Blackmagic Desktop Video, then restart Pixelview.");
+		captureHelp = QStringLiteral("No capture plugin available — check Blackmagic Desktop Video or the AJA driver, then restart Pixelview. An AJA device must be connected when Pixelview starts.");
 		break;
 	case CaptureStatus::NoDevices:
-		captureHelp = QStringLiteral("No Blackmagic input devices found. Connect a device; it will appear automatically.");
+		captureHelp = QStringLiteral("No Blackmagic or AJA input devices found. Connect a device; a Blackmagic device appears automatically, an AJA device after restarting Pixelview.");
 		break;
 	case CaptureStatus::NotSelected:
-		captureHelp = QStringLiteral("Choose a Blackmagic input device to begin.");
+		captureHelp = QStringLiteral("Choose a Blackmagic or AJA input device to begin.");
 		break;
 	case CaptureStatus::Disconnected:
 		captureHelp = QStringLiteral("Selected device is disconnected. Reconnect it or choose another device. Preview may retain its last frame.");
@@ -1959,6 +1978,10 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 		SelectPixelviewTestPattern(*pattern);
 		return;
 	}
+	if (auto card = pixelview::ajaCardFromId(id.toStdString())) {
+		SelectPixelviewAjaDevice(*card, initializing);
+		return;
+	}
 	const QByteArray name = pixelviewDevices->itemText(index).toUtf8();
 	OBSProperties props = obs_get_source_properties("decklink-input");
 	auto *deviceList = props ? obs_properties_get(props, "device_hash") : nullptr;
@@ -1978,9 +2001,9 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	if (!settings)
 		settings = obs_data_create();
 	if (source && !pixelview::shouldChangeDevice(obs_data_get_string(settings, "device_hash"), id.constData())) {
-		// Back from a test pattern to the same device: show it, keep its settings.
-		if (PixelviewTestPatternActive()) {
-			ShowPixelviewCapture(false);
+		// Back from a test pattern or AJA to the same device: show it, keep its settings.
+		if (PixelviewTestPatternActive() || PixelviewAjaActive()) {
+			ShowPixelviewCapture(PixelviewCaptureKind::DeckLink);
 			SaveProject();
 			RefreshPixelviewDevices();
 		}
@@ -2025,7 +2048,82 @@ void OBSBasic::SelectPixelviewDevice(int index, bool initializing)
 	} else {
 		obs_source_update(source, settings);
 	}
-	ShowPixelviewCapture(false);
+	ShowPixelviewCapture(PixelviewCaptureKind::DeckLink);
+	FitPixelviewCapture(initializing);
+	SaveProject();
+	RefreshPixelviewDevices();
+}
+
+void OBSBasic::SelectPixelviewAjaDevice(const std::string &card, bool initializing)
+{
+	OBSProperties typeProps = obs_get_source_properties(pixelview::AjaSourceId);
+	auto *cards = typeProps ? obs_properties_get(typeProps, pixelview::AjaDeviceKey) : nullptr;
+	bool found = false;
+	std::string name;
+	for (size_t i = 0; cards && i < obs_property_list_item_count(cards); ++i) {
+		if (!obs_property_list_item_disabled(cards, i) && card == obs_property_list_item_string(cards, i)) {
+			found = true;
+			name = obs_property_list_item_name(cards, i);
+		}
+	}
+	if (!found) {
+		RefreshPixelviewDevices(); // Device left between the refresh and the click.
+		return;
+	}
+	OBSSourceAutoRelease source = obs_get_source_by_name(pixelview::AjaSourceName);
+	if (source && strcmp(obs_source_get_id(source), pixelview::AjaSourceId) != 0)
+		return;
+	OBSDataAutoRelease settings = source ? obs_source_get_settings(source) : obs_data_create();
+	if (source && !pixelview::shouldChangeDevice(obs_data_get_string(settings, pixelview::AjaDeviceKey), card)) {
+		// Back to the same card: show it, keep its settings.
+		if (!PixelviewAjaActive()) {
+			ShowPixelviewCapture(PixelviewCaptureKind::Aja);
+			SaveProject();
+			RefreshPixelviewDevices();
+		}
+		return;
+	}
+	const bool created = !source;
+	obs_data_set_string(settings, pixelview::AjaDeviceKey, card.c_str());
+	if (created) {
+		// The input list is built for a source instance (the plugin filters inputs
+		// other sources and outputs own), so create it first. Without an input
+		// the plugin captures nothing yet.
+		source = obs_source_create(pixelview::AjaSourceId, pixelview::AjaSourceName, settings, nullptr);
+		if (!source) {
+			PixelviewWarn(QStringLiteral("Pixelview"), QStringLiteral("Could not create the AJA input. Check the application log and the AJA driver installation."));
+			return;
+		}
+	}
+	OBSProperties props = obs_source_properties(source); // Runs the plugin's device callback.
+	std::vector<int64_t> inputs;
+	if (auto *list = props ? obs_properties_get(props, pixelview::AjaInputKey) : nullptr) {
+		for (size_t i = 0; i < obs_property_list_item_count(list); ++i)
+			if (!obs_property_list_item_disabled(list, i))
+				inputs.push_back(obs_property_list_item_int(list, i));
+	}
+	if (auto input = pixelview::chooseAjaInput(obs_data_get_int(settings, pixelview::AjaInputKey), inputs))
+		obs_data_set_int(settings, pixelview::AjaInputKey, *input);
+	else
+		blog(LOG_WARNING, "Pixelview: AJA %s offers no free input", name.c_str());
+	// Upstream defaults to 8-bit; a 10-bit stream needs 10-bit capture. A pixel
+	// format chosen later in Device settings is kept.
+	if (auto *formats = created && props ? obs_properties_get(props, pixelview::AjaPixelFormatKey) : nullptr) {
+		for (size_t i = 0; i < obs_property_list_item_count(formats); ++i)
+			if (obs_property_list_item_int(formats, i) == pixelview::AjaPixelFormat10Bit)
+				obs_data_set_int(settings, pixelview::AjaPixelFormatKey, pixelview::AjaPixelFormat10Bit);
+	}
+	obs_source_update(source, settings);
+	blog(LOG_INFO, "Pixelview: AJA capture %s, input %lld, pixel format %lld", name.c_str(),
+	     (long long)obs_data_get_int(settings, pixelview::AjaInputKey), (long long)obs_data_get_int(settings, pixelview::AjaPixelFormatKey));
+	if (!PixelviewAjaItem()) {
+		auto *item = obs_scene_add(GetCurrentScene(), source);
+		if (!item)
+			return;
+		obs_sceneitem_select(item, false);
+		pixelviewFitPolicy.sourceCreated();
+	}
+	ShowPixelviewCapture(PixelviewCaptureKind::Aja);
 	FitPixelviewCapture(initializing);
 	SaveProject();
 	RefreshPixelviewDevices();
@@ -2069,7 +2167,7 @@ void OBSBasic::SelectPixelviewTestPattern(int64_t pattern)
 		obs_sceneitem_select(item, false);
 		pixelviewFitPolicy.sourceCreated();
 	}
-	ShowPixelviewCapture(true);
+	ShowPixelviewCapture(PixelviewCaptureKind::TestPattern);
 	FitPixelviewCapture();
 	SaveProject();
 	RefreshPixelviewDevices();
@@ -2086,9 +2184,21 @@ bool OBSBasic::PixelviewTestPatternActive()
 	return item && obs_sceneitem_visible(item);
 }
 
+obs_sceneitem_t *OBSBasic::PixelviewAjaItem()
+{
+	return obs_scene_find_source(GetCurrentScene(), pixelview::AjaSourceName);
+}
+
+bool OBSBasic::PixelviewAjaActive()
+{
+	auto *item = PixelviewAjaItem();
+	return item && obs_sceneitem_visible(item) && !PixelviewTestPatternActive();
+}
+
 obs_sceneitem_t *OBSBasic::PixelviewActiveCaptureItem()
 {
 	return PixelviewTestPatternActive() ? PixelviewTestPatternItem()
+	       : PixelviewAjaActive()       ? PixelviewAjaItem()
 					    : obs_scene_find_source(GetCurrentScene(), "Pixelview Capture");
 }
 
@@ -2111,15 +2221,21 @@ std::string OBSBasic::PixelviewSelectedCaptureId()
 		return {};
 	if (strcmp(obs_source_get_id(source), pixelview::TestPatternSourceId) == 0)
 		return pixelview::testPatternId(obs_data_get_int(settings, "pattern"));
+	if (strcmp(obs_source_get_id(source), pixelview::AjaSourceId) == 0) {
+		const char *card = obs_data_get_string(settings, pixelview::AjaDeviceKey);
+		return card && *card ? pixelview::ajaDeviceId(card) : std::string();
+	}
 	return obs_data_get_string(settings, "device_hash");
 }
 
-void OBSBasic::ShowPixelviewCapture(bool testPattern)
+void OBSBasic::ShowPixelviewCapture(PixelviewCaptureKind kind)
 {
 	if (auto *item = PixelviewTestPatternItem())
-		obs_sceneitem_set_visible(item, testPattern);
+		obs_sceneitem_set_visible(item, kind == PixelviewCaptureKind::TestPattern);
+	if (auto *item = PixelviewAjaItem())
+		obs_sceneitem_set_visible(item, kind == PixelviewCaptureKind::Aja);
 	if (auto *item = obs_scene_find_source(GetCurrentScene(), "Pixelview Capture"))
-		obs_sceneitem_set_visible(item, !testPattern);
+		obs_sceneitem_set_visible(item, kind == PixelviewCaptureKind::DeckLink);
 }
 
 void OBSBasic::FitPixelviewCapture(bool initializing)

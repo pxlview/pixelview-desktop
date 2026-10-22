@@ -90,6 +90,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   if(!PixelviewLeaseValid() || PixelviewSettingsBusy()) {pixelviewLease.fail("Cannot start while native output is busy.");return;}
   // The stream starts in the node's colour profile (SDR, or Rec.2100 PQ/HLG).
   if(!ApplyPixelviewColor(true)) {pixelviewLease.deny(QStringLiteral("The sender could not switch to this node's colour profile."));return;}
+  if(const QString refusal=PixelviewAjaStreamRefusal(); !refusal.isEmpty()) {pixelviewLease.deny(refusal);return;}
   pixelviewConnectionStatus->setText(QStringLiteral("Preparing WHIP stream…"));
   OBSDataAutoRelease settings=obs_data_create();
   obs_data_set_string(settings,"server",endpoint.toUtf8().constData());

@@ -28,18 +28,23 @@ std::vector<Entry> entries; bool available=true, saved=false; int storage=0, sel
 std::string selected;
 // Test pattern generator list: values and names, as the plugin registers them.
 std::vector<std::pair<long long,const char*>> patterns; int patternStorage=0, deckLinkProps=0;
+// AJA cards from the stock plugin's list; the type exists only with a card at launch.
+std::vector<Entry> ajaEntries; bool ajaAvailable=false; int ajaStorage=0, ajaScans=0;
+const char *obs_source_get_display_name(const char *id){assert(!strcmp(id,pixelview::AjaSourceId));return ajaAvailable?"AJA":nullptr;}
 using OBSProperties=int*; using OBSSourceAutoRelease=int*; using OBSDataAutoRelease=int*;
 int *obs_get_source_properties(const char *id){
  if(!strcmp(id,pixelview::TestPatternSourceId)) return patterns.empty()?nullptr:&patternStorage;
+ if(!strcmp(id,pixelview::AjaSourceId)){assert(ajaAvailable);++ajaScans;return &ajaStorage;}
  assert(!strcmp(id,"decklink-input"));return available?&deckLinkProps:nullptr;}
 int *obs_properties_get(int *props,const char *key){
  if(props==&patternStorage){assert(!strcmp(key,"pattern"));return &patternStorage;}
+ if(props==&ajaStorage){assert(!strcmp(key,pixelview::AjaDeviceKey));return &ajaStorage;}
  assert(!strcmp(key,"device_hash"));return &storage;}
-size_t obs_property_list_item_count(int *list){return list==&patternStorage?patterns.size():entries.size();}
-const char *obs_property_list_item_string(int*,size_t i){return entries[i].id;}
+size_t obs_property_list_item_count(int *list){return list==&patternStorage?patterns.size():list==&ajaStorage?ajaEntries.size():entries.size();}
+const char *obs_property_list_item_string(int *list,size_t i){return list==&ajaStorage?ajaEntries[i].id:entries[i].id;}
 long long obs_property_list_item_int(int *list,size_t i){assert(list==&patternStorage);return patterns[i].first;}
-const char *obs_property_list_item_name(int *list,size_t i){return list==&patternStorage?patterns[i].second:entries[i].name;}
-bool obs_property_list_item_disabled(int*,size_t i){return entries[i].disabled;}
+const char *obs_property_list_item_name(int *list,size_t i){return list==&patternStorage?patterns[i].second:list==&ajaStorage?ajaEntries[i].name:entries[i].name;}
+bool obs_property_list_item_disabled(int *list,size_t i){return list==&ajaStorage?ajaEntries[i].disabled:entries[i].disabled;}
 int *obs_get_source_by_name(const char*){return saved?&storage:nullptr;}
 int *obs_source_get_settings(int*){return &storage;}
 const char *obs_data_get_string(int*,const char*){return selected.c_str();}
@@ -48,6 +53,10 @@ void obs_sceneitem_select(int*,bool){} void obs_sceneitem_set_locked(int*,bool){
 struct OBSBasic {
  bool pixelviewCaptureAutoSelectPending=false;
  bool testPatternActive=false; long long pattern=0; int patternSelections=0;
+ std::vector<pixelview::Device> pixelviewAjaDevices; int pixelviewAjaPoll=0, ajaSelections=0;
+ int *PixelviewAjaItem(){return nullptr;}
+ bool PixelviewAjaActive(){return false;}
+ void SelectPixelviewAjaDevice(const std::string &card,bool){++ajaSelections;selected=pixelview::ajaDeviceId(card);saved=true;RefreshPixelviewDevices();}
  int *PixelviewTestPatternItem(){return testPatternActive?&storage:nullptr;}
  bool PixelviewTestPatternActive(){return testPatternActive;}
  std::string PixelviewSelectedCaptureId(){return testPatternActive?pixelview::testPatternId(pattern):saved?selected:std::string();}
@@ -71,7 +80,7 @@ struct OBSBasic {
  }
  void startup(){STARTUP}
 };
-void reset(){entries.clear();patterns.clear();selected.clear();saved=false;selections=0;available=true;}
+void reset(){entries.clear();patterns.clear();ajaEntries.clear();ajaAvailable=false;ajaScans=0;selected.clear();saved=false;selections=0;available=true;}
 }
 int main(int argc,char **argv){QApplication app(argc,argv);using namespace fixture;
  reset(); OBSBasic w; w.startup();assert(selected.empty());
@@ -114,6 +123,19 @@ int main(int argc,char **argv){QApplication app(argc,argv);using namespace fixtu
  reset();patterns={{0,"SMPTE color bars"}};OBSBasic restored;restored.testPatternActive=true;restored.startup();
  entries={{"capture","4K Mini",false}};restored.RefreshPixelviewDevices();
  assert(selections==0 && restored.combo.currentData().toString()=="test-pattern:0");
+ // AJA cards follow the DeckLink devices, prefixed; DeckLink stays the first choice.
+ reset();ajaAvailable=true;ajaEntries={{"DNxIV - 0","AJA DNxIV",false},{"off","Gone",true}};
+ entries={{"capture","4K Mini",false}};patterns={{0,"SMPTE color bars"}};
+ OBSBasic mixed;mixed.paired=true;mixed.startup();
+ assert(mixed.combo.count()==5 && mixed.combo.itemData(2).toString()=="aja:DNxIV - 0" && mixed.combo.itemText(2)=="AJA DNxIV");
+ assert(mixed.combo.itemData(3).toString().isEmpty() && selected=="capture" && mixed.ajaSelections==0);
+ mixed.SelectPixelviewDevice(2);assert(mixed.ajaSelections==1 && selected=="aja:DNxIV - 0" && selections==1);
+ assert(mixed.combo.currentData().toString()=="aja:DNxIV - 0");
+ // Building the AJA list rescans the bus: every fifth refresh only.
+ const int scans=ajaScans;for(int i=0;i<5;++i) mixed.RefreshPixelviewDevices();assert(ajaScans==scans+1);
+ // AJA alone: its card is auto-selected like a DeckLink device.
+ reset();available=false;ajaAvailable=true;ajaEntries={{"DNxIV - 0","AJA DNxIV",false}};
+ OBSBasic ajaOnly;ajaOnly.paired=true;ajaOnly.startup();assert(ajaOnly.ajaSelections==1 && selected=="aja:DNxIV - 0");
 }
 '''.replace('REFRESH', refresh).replace('SELECTION', selection).replace('STARTUP', startup)
         with tempfile.TemporaryDirectory(prefix='pixelview-capture-startup-') as tmp:

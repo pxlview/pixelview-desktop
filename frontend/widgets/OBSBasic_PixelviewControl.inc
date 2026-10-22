@@ -88,12 +88,13 @@ QJsonValue PixelviewListItemValue(obs_property_t *prop, size_t i)
 }
 
 // Remote capture settings: the selected source's own boolean and list
-// properties (DeckLink input or test pattern), never free text; the device
+// properties (DeckLink or AJA input, or test pattern), never free text; the device
 // itself is chosen by select_device.
 bool PixelviewRemoteProperty(obs_property_t *prop)
 {
 	const auto type = obs_property_get_type(prop);
-	if (!obs_property_visible(prop) || strcmp(obs_property_name(prop), "device_hash") == 0) return false;
+	if (!obs_property_visible(prop) || strcmp(obs_property_name(prop), "device_hash") == 0 ||
+	    strcmp(obs_property_name(prop), pixelview::AjaDeviceKey) == 0) return false;
 	return type == OBS_PROPERTY_BOOL ||
 	       (type == OBS_PROPERTY_LIST && obs_property_list_format(prop) != OBS_COMBO_FORMAT_INVALID &&
 		obs_property_list_format(prop) != OBS_COMBO_FORMAT_BOOL);

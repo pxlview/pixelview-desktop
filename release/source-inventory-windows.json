@@ -10,7 +10,8 @@
    "Qt 6 (obs-deps-qt6 2026-08-26 x64) exact module sources, notices and relinking materials are incomplete.",
    "WinSparkle 0.9.4 is shipped as the upstream prebuilt DLL; its tag archive excludes the bundled third-party submodules (expat and others), whose notices are carried by COPYING.expat only.",
    "Vendor-signed redistributables in the program tree (MSVC runtime, NVIDIA/AMD/Intel encoder interfaces, Blackmagic DeckLink API) need redistribution review.",
-   "Review modification notices/dates, build/install instructions and codec/patent obligations for the Windows payload."
+   "Review modification notices/dates, build/install instructions and codec/patent obligations for the Windows payload.",
+   "libajantv2 (AJA NTV2 SDK, MIT) is statically linked into the aja capture plugin from the OBS dependency bundle, which carries no notice for it: add its MIT notice to the release NOTICES before a release ships the plugin."
   ]
  },
  "runtime_bindings": [

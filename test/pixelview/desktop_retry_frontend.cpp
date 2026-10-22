@@ -100,6 +100,9 @@ public:
  void DisplayStreamStartError(){pixelviewLease.fail("setup error");}
  bool PixelviewLeaseValid()const;
  bool PixelviewSettingsBusy()const{return pixelviewStreamingBusy;}
+ // Colour and AJA capture checks before publish are covered elsewhere; they pass here.
+ bool ApplyPixelviewColor(bool=false){return true;}
+ QString PixelviewAjaStreamRefusal(){return {};}
  std::function<void(bool)> MakeSetup();
  void OutputStartedSignal(bool withDelay);
  void StreamDelayStarting(int sec);

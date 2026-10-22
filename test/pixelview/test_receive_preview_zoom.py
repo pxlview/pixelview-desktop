@@ -60,6 +60,7 @@ class ReceivePreviewZoom(unittest.TestCase):
 #include <obs.hpp>
 #include <util/config-file.h>
 #include <utility/display-helpers.hpp>
+#include <utility/PixelviewCapturePolicy.hpp>
 #include <QDir>
 namespace fixture {
 // Real libobs user configuration on disk: mode selection persists the tab.

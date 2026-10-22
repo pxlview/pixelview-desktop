@@ -12,7 +12,8 @@
       "gst-plugins-bad 1.28.3 applemedia is rebuilt from the pinned tarball with the vtdec patch; meson/ninja build tools are pinned by version but not archived.",
       "rswebrtc 0.15.2 source archive and MPL notice verified, but Cargo static dependency sources/notices and build-tool inputs remain incomplete.",
       "OBS dependency bundle, Sparkle, fonts/assets, static libraries, codecs and Blackmagic SDK redistribution/source obligations need exact-payload review.",
-      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations."
+      "Review modifications/dates, required submodules versus disabled-platform exclusions, build/install instructions, installation information and codec/patent/vendor obligations.",
+      "libajantv2 (AJA NTV2 SDK, MIT) is statically linked into the aja capture plugin from the OBS dependency bundle, which carries no notice for it: add its MIT notice to the release NOTICES before a release ships the plugin."
     ]
   },
   "runtime_bindings": [

@@ -52,6 +52,28 @@ int main()
 	assert(pixelview::chooseOption(8, {0, 2, 8}, 2) == 8);
 	assert(pixelview::chooseOption(8, {0}, 2) == 0); // never select an unsupported default
 	assert(!pixelview::chooseOption(8, {}, 2).has_value());
+	// AJA cards are prefixed so they never collide with DeckLink hashes or patterns.
+	assert(pixelview::ajaDeviceId("Io4KPlus - 0") == "aja:Io4KPlus - 0");
+	assert(pixelview::ajaCardFromId("aja:Io4KPlus - 0") == std::string("Io4KPlus - 0"));
+	assert(!pixelview::ajaCardFromId("aja:").has_value());
+	assert(!pixelview::ajaCardFromId("real-hash").has_value());
+	assert(!pixelview::ajaCardFromId("test-pattern:0").has_value());
+	assert(!pixelview::testPatternFromId("aja:Io4KPlus - 0").has_value());
+	std::vector<pixelview::Device> mixed{{"real-hash", "DeckLink"}, {"aja:card", "AJA"}};
+	assert(captureStatus(true, mixed, "aja:card") == CaptureStatus::AvailableUnverified);
+	assert(captureStatus(true, devices, "aja:card") == CaptureStatus::Disconnected);
+	// The plugin's input list starts with "Select..." (22); it is never chosen.
+	assert(pixelview::chooseAjaInput(22, {22, 0, 14}) == 0);
+	assert(pixelview::chooseAjaInput(14, {22, 0, 14}) == 14);
+	assert(pixelview::chooseAjaInput(1, {22, 0, 14}) == 0);
+	assert(!pixelview::chooseAjaInput(22, {22}).has_value());
+	assert(!pixelview::chooseAjaInput(0, {}).has_value());
+	// SDR up to 10-bit 4:2:2 only.
+	assert(pixelview::ajaStreamRefusal(false, "main10").empty());
+	assert(pixelview::ajaStreamRefusal(false, "main42210").empty());
+	assert(pixelview::ajaStreamRefusal(false, "").empty());
+	assert(!pixelview::ajaStreamRefusal(false, "main44410").empty());
+	assert(!pixelview::ajaStreamRefusal(true, "main10").empty());
 	std::cout << "Pixelview fit policy passed\n";
 }
 #else

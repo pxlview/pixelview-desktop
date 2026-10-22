@@ -441,14 +441,22 @@ private:
 	void RefreshPixelviewDevices();
 	void SelectPixelviewDevice(int index, bool initializing = false);
 	void SelectPixelviewTestPattern(int64_t pattern);
-	// The sender capture is the visible one of "Pixelview Capture" (DeckLink)
-	// and "Pixelview Test Pattern"; the hidden one keeps its settings.
+	void SelectPixelviewAjaDevice(const std::string &card, bool initializing);
+	// The sender capture is the visible one of "Pixelview Capture" (DeckLink),
+	// "Pixelview AJA Capture" and "Pixelview Test Pattern"; hidden ones keep
+	// their settings.
+	enum class PixelviewCaptureKind { DeckLink, Aja, TestPattern };
 	obs_sceneitem_t *PixelviewTestPatternItem();
+	obs_sceneitem_t *PixelviewAjaItem();
 	bool PixelviewTestPatternActive();
+	bool PixelviewAjaActive();
 	obs_sceneitem_t *PixelviewActiveCaptureItem();
 	OBSSource PixelviewCaptureSource();
 	std::string PixelviewSelectedCaptureId();
-	void ShowPixelviewCapture(bool testPattern);
+	void ShowPixelviewCapture(PixelviewCaptureKind kind);
+	std::vector<pixelview::Device> pixelviewAjaDevices;
+	int pixelviewAjaPoll = 0;
+	QString PixelviewAjaStreamRefusal();
 	void FitPixelviewCapture(bool initializing = false);
 	void RefreshPixelviewFPS();
 	void SelectPixelviewFPS(int index);

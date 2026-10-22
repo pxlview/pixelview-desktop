@@ -28,11 +28,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONFIGS = ('Debug', 'RelWithDebInfo', 'Release', 'MinSizeRel')
 
 # Mirrors cmake/macos/pixelview-build.sh: Pixelview ships no browser, What's New,
-# obs-websocket, scripting, virtual camera, AJA, VST or VLC.
+# obs-websocket, scripting, virtual camera, AJA output, VST or VLC.
 FEATURE_FLAGS = [
     '-DENABLE_BROWSER=OFF', '-DENABLE_WHATSNEW=OFF', '-DENABLE_WEBSOCKET=OFF',
     '-DENABLE_SCRIPTING=OFF', '-DENABLE_VIRTUALCAM=OFF',
-    '-DENABLE_AJA=OFF', '-DENABLE_DECKLINK=ON',
+    '-DENABLE_AJA=ON', '-DENABLE_AJA_OUTPUT_UI=OFF', '-DENABLE_DECKLINK=ON',
     '-DENABLE_WEBRTC=ON', '-DENABLE_VST=OFF', '-DENABLE_VLC=OFF',
 ]
 

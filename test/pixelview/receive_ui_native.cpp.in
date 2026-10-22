@@ -76,6 +76,7 @@ public:
  bool PixelviewSettingsBusy() const {return nativeBusy;}
  // The fixture has no test pattern; the sender capture is the DeckLink fixture.
  bool PixelviewTestPatternActive() {return false;}
+ bool PixelviewAjaActive() {return false;}
  int clears=0;
  void ClearPixelviewAudio(){++clears;}
  void RefreshPixelviewAudio(){}

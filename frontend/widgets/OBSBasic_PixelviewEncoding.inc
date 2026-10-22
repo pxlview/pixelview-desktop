@@ -396,6 +396,16 @@ std::vector<OBSSource> PixelviewP3Filters(obs_source_t *source)
 }
 } // namespace
 
+// An AJA input streams SDR up to 10-bit 4:2:2 (the stock plugin's labelling);
+// HDR and 4:4:4 are refused instead of being sent mislabelled or subsampled.
+QString OBSBasic::PixelviewAjaStreamRefusal()
+{
+	if (!PixelviewAjaActive()) return {};
+	const std::string id = config_get_string(activeConfiguration, "AdvOut", "Encoder");
+	OBSData data = PixelviewEncoderData(GetCurrentProfile().path / "streamEncoder.json", id.c_str(), false);
+	return QString::fromStdString(pixelview::ajaStreamRefusal(PixelviewColorHdr(), obs_data_get_string(data, "profile")));
+}
+
 void OBSBasic::ApplyPixelviewCaptureColor()
 {
 	// A DeckLink capture labels its frames with the node's transfer (frame HDR

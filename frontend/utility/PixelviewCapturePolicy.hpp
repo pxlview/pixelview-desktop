@@ -52,6 +52,48 @@ inline std::optional<int64_t> testPatternFromId(const std::string &id)
 	return value;
 }
 
+// An AJA input is a third managed source, created by the stock AJA plugin
+// ("aja_source"). Its devices are listed after the DeckLink devices with the
+// plugin's card id behind a prefix, so ids never collide with DeckLink hashes.
+// The plugin only registers the source when a card is present at launch.
+inline constexpr const char *AjaSourceId = "aja_source";
+inline constexpr const char *AjaSourceName = "Pixelview AJA Capture";
+inline constexpr const char *AjaDevicePrefix = "aja:";
+inline constexpr const char *AjaDeviceKey = "ui_prop_device";
+inline constexpr const char *AjaInputKey = "ui_prop_input";
+inline constexpr const char *AjaPixelFormatKey = "ui_prop_pix_fmt";
+inline constexpr int64_t AjaInputNone = 22;       // IOSelection::Invalid ("Select...")
+inline constexpr int64_t AjaPixelFormat10Bit = 0; // NTV2_FBF_10BIT_YCBCR (v210)
+inline std::string ajaDeviceId(const std::string &card)
+{
+	return AjaDevicePrefix + card;
+}
+inline std::optional<std::string> ajaCardFromId(const std::string &id)
+{
+	const std::string prefix = AjaDevicePrefix;
+	if (id.size() <= prefix.size() || id.compare(0, prefix.size(), prefix) != 0)
+		return std::nullopt;
+	return id.substr(prefix.size());
+}
+// The saved input while it is still offered, else the first one; never "Select...".
+inline std::optional<int64_t> chooseAjaInput(int64_t current, const std::vector<int64_t> &offered)
+{
+	std::vector<int64_t> inputs;
+	for (auto value : offered)
+		if (value != AjaInputNone)
+			inputs.push_back(value);
+	return chooseOption(current, inputs);
+}
+// AJA stays close to the stock plugin: SDR Rec.709, up to 10-bit 4:2:2. Empty when allowed.
+inline std::string ajaStreamRefusal(bool hdr, const std::string &profile)
+{
+	if (hdr)
+		return "HDR is not supported with an AJA input yet. Ask an admin to set the node to SDR, or use a Blackmagic input.";
+	if (profile == "main44410")
+		return "Main 4:4:4 10 is not supported with an AJA input yet. Choose Main, Main10 or Main 4:2:2 10.";
+	return {};
+}
+
 enum class CaptureStatus { PluginUnavailable, NoDevices, NotSelected, Disconnected, AvailableUnverified, TestPattern };
 inline CaptureStatus captureStatus(bool plugin, const std::vector<Device> &devices, const std::string &selected)
 {

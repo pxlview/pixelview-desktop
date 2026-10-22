@@ -246,6 +246,27 @@ Desktop through the backend pass-through `POST /desktop/devices/{id}/control`
 - Status distinguishes missing plugin, no devices, no selection, disconnected selection and
   "Device selected - Local preview"; device presence is not signal lock.
 
+### AJA capture
+
+- AJA cards are listed after the DeckLink devices (ids `aja:<card id>`), from the stock OBS `aja`
+  plugin's own device list, now built on macOS and Windows (`ENABLE_AJA=ON`, with libajantv2 from
+  the pinned OBS dependency bundle; the AJA output frontend plugin stays off). Choosing one creates
+  a third managed source, `Pixelview AJA Capture` (`aja_source`), shown instead of the DeckLink
+  capture and the test pattern, which keep their settings; DeckLink stays the first automatic choice.
+- Kept close to stock, since no AJA hardware was available for testing: the first input the card
+  offers is selected (another one in **Device settings...**, the stock AJA properties), the pixel
+  format defaults to 10-bit YUV (v210; upstream 8-bit) when the card offers it, and video format
+  and SDI transport stay on auto-detect. Frames are labelled the stock way: Rec. 709 (601 for SD),
+  limited range, with the plugin's clamping. None of the DeckLink capture changes above apply.
+- An AJA input streams SDR only, up to Main 4:2:2 10: an HDR node colour profile or Main 4:4:4 10
+  is refused at Start (and shown next to Start Streaming) instead of being sent mislabelled or
+  subsampled. The P3-D65 conversion stays DeckLink-only.
+- The stock plugin registers its source only when an AJA card is present at launch, and its list
+  never drops a card, so a card connected later needs a restart and a removed one is not reported as
+  disconnected. The list is rebuilt every fifth refresh (about 10 s), because it rescans the bus.
+- `select_device` and `get_state` on the control route include AJA cards; `set_capture` offers the
+  AJA source's own list and boolean properties except the device.
+
 ### Test patterns
 
 - For testing without a capture card, the device list offers, after the DeckLink devices and a
@@ -868,6 +889,18 @@ gate) fail in the current environment regardless of changes.
 
 ### Verified live
 
+- AJA build without AJA hardware (2026-10-22, signed local build of `feat/aja-capture`, isolated
+  `--app-config-dir`, paired at startup to the local pentest backend and a local engine, only an
+  UltraStudio 4K Mini attached): the bundled `aja.plugin` (libajantv2 linked statically, system
+  frameworks only) loaded, found no card and did not register its source, as upstream does; the
+  device list offered the 4K Mini first and the test patterns, with no AJA entries, and the 4K Mini
+  was selected automatically. Through the control route the 4K Mini streamed HEVC over WHIP to the
+  engine (link reports 6000 kb/s, 0 lost, 0 frames skipped), `run_receive_sdi_live.py` received the
+  session for 60 s and played 1500 frames out of the 4K Mini at 1080p25, `select_device` switched to
+  a test pattern and back, and an unknown `aja:` id was refused. Quit through SIGTERM was clean
+  (no remaining sources, 0 leaks, empty sentinel, no crash report). Not verified: anything with an
+  AJA card (listing, input and pixel format choice, capture, the HDR/4:4:4 refusal at Start), the
+  Windows build, and the receiving application's own window.
 - Test patterns (2026-10-04, signed local build, isolated `--app-config-dir`, unpaired, an
   UltraStudio Recorder 3G attached without signal): with a saved scene holding a visible
   `Pixelview Test Pattern` and a hidden `Pixelview Capture`, the app restored "Test pattern: SMPTE
@@ -1308,6 +1341,8 @@ gate) fail in the current environment regardless of changes.
   100 ms buffer are mitigations.
 
 ## Known limitations and intentionally out of scope
+
+- AJA capture is SDR only, up to 10-bit 4:2:2 (see AJA capture); it has not run on AJA hardware.
 
 - Admin remote control covers the Sending controls only: no remote receiving, pairing, Advanced
   encoder options, local monitoring or DeckLink output settings.

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.28...3.30)
 
-if(NOT ENABLE_AJA)
+option(ENABLE_AJA_OUTPUT_UI "Build the AJA I/O device output frontend plugin" ON)
+
+if(NOT ENABLE_AJA OR NOT ENABLE_AJA_OUTPUT_UI)
   target_disable(aja-output-ui)
   return()
 endif()

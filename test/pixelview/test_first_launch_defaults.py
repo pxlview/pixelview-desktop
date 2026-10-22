@@ -39,7 +39,8 @@ int main() {
     def test_actual_discovery_skips_disabled_and_startup_preserves_saved_source(self):
         text = (ROOT/'frontend/widgets/OBSBasic.cpp').read_text()
         refresh = body(text, 'RefreshPixelviewDevices')
-        discovery = refresh[refresh.index('std::vector<pixelview::Device> devices;'):refresh.index('OBSSourceAutoRelease source')]
+        # DeckLink discovery only; the AJA list is covered by test_capture_startup.
+        discovery = refresh[refresh.index('std::vector<pixelview::Device> devices;'):refresh.index('\t// AJA cards')]
         startup = body(text, 'InitPixelview').split('pixelviewRefreshTimer->start(2000);', 1)[1]
         seed = refresh[refresh.index('\tif (source || testPattern)\n\t\tpixelviewCaptureAutoSelectPending'):]
         compiled(r'''#include <cassert>
@@ -62,6 +63,7 @@ int *obs_get_source_by_name(const char*){return saved?&item:nullptr;}
 // Test patterns are covered by test_capture_startup; none is saved here.
 int *PixelviewTestPatternItem(){return nullptr;}
 bool PixelviewTestPatternActive(){return false;}
+int *PixelviewAjaItem(){return nullptr;}
 using OBSSourceAutoRelease=int*;
 void obs_sceneitem_select(int*,bool){}
 void obs_sceneitem_set_locked(int*,bool){}
