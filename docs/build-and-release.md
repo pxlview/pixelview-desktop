@@ -5,7 +5,7 @@ This runbook covers the toolchain, the canonical local Developer ID build and la
 ## 1. Toolchain and dependencies
 
 - **Xcode / SDK.** Upstream OBS requires Xcode 26.5 / macOS SDK 26.5 (`cmake/macos/compilerconfig.cmake`). `cmake/macos/pixelview-build.sh` always passes `-DPIXELVIEW_LEGACY_TOOLCHAIN=ON`, lowering the floor to Xcode 15.3 / SDK 14.4 and excluding the Metal renderer (`libobs-metal`, needs Swift 6; OpenGL is used) and `mac-avcapture` (uses `AVCaptureDevice.backgroundReplacementActive`, absent in SDK 14.4). Native `decklink`, `mac-videotoolbox` and `obs-webrtc` (WHIP) stay enabled. `DEVELOPER_DIR` defaults to `/Applications/Xcode.app/Contents/Developer`; global `xcode-select` is untouched.
-- **Disabled upstream modules.** Browser/CEF, What's New, the inbound obs-websocket plugin, scripting, virtual camera, AJA, VST, Syphon, VLC. The outbound Desktop control socket uses NSURLSession, not obs-websocket.
+- **Disabled upstream modules.** Browser/CEF, What's New, the inbound obs-websocket plugin, scripting, virtual camera, the AJA output UI (`ENABLE_AJA_OUTPUT_UI=OFF`), VST, Syphon, VLC. The AJA capture plugin is built (`ENABLE_AJA=ON`, libajantv2 linked statically from obs-deps); see `docs/features.md`, "AJA capture". The outbound Desktop control socket uses NSURLSession, not obs-websocket.
 - **obs-deps and Qt.** `CMakePresets.json` pins pre-built obs-deps `2026-08-26` and, for `macos-universal`, the Qt6 bundle `2026-05-21` (deliberate Qt compatibility pin) with SHA-256 hashes; CMake downloads and verifies them into `.deps/`, and existing pinned `.deps` are reused on every build.
 - **GStreamer runtime (WHEP receiver).** `plugins/pixelview-whep` embeds the official GStreamer `1.28.3` macOS packages plus a source-built, patched `rswebrtc 0.15.2` and a source-built `applemedia` plugin from gst-plugins-bad `1.28.3` with the vtdec patch (HEVC reorder depth from the SPS, v210 output for 4:2:2 streams; meson/ninja pinned in a private venv under `.deps`), pinned by `plugins/pixelview-whep/runtime-lock.json`. The build helper runs these before CMake on every build (no Homebrew/host GStreamer):
 
@@ -306,7 +306,8 @@ The development build (6.1) was first run on 2026-10-03 (Windows Server 2025 x64
   - At least 15 GiB of free disk (a complete RelWithDebInfo tree in `build_x64` and `build_x86` is about 1.8 GiB; `.deps` about 1.7 GiB).
 - **Dependencies:** the preset downloads the pinned obs-deps and Qt6 for `windows-x64` into `.deps`. `win-dshow` needs the `deps/libdshowcapture/src` submodule and its nested `capture-device-support` submodule, which the helper initializes recursively. On x64 the configure also generates a Win32 child build in `build_x86` (32-bit capture helpers); it receives the same `OBS_VERSION_OVERRIDE`.
 - **Development build:** `python cmake/windows/pixelview-build.py` (or `--print` to see the configure command, `--check-only` for preflight).
-  - Mirrors the macOS feature flags: no browser, What's New, obs-websocket, scripting, virtual camera, AJA, VST or VLC; DeckLink and WebRTC on.
+  - Mirrors the macOS feature flags: no browser, What's New, obs-websocket, scripting, virtual camera, AJA output UI, VST or VLC; DeckLink, AJA capture and WebRTC on.
+  - `aja.dll` links libajantv2 statically and imports only `obs.dll`, system DLLs and the MSVC runtime. It finds cards through the vendor kernel driver (AJA's, or Avid's for the Artist DNxIV), which must be installed with the card connected before Pixelview starts.
   - Passes `OBS_VERSION_OVERRIDE` from `version.json`.
   - Output is `build_x64/rundir/RelWithDebInfo/bin/64bit/Pixelview.exe`.
   - Development builds are unsigned and have no updater. Run the app from that directory or open `build_x64/obs-studio.sln` and debug `obs-studio`.
