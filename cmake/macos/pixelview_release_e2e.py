@@ -555,7 +555,11 @@ echo "macos=$(sw_vers -productVersion)"
             raise StepFailed(f"unpair failed (HTTP {status})")
         revoked = True
         wait_for("the desktop to leave the account", lambda: desktop_id not in admin.devices(), 30)
-        wait_for("the app to finish the unpair", lambda: "Device revoked" in box.app_log(), 30)
+        # The backend either sends SOCKET_DESKTOP_REVOKED on the open socket ("Device
+        # revoked") or closes it first and refuses the reconnect with 4401 ("unpaired
+        # from your Pixelview account"); both run the same local unpair.
+        wait_for("the app to finish the unpair", lambda: any(
+            text in box.app_log() for text in ("Device revoked", "was unpaired from your Pixelview account")), 30)
         wait_for("the Pair button to return", lambda: box.find_text(box.screenshot(directory / "7-unpaired.png"),
                                                                     "Pair with Pixelview"), 30)
         return {"revoked": True}
