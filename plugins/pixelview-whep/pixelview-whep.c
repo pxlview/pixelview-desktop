@@ -601,6 +601,23 @@ static gboolean probe_cancelled(void *opaque)
  g_mutex_unlock(&r->lock);
  return cancelled;
 }
+/* GStreamer loads on first use, off the UI thread (runtime.h). A runtime that
+ * failed fails this receive with a typed reason (no retry). One still loading
+ * after a bounded wait (first launch after install can take seconds while
+ * macOS checks the plugins) is an untyped error the app retries; the load
+ * carries on meanwhile. Streaming is unaffected either way. */
+#define PV_RECEIVE_RUNTIME_UNAVAILABLE "receive-runtime-unavailable"
+enum runtime_status { RUNTIME_READY, RUNTIME_LOADING, RUNTIME_FAILED };
+static enum runtime_status runtime_ready(struct receiver *r, uint64_t generation)
+{
+#ifdef PIXELVIEW_WHEP_TEST
+ (void)r; (void)generation; return gst_is_initialized() ? RUNTIME_READY : RUNTIME_FAILED;
+#else
+ struct probe_waiter waiter = {r, generation};
+ const enum pixelview_gst_state state = pixelview_gst_wait(PIXELVIEW_GST_WAIT_MS, probe_cancelled, &waiter);
+ return state == PIXELVIEW_GST_READY ? RUNTIME_READY : state == PIXELVIEW_GST_FAILED ? RUNTIME_FAILED : RUNTIME_LOADING;
+#endif
+}
 static bool probe_attempt(struct receiver *r, uint64_t generation)
 {
  /* This stack context is only borrowed by the bounded waiter, never the cached
@@ -640,7 +657,8 @@ static gpointer worker(gpointer opaque)
    g_mutex_unlock(&r->lock);
    stop_pipeline(r);
    if (endpoint) {
-    if (probe_attempt(r, generation)) r->pipe = make_pipeline(r, endpoint);
+    const enum runtime_status runtime = runtime_ready(r, generation);
+    if (runtime == RUNTIME_READY && probe_attempt(r, generation)) r->pipe = make_pipeline(r, endpoint);
     wipe(&endpoint);
     g_rec_mutex_lock(&r->delivery);
     g_mutex_lock(&r->lock);
@@ -653,7 +671,9 @@ static gpointer worker(gpointer opaque)
     r->last_video = os_gettime_ns();
     if (failed && !r->quit && generation == r->generation) {
      r->state = "error";
+     if (runtime == RUNTIME_FAILED) r->failure = PV_RECEIVE_RUNTIME_UNAVAILABLE;
      blog(LOG_ERROR,"[pixelview-whep] media startup failed: %s",
+      runtime == RUNTIME_FAILED?"GStreamer runtime unavailable":runtime == RUNTIME_LOADING?"GStreamer runtime still loading":
       !r->pipe?(r->offer_failed?"no verified receive offer":"pipeline creation failed"):
       "pipeline did not enter playing state");
     }
@@ -735,7 +755,8 @@ bool obs_module_load(void)
    blog(LOG_ERROR, "[pixelview-whep] runtime lifetime unavailable"); return false;
   }
  }
- if (!pixelview_gst_init()) { blog(LOG_ERROR, "[pixelview-whep] bundled runtime unavailable"); return false; }
+ /* Paths and environment only; GStreamer itself starts on the first receive. */
+ if (!pixelview_gst_configure()) { blog(LOG_ERROR, "[pixelview-whep] bundled runtime unavailable"); return false; }
 #endif
  struct obs_source_info info = {
  .id = "pixelview_whep_source", .type = OBS_SOURCE_TYPE_INPUT,

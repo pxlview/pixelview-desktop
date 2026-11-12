@@ -465,6 +465,8 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					PIXELVIEW_PLATFORM_TEXT("The sender is streaming HEVC 4:4:4 10-bit, which this Mac cannot decode. Please use the HEVC Main or Main10 profile on the sender.", "The sender is streaming HEVC 4:4:4 10-bit, which this computer cannot decode. Please use the HEVC Main or Main10 profile on the sender.") :
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
+					is("receive-runtime-unavailable") ?
+					PIXELVIEW_PLATFORM_TEXT("Receiving could not start: its video components did not load on this Mac. Try again; if it keeps happening, quit and reopen Pixelview Desktop.", "Receiving could not start: its video components did not load on this computer. Try again; if it keeps happening, quit and reopen Pixelview Desktop.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
 			} else if (state && strcmp(state, "playing") == 0 && fresh) {
 				pixelviewReceiveRetries = 0;

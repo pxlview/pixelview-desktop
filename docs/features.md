@@ -472,6 +472,15 @@ An earlier backend handoff proposing receiver registration over the control sock
 - `pixelview_whep_source` (`plugins/pixelview-whep`) embeds a pinned GStreamer 1.28.3 runtime
   (source-built patched rswebrtc 0.15.2, libnice, VideoToolbox decoders, libopus) in the plugin
   bundle. No host GStreamer is used.
+- GStreamer starts on the first receive, on its own thread, never during module load or on the UI
+  thread. Each bundled plugin file is loaded in-process by name; nothing is scanned, no registry is
+  read or written and the forked `gst-plugin-scanner` never runs (in 0.0.12 its pipe wedged at launch
+  on a customer's Mac Studio and hung the app before the UI appeared). A receive waits up to 20 s for
+  the runtime. One that failed to load stops the receive with `receive-runtime-unavailable` (no
+  retry); one still loading counts as an interrupted stream, so the app reconnects while the load
+  carries on. Streaming is unaffected either way. The log says how long loading took, names a
+  plugin that took over 2 s, and names the plugin it is on when a receive gives up waiting.
+  The first receive after launch is slower by the load time (see the verification notes).
 - On each connection the plugin probes the VideoToolbox decoders and offers only verified profiles:
   H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10, Main 4:2:2 10
   and Main 4:4:4 10 (see below), VP9 profiles 0 and 2, plus stereo Opus. Each stream is decoded in its
