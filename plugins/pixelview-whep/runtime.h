@@ -172,7 +172,7 @@ static gpointer pv_gst_loader(gpointer unused)
 }
 
 /* Any thread: true once the runtime is loaded and checked. */
-static bool pixelview_gst_ready(void)
+G_GNUC_UNUSED static bool pixelview_gst_ready(void)
 {
  g_mutex_lock(&pv_gst_lock);
  const bool ready = pv_gst_state == PIXELVIEW_GST_READY;
