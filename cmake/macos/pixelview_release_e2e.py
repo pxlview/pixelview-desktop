@@ -265,7 +265,9 @@ class Machine:
     def ssh(self, script, timeout=300, stdin=None, check=True):
         remote = "bash -lc " + shlex.quote(script)
         if self.kind == "devbox":
-            command = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            # `devbox configure-ssh` sets ForwardAgent yes; on some images the proxy then
+            # prints "Failed to forward agent." to stdout, which corrupts command output.
+            command = ["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "StrictHostKeyChecking=accept-new",
                        "-o", f"UserKnownHostsFile={self.runtime.known_hosts}", "-o", "LogLevel=ERROR",
                        f"{self.name}.devbox.namespace", remote]
         else:
