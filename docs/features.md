@@ -480,7 +480,14 @@ An earlier backend handoff proposing receiver registration over the control sock
   retry); one still loading counts as an interrupted stream, so the app reconnects while the load
   carries on. Streaming is unaffected either way. The log says how long loading took, names a
   plugin that took over 2 s, and names the plugin it is on when a receive gives up waiting.
-  The first receive after launch is slower by the load time (see the verification notes).
+  The first receive after launch is slower by the load time: about 0.2 s from the signed build on
+  the dev Mac (M1 Pro, macOS 26.6.2), but 7-15 s the first time freshly written copies of the
+  plugins load (macOS checks them; `libgstapplemedia` and `libgstdtls` were the slow ones), which is
+  what a first receive after installing an update may see. Verified offline with
+  `plugins/pixelview-whep/tests/run-runtime-lazy.py` (scanner replaced by a sleeper; a plugin whose
+  init never returns) and with the production plugin in an OBS host: 0.0.12's module load hung in
+  `exchange_packets` on the sleeping scanner, the new one returns at once and receives. Not yet run
+  on the customer's Mac or in a notarized build.
 - On each connection the plugin probes the VideoToolbox decoders and offers only verified profiles:
   H.264 constrained baseline (`42c02a`, packetization-mode 1), HEVC Main, Main10, Main 4:2:2 10
   and Main 4:4:4 10 (see below), VP9 profiles 0 and 2, plus stereo Opus. Each stream is decoded in its
