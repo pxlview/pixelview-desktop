@@ -58,6 +58,7 @@ class OBSAbout;
 #include <utility/PixelviewLogShipper.hpp>
 #include <utility/PixelviewLinkReport.hpp>
 #include <utility/PixelviewSystemLoad.hpp>
+#include <utility/PixelviewWatermark.hpp>
 class QTabBar;
 class QLineEdit;
 class QToolButton;
@@ -202,6 +203,8 @@ static inline void ClearProcessPriority()
 	do {                   \
 	} while (false)
 #endif
+
+class QTemporaryDir;
 
 class OBSBasic : public OBSMainWindow {
 	Q_OBJECT
@@ -392,6 +395,20 @@ private:
 	quint64 pixelviewStateSeq = 0;
 	// Connection report pushed as DESKTOP_STATS (OBSBasic_PixelviewStats.inc).
 	void InitPixelviewStats();
+	// Session watermark burned in by the sender (OBSBasic_PixelviewWatermark.inc).
+	pixelview::WatermarkOverlay pixelviewWatermark;
+	QString pixelviewWatermarkLoaded, pixelviewWatermarkFetching;
+	quint64 pixelviewWatermarkFetchSeq = 0;
+	bool pixelviewWatermarkDeclared = false;
+	std::unique_ptr<QTemporaryDir> pixelviewWatermarkDir;
+	QTimer *pixelviewWatermarkRetry = nullptr;
+	void InitPixelviewWatermark();
+	void ShutdownPixelviewWatermark();
+	bool DeclarePixelviewWatermark();
+	void PixelviewWatermarkStarted();
+	void PixelviewWatermarkStopped();
+	void RefreshPixelviewWatermark();
+	void FetchPixelviewWatermark();
 	void PushPixelviewStats();
 	QTimer *pixelviewStatsTimer = nullptr;
 	pixelview::LinkReport pixelviewLinkReport;

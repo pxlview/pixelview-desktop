@@ -39,6 +39,7 @@ public:
 
 	// Pixelview: what the media server reports back about this stream.
 	void LinkStats(calldata_t *cd);
+	void Watermark(calldata_t *cd);
 
 private:
 	void ConfigureAudioTrack(std::string media_stream_id, std::string cname);
@@ -58,6 +59,10 @@ private:
 	std::string endpoint_url;
 	std::string bearer_token;
 	std::string bearer_issuer_origin; // Paired Pixelview backend; empty for a user-configured service.
+	// Pixelview Desktop burns the session watermark in and declares it with
+	// X-Pixelview-Watermark: sender; acknowledged when the engine echoes it.
+	std::atomic<bool> watermark_declared = false;
+	std::atomic<bool> watermark_acknowledged = false;
 	std::string resource_url;
 
 	std::atomic<bool> running;

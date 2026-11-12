@@ -136,6 +136,35 @@ behaviour is:
   credentials and resource DELETE is pinned to the original origin. Error text names the streaming
   destination or encoder, not stream keys or internal output machinery.
 
+### Session watermark
+
+- When the current session's watermark is on in Pixelview admin, the Desktop burns it into the sent
+  picture itself, so the engine adds nothing and HEVC/H.264 passthrough stays possible (the
+  engine's own watermark forces a VP9 transcode). The backend describes it as
+  `{"watermark": {"enabled", "id"}}` in `DESKTOP_READY` and `DESKTOP_STARTED`, and pushes
+  `DESKTOP_WATERMARK` when an admin changes it or another session becomes current. The image is
+  the engine's PNG (1920x1080 RGBA, centred text), fetched with the device token from
+  `GET /desktop/watermark` (`X-Pixelview-Watermark-Id` names it) and prefetched as soon as it is
+  announced.
+- Each WHIP connection decides once, before it starts: it sends `X-Pixelview-Watermark: sender`
+  when the state is known and, if on, that exact image is already loaded. The engine stores the
+  declaration for that ingest only, skips its watermark (stream, thumbnail and transcode gate) and
+  echoes the header on the 201 answer. Without the echo (an older engine) the Desktop draws
+  nothing and the engine watermarks; without a known state (older backend, failed lookup) or a
+  loaded image the Desktop does not declare and the engine watermarks as before. OBS, SRT and
+  other WHIP senders never send the header.
+- The image is drawn by a libobs main-rendered callback over the finished program picture (not a
+  scene item, so it is never saved and never in the Sources list): scaled to the canvas height,
+  aspect kept, bottom right, as the engine places it. It is visible in the preview only while a
+  declared stream runs, and a change during such a stream applies once the new image has
+  downloaded (the previous image stays until then; a failed download retries every 5 s).
+- Colour: it is composited after the capture's P3-D65 conversion (`P3D65_PQ_DESKTOP`), so the
+  matrix never touches it; with `P3D65_PQ` the engine's P3 LUT maps its neutral white to the same
+  white. In an HDR canvas the image is SDR content at the SDR white level (300 nits by default),
+  whereas the engine overlays the PNG's code values directly onto the PQ/HLG signal (full white),
+  and OBS blends in linear light where the engine blends Y'CbCr code values, so a partly
+  transparent watermark looks somewhat brighter over dark picture than the engine's.
+
 ### Admin remote control
 
 The admin pairing modal (pxlview/pixelview-admin#162) can operate every Sending control of an online

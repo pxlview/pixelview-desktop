@@ -68,6 +68,7 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
  };
  pixelviewLease.halt=[this]{
   pixelviewStartPermit=false; pixelviewActualStreaming=false;
+  PixelviewWatermarkStopped();
   if(!pixelviewLease.intent) ui->statusbar->clearMessage();
   pixelviewReconnectAt=0;
   if(pixelviewLease.transientFailure && !pixelviewLease.intent) {
@@ -96,6 +97,8 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   obs_data_set_string(settings,"bearer_token",bearer.toUtf8().constData());
   // Engines behind the backend's /ingress proxy name the backend origin in their WHIP Location.
   obs_data_set_string(settings,"pixelview_bearer_issuer_origin",pixelviewOrigin.toString().toUtf8().constData());
+  // The sender burns the session watermark in when it can; the engine then skips its own.
+  obs_data_set_bool(settings,"pixelview_watermark",DeclarePixelviewWatermark());
   OBSServiceAutoRelease whip=obs_service_create("whip_custom","Pixelview leased WHIP",settings,nullptr);
   if(!whip) {pixelviewLease.fail("WHIP output is unavailable in this build. SRT is not supported.");return;}
   pixelviewPreviousService=service; service=whip;
@@ -204,11 +207,13 @@ void OBSBasic::InitPixelviewDesktop(QWidget *sidebar)
   RefreshPixelviewReconnect();
  }); pixelviewWatchdog->start();
  InitPixelviewStats();
+ InitPixelviewWatermark();
  connect(this,&OBSBasic::StreamingStarted,this,[this](bool withDelay){
   if(!PixelviewLeaseValid()) {pixelviewLease.fail("Stream authority lost before output started.");return;}
   if(withDelay) {pixelviewConnectionStatus->setText(QStringLiteral("Starting WHIP stream (delay)…"));return;}
   pixelviewActualStreaming=true;
   pixelviewLease.outputStarted();
+  PixelviewWatermarkStarted();
   pixelviewConnectionStatus->setText(QStringLiteral("Streaming"));
   ui->statusbar->clearMessage();
  });
@@ -372,6 +377,7 @@ void OBSBasic::PixelviewOutputStopped()
  }
  pixelviewStopPending=false;
  pixelviewActualStreaming=false;pixelviewStartPermit=false;
+ PixelviewWatermarkStopped();
  if(!pixelviewLease.intent) pixelviewLease.outputStopped();
  if(pixelviewStreamingBusy) {pixelviewStreamingBusy=false; emit StreamingStopped();}
  if(pixelviewUnpairPending) UnregisterPixelviewDesktop();

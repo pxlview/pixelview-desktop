@@ -53,6 +53,19 @@ WHIPOutput::WHIPOutput(obs_data_t *, obs_output_t *output)
 		"void pixelview_link_stats(out bool reported, out int age_ms, out int rtt_ms, out float loss_pct, "
 		"out float jitter_ms, out int lost, out int nacked)",
 		[](void *priv_data, calldata_t *cd) { static_cast<WHIPOutput *>(priv_data)->LinkStats(cd); }, this);
+	proc_handler_add(
+		obs_output_get_proc_handler(output),
+		"void pixelview_watermark(out bool declared, out bool acknowledged)",
+		[](void *priv_data, calldata_t *cd) { static_cast<WHIPOutput *>(priv_data)->Watermark(cd); }, this);
+}
+
+// Pixelview: whether this connection declared that the sender burns the
+// watermark in, and whether the media server answered that it will not add
+// its own. Valid once the stream has started.
+void WHIPOutput::Watermark(calldata_t *cd)
+{
+	calldata_set_bool(cd, "declared", watermark_declared.load());
+	calldata_set_bool(cd, "acknowledged", watermark_acknowledged.load());
 }
 
 void WHIPOutput::LinkStats(calldata_t *cd)
@@ -314,6 +327,8 @@ bool WHIPOutput::Init()
 
 	OBSDataAutoRelease service_settings = obs_service_get_settings(service);
 	bearer_issuer_origin = obs_data_get_string(service_settings, "pixelview_bearer_issuer_origin");
+	watermark_declared = obs_data_get_bool(service_settings, "pixelview_watermark");
+	watermark_acknowledged = false;
 
 	return true;
 }
@@ -456,6 +471,9 @@ bool WHIPOutput::Connect()
 
 
 
+	if (watermark_declared)
+		headers = curl_slist_append(headers, "X-Pixelview-Watermark: sender");
+
 	// Add user-agent to our requests
 	headers = curl_slist_append(headers, user_agent.c_str());
 
@@ -533,6 +551,15 @@ bool WHIPOutput::Connect()
 		location_header_count++;
 		last_location_header = value;
 	}
+
+	// An engine without sender watermarks does not echo the header and adds its own.
+	for (auto &http_header : http_headers) {
+		if (watermark_declared && astrcmpi(value_for_header("x-pixelview-watermark", http_header).c_str(), "sender") == 0)
+			watermark_acknowledged = true;
+	}
+	if (watermark_declared)
+		do_log(LOG_INFO, "Sender watermark %s by the media server",
+		       watermark_acknowledged ? "acknowledged" : "not acknowledged (it watermarks itself)");
 
 	if (location_header_count < static_cast<size_t>(redirect_count) + 1) {
 		do_log(LOG_ERROR, "WHIP server did not provide a resource URL via the Location header");
