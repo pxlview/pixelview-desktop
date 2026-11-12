@@ -474,8 +474,10 @@ An earlier backend handoff proposing receiver registration over the control sock
   bundle. No host GStreamer is used.
 - GStreamer starts on the first receive, on its own thread, never during module load or on the UI
   thread. Each bundled plugin file is loaded in-process by name; nothing is scanned, no registry is
-  read or written and the forked `gst-plugin-scanner` never runs (in 0.0.12 its pipe wedged at launch
-  on a customer's Mac Studio and hung the app before the UI appeared). A receive waits up to 20 s for
+  read or written and the forked `gst-plugin-scanner` never runs (in 0.0.12, on a customer's Mac Studio,
+  the app and the scanner deadlocked at launch: each was blocked in `write()` on a full pipe to the
+  other, after the scanner had loaded `libgstplayback` and `libgstsctp`, and GStreamer waits with no
+  timeout, so the app hung before the UI appeared; why only that Mac is unknown). A receive waits up to 20 s for
   the runtime. One that failed to load stops the receive with `receive-runtime-unavailable` (no
   retry); one still loading counts as an interrupted stream, so the app reconnects while the load
   carries on. Streaming is unaffected either way. The log says how long loading took, names a

@@ -14,8 +14,9 @@
  * every later receive waits a bounded time and then fails.
  *
  * Nothing is scanned and the forked gst-plugin-scanner is never run (on one
- * customer Mac it stopped reading its pipe and GStreamer waited on it forever,
- * on the main thread). Each plugin file in the bundled directory is loaded
+ * customer Mac the app and the scanner deadlocked, each blocked in write() on
+ * a full pipe to the other with neither reading, and GStreamer has no timeout,
+ * so the app hung on the main thread at launch). Each plugin file in the bundled directory is loaded
  * in-process, by name, so the log names a plugin that is slow or hangs. No
  * system, user or external registry is read; every required factory must
  * come from the bundled directory. */
