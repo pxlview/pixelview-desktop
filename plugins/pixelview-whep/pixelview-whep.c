@@ -601,11 +601,13 @@ static gboolean probe_cancelled(void *opaque)
  g_mutex_unlock(&r->lock);
  return cancelled;
 }
-/* GStreamer loads on first use, off the UI thread (runtime.h). A runtime that
- * failed fails this receive with a typed reason (no retry). One still loading
- * after a bounded wait (first launch after install can take seconds while
- * macOS checks the plugins) is an untyped error the app retries; the load
- * carries on meanwhile. Streaming is unaffected either way. */
+/* GStreamer loads on first use, off the UI thread (runtime.h). While it
+ * loads the receive reports "preparing". A runtime that failed, or is still
+ * loading past its overall budget, fails this receive with a typed reason
+ * (no retry; a late finish still serves the next receive). One still loading
+ * after a single bounded wait (first launch after install can take seconds
+ * while macOS checks the plugins) is an untyped error the app retries; the
+ * load carries on meanwhile. Streaming is unaffected either way. */
 #define PV_RECEIVE_RUNTIME_UNAVAILABLE "receive-runtime-unavailable"
 enum runtime_status { RUNTIME_READY, RUNTIME_LOADING, RUNTIME_FAILED };
 static enum runtime_status runtime_ready(struct receiver *r, uint64_t generation)
@@ -613,9 +615,17 @@ static enum runtime_status runtime_ready(struct receiver *r, uint64_t generation
 #ifdef PIXELVIEW_WHEP_TEST
  (void)r; (void)generation; return gst_is_initialized() ? RUNTIME_READY : RUNTIME_FAILED;
 #else
+ if (pixelview_gst_ready()) return RUNTIME_READY;
+ g_mutex_lock(&r->lock);
+ if (!r->quit && r->generation == generation && !g_strcmp0(r->state, "connecting")) r->state = "preparing";
+ g_mutex_unlock(&r->lock);
  struct probe_waiter waiter = {r, generation};
  const enum pixelview_gst_state state = pixelview_gst_wait(PIXELVIEW_GST_WAIT_MS, probe_cancelled, &waiter);
- return state == PIXELVIEW_GST_READY ? RUNTIME_READY : state == PIXELVIEW_GST_FAILED ? RUNTIME_FAILED : RUNTIME_LOADING;
+ g_mutex_lock(&r->lock);
+ if (!r->quit && r->generation == generation && !g_strcmp0(r->state, "preparing")) r->state = "connecting";
+ g_mutex_unlock(&r->lock);
+ return state == PIXELVIEW_GST_READY ? RUNTIME_READY :
+        state == PIXELVIEW_GST_FAILED || state == PIXELVIEW_GST_STALLED ? RUNTIME_FAILED : RUNTIME_LOADING;
 #endif
 }
 static bool probe_attempt(struct receiver *r, uint64_t generation)

@@ -466,11 +466,14 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 					hevcOther ?
 					QStringLiteral("The sender is using an unsupported HEVC profile. Please use the HEVC Main or Main10 profile on the sender.") :
 					is("receive-runtime-unavailable") ?
-					PIXELVIEW_PLATFORM_TEXT("Receiving could not start: its video components did not load on this Mac. Try again; if it keeps happening, quit and reopen Pixelview Desktop.", "Receiving could not start: its video components did not load on this computer. Try again; if it keeps happening, quit and reopen Pixelview Desktop.") :
+					PIXELVIEW_PLATFORM_TEXT("Receiving could not start: its video components did not load on this Mac. Quit and reopen Pixelview Desktop, then start receiving again.", "Receiving could not start: its video components did not load on this computer. Quit and reopen Pixelview Desktop, then start receiving again.") :
 					QStringLiteral("Receive media failed. Check connection and retry."), ReceiveStatusTone::Error);
 			} else if (state && strcmp(state, "playing") == 0 && fresh) {
 				pixelviewReceiveRetries = 0;
 				SetPixelviewReceiveStatus(QStringLiteral("Receiving"), ReceiveStatusTone::Receiving);
+			} else if (state && strcmp(state, "preparing") == 0) {
+				// First receive of this launch: the plugin is loading its video components.
+				SetPixelviewReceiveStatus(QStringLiteral("Preparing video components…"), ReceiveStatusTone::Connecting);
 			} else {
 				SetPixelviewReceiveStatus(QStringLiteral("Waiting for video…"), ReceiveStatusTone::Connecting);
 			}
