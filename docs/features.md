@@ -572,7 +572,12 @@ An earlier backend handoff proposing receiver registration over the control sock
   with fresh sessions (13-50 s, dominated by the engine: viewers that join just before or while its
   input restarts, and viewers present across a sender reconnect, never get media). About one first
   connect in ten fails with a codec-route CORE/NEGOTIATION error and recovers on the retry. The
-  real DeckLink card was not exercised through a reconnect (no GUI control available). Endpoints stay in private memory; OBS-log diagnostics are limited to
+  real DeckLink card was not exercised through a reconnect (no GUI control available).
+- Reconnect cap, verified 2026-11-23 in the signed app against the same local setup: with the
+  sender stopped the receive made 10 fresh logins and gave up 4 min 8 s after the last frame, with
+  the red final status and no further logins; Start receiving then resumed video and began a new
+  count; a sender back within the budget recovered on attempt 3 and the next outage started again
+  at attempt 1. Endpoints stay in private memory; OBS-log diagnostics are limited to
   timeout/EOS and GStreamer domain/code.
 
 ### HEVC 4:2:2 10 reception
@@ -639,8 +644,15 @@ not measured end-to-end latency.
   link edits that value. The server value is never written to it.
 - **Verified (2026-10-12):** receiver protocol unit tests (`receiver_native.cpp`), UI contract
   (`test_receive_ui.py`), and the WHEP loopback matrix, where every playing case retunes 50 → 300 ms
-  live (sink latency 103 → 353 ms, frames keep flowing). **Not run:** the app against a backend
-  that shares the buffer, audio/video sync right after a live retune, and a real admin round trip.
+  live (sink latency 103 → 353 ms, frames keep flowing).
+- **End to end (2026-11-23):** the signed app against the pentest backend from
+  pxlview/pixelview-backend-v4#310 and a local pv-engine (main, HEVC Main 1080p25 x265 over SRT),
+  with an admin socket and `PATCH /node` standing in for the admin UI. Admin 400 ms reached the
+  app and retuned it live (sink latency 160 → 460 ms, still Receiving, engine
+  `min_delay_ms` 400); the app's Buffer dialog set 250 ms, which the backend stored, pushed to the
+  admin socket and the engine, and the app applied on the echo; admin 0 showed
+  **Buffer: Off · 100 ms**. **Not run:** the admin UI itself (pxlview/pixelview-admin#185 is
+  covered by its browser test), audio/video sync measured after a retune, and production.
 
 ### Canvas precision
 
