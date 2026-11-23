@@ -381,9 +381,27 @@ int main(int argc,char **argv) {
    layout.pixelviewReceiveIntent=true; mediaFailure=""; poll();
    assert(!green() && layout.pixelviewReceiveIntent && layout.pixelviewReceiveStatus->text().contains("Reconnecting in 2 s"));
    assert(layout.pixelviewReceiveRetryTimer->isActive() && layout.pixelviewReceiveRetries==1 && layout.pixelviewReceiveButton->text()=="Stop receiving");
+   assert(layout.pixelviewReceiveStatus->text().contains("attempt 1 of 10"));
    layout.StopPixelviewReceive(true);
    assert(!layout.pixelviewReceiveIntent && !layout.pixelviewReceiveRetryTimer->isActive() && layout.pixelviewReceiveButton->text()=="Start receiving");
-   layout.pixelviewReceiveRetries=0;
+   // A sender that stopped streaming never sends fresh video, so the budget
+   // runs out: the receive stops with a final error instead of retrying forever.
+   layout.pixelviewReceiveRetries=layout.PixelviewReceiveMaxRetries-1;
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true; poll();
+   assert(layout.pixelviewReceiveIntent && layout.pixelviewReceiveRetryTimer->isActive());
+   assert(layout.pixelviewReceiveStatus->text().contains("Reconnecting in 10 s (attempt 10 of 10)"));
+   layout.pixelviewReceiveSource=OBSSourceAutoRelease(obs_source_create_private("pixelview_whep_source","Synthetic receive",nullptr));
+   layout.pixelviewReceiveIntent=true; poll();
+   assert(!layout.pixelviewReceiveIntent && !layout.pixelviewReceiveRetryTimer->isActive() && layout.pixelviewReceiveRetries==10);
+   assert(layout.pixelviewReceiveStatus->text().contains("Gave up after 10 reconnect attempts"));
+   assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585"));
+   assert(layout.pixelviewReceiveButton->text()=="Start receiving");
+   // Only an operator Start renews the budget.
+   layout.pixelviewReceiveId->clear(); layout.pixelviewReceiveButton->click();
+   while(layout.pixelviewReceiveCredentialBusy) app.processEvents();
+   assert(layout.pixelviewReceiveRetries==0);
+   layout.StopPixelviewReceive(true);
    layout.StopPixelviewReceive(true); app.processEvents(); assert(!green());
    assert(layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==app.palette().color(QPalette::WindowText));
    auto red=[&]{app.processEvents(); return layout.pixelviewReceiveStatus->palette().color(QPalette::WindowText)==QColor("#ed8585");};

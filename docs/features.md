@@ -554,8 +554,13 @@ An earlier backend handoff proposing receiver registration over the control sock
   Receiving panel reconnects an attempt that ended without a typed reason: it stops the session and
   starts a fresh login and WHEP session after 2, 4, 8, then every 10 s
   (`[pixelview-receive] media stopped; reconnecting in N s`), showing
-  "Stream interrupted. Reconnecting in N s…". The intent stays set while waiting, so the button
-  reads Stop receiving (which cancels) and the mode stays locked; the backoff resets on fresh video.
+  "Stream interrupted. Reconnecting in N s (attempt K of 10)…". The intent stays set while waiting,
+  so the button reads Stop receiving (which cancels) and the mode stays locked. Ten attempts without
+  fresh video (about 5 minutes, e.g. the sender stopped streaming) end the receive with
+  "The sender stopped streaming. Gave up after 10 reconnect attempts." and
+  `[pixelview-receive] media stopped; giving up after 10 reconnect attempts`; the count resets
+  only on fresh video or an operator Start receiving. The cap is Desktop-side only (no backend
+  liveness check).
   Typed refusals (colour mode, HEVC profile), kicks, deleted sessions and control-plane errors never
   retry. A fresh session is required because the engine tears a viewer down on a transient ICE
   disconnect (pxlview/pv-engine#61).
@@ -803,7 +808,7 @@ configuration.
   the next launch; it offers neither safe mode nor crash upload and blocks until dismissed.
 - Reconnect summary: sender control socket 1-30 s backoff, media unaffected by control drops,
   stream retries per profile reconnect settings; receiver control 1-30 s re-authentication with 7 s
-  media grace; receive media reconnects with a fresh session (2-10 s backoff) while a rendered
+  media grace; receive media reconnects with a fresh session (2-10 s backoff, at most 10 attempts) while a rendered
   DeckLink output keeps playing; a DeckLink receive output resumes up to three times after a named
   stop. Relaunch
   reconnects pairing but never invents streaming or receiving intent.

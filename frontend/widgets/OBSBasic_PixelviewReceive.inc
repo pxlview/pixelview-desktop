@@ -318,7 +318,9 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	pixelviewReceiveButton->ensurePolished(); pixelviewReceiveButton->setFixedHeight(36);
 	connectionRows->addWidget(pixelviewReceiveButton);
 	connect(pixelviewReceiveButton, &QPushButton::clicked, this, [this] {
-		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else StartPixelviewReceive();
+		// Only an operator Start renews the reconnect budget; the retry timer
+		// also calls StartPixelviewReceive and must not.
+		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else { pixelviewReceiveRetries = 0; StartPixelviewReceive(); }
 	});
 	auto *statusRow = new QHBoxLayout;
 	statusRow->setContentsMargins(0, 0, 0, 0); statusRow->setSpacing(8);
@@ -797,16 +799,26 @@ void OBSBasic::StartPixelviewReceive()
 
 // Tear the stalled session down and start a fresh one after a backoff
 // (2, 4, 8, then every 10 s). The intent stays set while waiting, so the button
-// reads Stop receiving (which cancels) and the mode stays locked.
+// reads Stop receiving (which cancels) and the mode stays locked. Only fresh
+// video or an operator Start resets the count, so a sender that stopped
+// streaming ends the receive after PixelviewReceiveMaxRetries attempts.
 void OBSBasic::RetryPixelviewReceive()
 {
 	StopPixelviewReceive(true);
 	if (!pixelviewReceiving || isClosing() || pixelviewShutdownPending || !pixelviewReceiveRetryTimer) return;
+	if (pixelviewReceiveRetries >= PixelviewReceiveMaxRetries) {
+		blog(LOG_WARNING, "[pixelview-receive] media stopped; giving up after %d reconnect attempts", pixelviewReceiveRetries);
+		SetPixelviewReceiveStatus(QStringLiteral("The sender stopped streaming. Gave up after %1 reconnect attempts. Click Start receiving to try again.")
+			.arg(pixelviewReceiveRetries), ReceiveStatusTone::Error);
+		return; // StopPixelviewReceive already released the mode lock and tray.
+	}
 	const int seconds = pixelviewReceiveRetries < 3 ? 2 << pixelviewReceiveRetries : 10;
 	++pixelviewReceiveRetries;
-	blog(LOG_WARNING, "[pixelview-receive] media stopped; reconnecting in %d s (attempt %d)", seconds, pixelviewReceiveRetries);
+	blog(LOG_WARNING, "[pixelview-receive] media stopped; reconnecting in %d s (attempt %d of %d)", seconds,
+	     pixelviewReceiveRetries, PixelviewReceiveMaxRetries);
 	pixelviewReceiveIntent = true;
-	SetPixelviewReceiveStatus(QStringLiteral("Stream interrupted. Reconnecting in %1 s…").arg(seconds), ReceiveStatusTone::Connecting);
+	SetPixelviewReceiveStatus(QStringLiteral("Stream interrupted. Reconnecting in %1 s (attempt %2 of %3)…")
+		.arg(seconds).arg(pixelviewReceiveRetries).arg(PixelviewReceiveMaxRetries), ReceiveStatusTone::Connecting);
 	pixelviewReceiveRetryTimer->start(seconds * 1000);
 	RefreshPixelviewModes();
 	RefreshPixelviewReceiveTray();
