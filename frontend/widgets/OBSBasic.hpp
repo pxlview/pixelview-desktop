@@ -352,7 +352,7 @@ private:
 	QPushButton *pixelviewReceiveButton = nullptr;
 	QToolButton *pixelviewReceiveBuffer = nullptr;
 	int pixelviewReceiveBufferMs = 100; // Local setting, used when the server does not share its buffer.
-	static constexpr int PixelviewReceiveDefaultBufferMs = 100; // When the server's playback buffer is off.
+	static constexpr int PixelviewReceiveDefaultBufferMs = 100; // Local default, and the floor under the server's playback buffer.
 	int PixelviewReceiveBufferMs() const;
 	void RefreshPixelviewReceiveBuffer();
 	QLabel *pixelviewReceiveStatus = nullptr;

@@ -630,9 +630,11 @@ not measured end-to-end latency.
 
 - **Shared with the server.** Backends that share the node's playback buffer (`playout_delay_ms`,
   0-2000 ms, 0 = off; the admin Server settings slider) return it from `/login/player` and push
-  changes as `SOCKET_PLAYOUT_DELAY`. While signed in to such a server the receiver uses it, with
-  off meaning the Desktop default of 100 ms, and the link reads **Buffer: N ms** or
-  **Buffer: Off · 100 ms**. The link stays editable while receiving; a change is sent as
+  changes as `SOCKET_PLAYOUT_DELAY`. While signed in to such a server the receiver uses it, but
+  never less than 100 ms: off and values below 100 ms leave the GStreamer jitter buffer too little
+  time for reordering and retransmission, so the Desktop stays at 100 ms (browser viewers still get
+  the server value). The link reads **Buffer: N ms**, **Buffer: Off · 100 ms** or
+  **Buffer: 100 ms · server N ms**. The link stays editable while receiving; a change is sent as
   `SET_PLAYOUT_DELAY` on the viewer socket and only applied when the backend answers with the
   stored value, so admin, the engine, this receiver and any other Desktop receiver on the server
   agree. Backend protocol: `docs/playback-buffer.md` in the backend repository.

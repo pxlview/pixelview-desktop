@@ -94,7 +94,10 @@ class ReceiveUI(unittest.TestCase):
         self.assertIn('QStringLiteral("Buffer: Off · %1 ms").arg(PixelviewReceiveDefaultBufferMs)', buffer)
         # While signed in to a sharing server the buffer is the server's playback buffer.
         self.assertIn('int OBSBasic::PixelviewReceiveBufferMs() const', text)
-        self.assertIn('server > 0 ? server : server == 0 ? PixelviewReceiveDefaultBufferMs : pixelviewReceiveBufferMs', text)
+        # The server value never takes the Desktop below its 100 ms floor.
+        self.assertIn('server >= 0 ? std::max(server, PixelviewReceiveDefaultBufferMs) : pixelviewReceiveBufferMs', text)
+        self.assertIn('QStringLiteral("Buffer: %1 ms · server %2 ms").arg(PixelviewReceiveDefaultBufferMs).arg(server)', buffer)
+        self.assertIn('Pixelview Desktop never buffers less than %1 ms', init)
         self.assertIn('pixelviewReceiver->setPlayoutDelay(value)', init)
         self.assertIn('"set_latency"', init)
         self.assertNotIn('Buffer: %1 ms…', init)

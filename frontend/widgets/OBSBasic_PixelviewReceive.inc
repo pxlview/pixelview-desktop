@@ -337,7 +337,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		const int value = QInputDialog::getInt(this, QStringLiteral("Receive buffer"),
 			shared ? QStringLiteral("This is the server's playback buffer, shared with Pixelview admin. "
 						"Changing it applies to every viewer of this server.\n\n"
-						"0 turns it off; Pixelview Desktop then uses %1 ms.\n\nPlayback buffer (milliseconds):").arg(PixelviewReceiveDefaultBufferMs) :
+						"0 turns it off. Pixelview Desktop never buffers less than %1 ms, so below that it uses %1 ms.\n\nPlayback buffer (milliseconds):").arg(PixelviewReceiveDefaultBufferMs) :
 				 QStringLiteral("Keep this at 100 ms normally. If you see glitches, try increasing it.\n\nJitter buffer (milliseconds):"),
 			shared ? pixelviewReceiver->playoutDelay() : pixelviewReceiveBufferMs, 0, pixelview::PixelviewReceiver::MaxPlayoutDelay, 10, &accepted);
 		if (!accepted) return;
@@ -523,19 +523,23 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 }
 
 // While signed in to a server that shares it, the receive buffer is the
-// server's playback buffer (0 = off: the Desktop default); otherwise the local
-// setting.
+// server's playback buffer, but never below the Desktop's 100 ms: off (0) and
+// smaller values leave too little time for reordering and retransmission.
+// Otherwise the local setting.
 int OBSBasic::PixelviewReceiveBufferMs() const
 {
 	const int server = pixelviewReceiver ? pixelviewReceiver->playoutDelay() : -1;
-	return server > 0 ? server : server == 0 ? PixelviewReceiveDefaultBufferMs : pixelviewReceiveBufferMs;
+	return server >= 0 ? std::max(server, PixelviewReceiveDefaultBufferMs) : pixelviewReceiveBufferMs;
 }
 
 void OBSBasic::RefreshPixelviewReceiveBuffer()
 {
 	if (!pixelviewReceiveBuffer) return;
 	const int server = pixelviewReceiver ? pixelviewReceiver->playoutDelay() : -1;
+	// Say when the Desktop's floor applies instead of the server's value.
 	pixelviewReceiveBuffer->setText(server == 0 ? QStringLiteral("Buffer: Off · %1 ms").arg(PixelviewReceiveDefaultBufferMs) :
+		server > 0 && server < PixelviewReceiveDefaultBufferMs ?
+		QStringLiteral("Buffer: %1 ms · server %2 ms").arg(PixelviewReceiveDefaultBufferMs).arg(server) :
 		QStringLiteral("Buffer: %1 ms").arg(PixelviewReceiveBufferMs()));
 	pixelviewReceiveBuffer->setToolTip(server >= 0 ?
 		QStringLiteral("The server's playback buffer, shared with Pixelview admin. Changing it here changes it for the whole server.") :
