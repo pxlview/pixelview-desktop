@@ -44,12 +44,21 @@ public:
  const QString &session() const { return sessionId; }
  const QString &viewer() const { return viewerId; }
  const QString &clientToken() const { return viewerToken; }
+ // The server's playback buffer in ms (0 = off), shared with Pixelview admin;
+ // -1 when not signed in or the backend does not share it.
+ int playoutDelay() const { return serverPlayoutDelay; }
+ // Asks the backend to change the server's playback buffer. The new value
+ // arrives through onPlayoutDelay once the backend has stored it.
+ bool setPlayoutDelay(int ms);
+ static constexpr int MaxPlayoutDelay = 2000;
  std::function<void(const QString &)> onEndpoint;
  std::function<void()> onStopped;
  std::function<void()> onChanged;
  // The host removed this viewer; argument is the session id. Delivered after the
  // controller has stopped and entered the Error state.
  std::function<void(const QString &)> onKicked;
+ // The server's playback buffer changed (login or admin/another receiver).
+ std::function<void(int)> onPlayoutDelay;
 private:
  void change(State, const QString &);
  void authenticate();
@@ -71,5 +80,7 @@ private:
  QElapsedTimer controlLossClock;
  QDeadlineTimer authorizationDeadline, pendingAuthorizationDeadline;
  int retryCount = 0;
+ int serverPlayoutDelay = -1;
+ void playoutDelayChanged(const QJsonValue &);
 };
 }

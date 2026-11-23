@@ -136,6 +136,46 @@ behaviour is:
   credentials and resource DELETE is pinned to the original origin. Error text names the streaming
   destination or encoder, not stream keys or internal output machinery.
 
+### Session watermark
+
+- When the current session's watermark is on in Pixelview admin, the Desktop burns it into the sent
+  picture itself, so the engine adds nothing and HEVC/H.264 passthrough stays possible (the
+  engine's own watermark forces a VP9 transcode). The backend describes it as
+  `{"watermark": {"enabled", "id"}}` in `DESKTOP_READY` and `DESKTOP_STARTED`, and pushes
+  `DESKTOP_WATERMARK` when an admin changes it or another session becomes current. The image is
+  the engine's PNG (1920x1080 RGBA, centred text), fetched with the device token from
+  `GET /desktop/watermark` (`X-Pixelview-Watermark-Id` names it) and prefetched as soon as it is
+  announced.
+- Each WHIP connection decides once, before it starts: it sends `X-Pixelview-Watermark: sender`
+  when the state is known and, if on, that exact image is already loaded. The engine stores the
+  declaration for that ingest only, skips its watermark (stream, thumbnail and transcode gate) and
+  echoes the header on the 201 answer. Without the echo (an older engine) the Desktop draws
+  nothing and the engine watermarks; without a known state (older backend, failed lookup) or a
+  loaded image the Desktop does not declare and the engine watermarks as before. OBS, SRT and
+  other WHIP senders never send the header.
+- The image is drawn by a libobs main-rendered callback over the finished program picture (not a
+  scene item, so it is never saved and never in the Sources list): scaled to the canvas height,
+  aspect kept, bottom right, as the engine places it. It is visible in the preview only while a
+  declared stream runs, and a change during such a stream applies once the new image has
+  downloaded (the previous image stays until then; a failed download retries every 5 s).
+- Colour: it is composited after the capture's P3-D65 conversion (`P3D65_PQ_DESKTOP`), so the
+  matrix never touches it; with `P3D65_PQ` the engine's P3 LUT maps its neutral white to the same
+  white. In an HDR canvas the image is SDR content at the SDR white level (300 nits by default),
+  whereas the engine overlays the PNG's code values directly onto the PQ/HLG signal (full white),
+  and OBS blends in linear light where the engine blends Y'CbCr code values, so a partly
+  transparent watermark looks somewhat brighter over dark picture than the engine's.
+- Verified 2026-11-23 in the signed app with the watermark on: a paired sender instance on the
+  built-in colour bars, driven through the control route, streaming to a local pv-engine (`main`
+  plus pxlview/pv-engine#70) and a receiving app instance, against the pentest backend with
+  pxlview/pixelview-backend-v4#278 and #310. HEVC Main, Main10, Main 4:2:2 10 and Main 4:4:4 10
+  in SDR; Main10, 4:2:2 10 and 4:4:4 10 in PQ and HLG; 4:2:2 10 and 4:4:4 10 in P3 Desktop; and
+  H.264 (VideoToolbox and x264) in SDR: 14/14 reached the receiver as passthrough (no VP9) with no
+  stall, the engine acknowledged the sender watermark on every ingest, and its thumbnail and the
+  receiving app show the watermark once. **Not run:** SDI capture into the sender (the 4K Mini
+  output was held by another application), any SDI output measurement, the engine without #70,
+  and production. The pentest backend cannot render the watermark PNG (its font download is
+  blocked), so that run used a local copy of the font.
+
 ### Admin remote control
 
 The admin pairing modal (pxlview/pixelview-admin#162) can operate every Sending control of an online
@@ -554,8 +594,13 @@ An earlier backend handoff proposing receiver registration over the control sock
   Receiving panel reconnects an attempt that ended without a typed reason: it stops the session and
   starts a fresh login and WHEP session after 2, 4, 8, then every 10 s
   (`[pixelview-receive] media stopped; reconnecting in N s`), showing
-  "Stream interrupted. Reconnecting in N s…". The intent stays set while waiting, so the button
-  reads Stop receiving (which cancels) and the mode stays locked; the backoff resets on fresh video.
+  "Stream interrupted. Reconnecting in N s (attempt K of 10)…". The intent stays set while waiting,
+  so the button reads Stop receiving (which cancels) and the mode stays locked. Ten attempts without
+  fresh video (about 5 minutes, e.g. the sender stopped streaming) end the receive with
+  "The sender stopped streaming. Gave up after 10 reconnect attempts." and
+  `[pixelview-receive] media stopped; giving up after 10 reconnect attempts`; the count resets
+  only on fresh video or an operator Start receiving. The cap is Desktop-side only (no backend
+  liveness check).
   Typed refusals (colour mode, HEVC profile), kicks, deleted sessions and control-plane errors never
   retry. A fresh session is required because the engine tears a viewer down on a transient ICE
   disconnect (pxlview/pv-engine#61).
@@ -567,7 +612,12 @@ An earlier backend handoff proposing receiver registration over the control sock
   with fresh sessions (13-50 s, dominated by the engine: viewers that join just before or while its
   input restarts, and viewers present across a sender reconnect, never get media). About one first
   connect in ten fails with a codec-route CORE/NEGOTIATION error and recovers on the retry. The
-  real DeckLink card was not exercised through a reconnect (no GUI control available). Endpoints stay in private memory; OBS-log diagnostics are limited to
+  real DeckLink card was not exercised through a reconnect (no GUI control available).
+- Reconnect cap, verified 2026-11-23 in the signed app against the same local setup: with the
+  sender stopped the receive made 10 fresh logins and gave up 4 min 8 s after the last frame, with
+  the red final status and no further logins; Start receiving then resumed video and began a new
+  count; a sender back within the budget recovered on attempt 3 and the next outage started again
+  at attempt 1. Endpoints stay in private memory; OBS-log diagnostics are limited to
   timeout/EOS and GStreamer domain/code.
 
 ### HEVC 4:2:2 10 reception
@@ -615,9 +665,36 @@ An earlier backend handoff proposing receiver registration over the control sock
 
 ### Jitter buffer
 
-`PixelviewReceive/BufferMs` defaults to 100 ms and is passed explicitly on every `connect`. The
-**Buffer: N ms** link in the Receiving panel edits it (0-2000 ms, persisted, applied to the next
-connection). It is a jitter-buffer target, not measured end-to-end latency.
+The receive jitter buffer is passed explicitly on every `connect`. It is a jitter-buffer target,
+not measured end-to-end latency.
+
+- **Shared with the server.** Backends that share the node's playback buffer (`playout_delay_ms`,
+  0-2000 ms, 0 = off; the admin Server settings slider) return it from `/login/player` and push
+  changes as `SOCKET_PLAYOUT_DELAY`. While signed in to such a server the receiver uses it, but
+  never less than 100 ms: off and values below 100 ms leave the GStreamer jitter buffer too little
+  time for reordering and retransmission, so the Desktop stays at 100 ms (browser viewers still get
+  the server value). The link reads **Buffer: N ms**, **Buffer: Off · 100 ms** or
+  **Buffer: 100 ms · server N ms**. The link stays editable while receiving; a change is sent as
+  `SET_PLAYOUT_DELAY` on the viewer socket and only applied when the backend answers with the
+  stored value, so admin, the engine, this receiver and any other Desktop receiver on the server
+  agree. Backend protocol: `docs/playback-buffer.md` in the backend repository.
+- **Live retune.** A change during a receive goes to the source's `set_latency` proc. The WHEP
+  worker sets webrtcbin's `latency` (passed on to both jitterbuffers) and recalculates the
+  pipeline latency, without reconnecting.
+- **Local fallback.** Before signing in, and with backends that do not share it,
+  `PixelviewReceive/BufferMs` (default 100 ms, persisted) applies to the next connection and the
+  link edits that value. The server value is never written to it.
+- **Verified (2026-10-12):** receiver protocol unit tests (`receiver_native.cpp`), UI contract
+  (`test_receive_ui.py`), and the WHEP loopback matrix, where every playing case retunes 50 → 300 ms
+  live (sink latency 103 → 353 ms, frames keep flowing).
+- **End to end (2026-11-23):** the signed app against the pentest backend from
+  pxlview/pixelview-backend-v4#310 and a local pv-engine (main, HEVC Main 1080p25 x265 over SRT),
+  with an admin socket and `PATCH /node` standing in for the admin UI. Admin 400 ms reached the
+  app and retuned it live (sink latency 160 → 460 ms, still Receiving, engine
+  `min_delay_ms` 400); the app's Buffer dialog set 250 ms, which the backend stored, pushed to the
+  admin socket and the engine, and the app applied on the echo; admin 0 showed
+  **Buffer: Off · 100 ms**. **Not run:** the admin UI itself (pxlview/pixelview-admin#185 is
+  covered by its browser test), audio/video sync measured after a retune, and production.
 
 ### Canvas precision
 
@@ -785,7 +862,7 @@ configuration.
   the next launch; it offers neither safe mode nor crash upload and blocks until dismissed.
 - Reconnect summary: sender control socket 1-30 s backoff, media unaffected by control drops,
   stream retries per profile reconnect settings; receiver control 1-30 s re-authentication with 7 s
-  media grace; receive media reconnects with a fresh session (2-10 s backoff) while a rendered
+  media grace; receive media reconnects with a fresh session (2-10 s backoff, at most 10 attempts) while a rendered
   DeckLink output keeps playing; a DeckLink receive output resumes up to three times after a named
   stop. Relaunch
   reconnects pairing but never invents streaming or receiving intent.

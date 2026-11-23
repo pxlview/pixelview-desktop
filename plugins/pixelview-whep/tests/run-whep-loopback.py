@@ -40,6 +40,10 @@ if receiver_codec.exists():
 registration=selection.extract(server,'func newWHEPMediaEngine(')
 registration=registration.replace('newWHEPMediaEngine(codecMap *codec.Mapper','register(fixtures []Codec').replace('codecMap.Codecs','fixtures').replace('codec.MediaTypeVideo','1').replace('codec.IsABRFormat','isABR')
 source+='\n'+registration
+# Engines with the playback buffer register the playout-delay extension: exact constant.
+playout=ENGINE/'internal/av/whep/playout_delay.go'
+if 'playoutDelayURI' in registration:
+    source+='\n'+next(l for l in playout.read_text().splitlines() if l.startswith('const playoutDelayURI'))+'\n'
 source=source.replace('codec.MatchesReceiver','MatchesReceiver').replace('codec.Codec','Codec').replace('codec.WebRTCConfig','WebRTCConfig')
 provenance_paths=[p for p in [policy] if p.exists()]+[ENGINE/'internal/av/whep/server.go',ENGINE/'internal/av/codec/mapper.go',ENGINE/'internal/av/codec/negotiation.go',ENGINE/'internal/av/whep/h264_binding.go',ENGINE/'go.mod',ENGINE/'go.sum']
 if receiver_codec.exists(): provenance_paths.append(receiver_codec)
@@ -127,7 +131,7 @@ for fmt,name,depth,pt,fixture,mode,refusal in cases:
         stdout,stderr=receiver.communicate(timeout=25)
         result=subprocess.CompletedProcess(receiver.args,receiver.returncode,stdout,stderr)
         (case/'receiver.log').write_text(result.stdout+result.stderr)
-        lines=[l for l in result.stdout.splitlines() if l.startswith(('LOOPBACK_RESULT','LOOPBACK_FAILURE'))];print(label,lines,flush=True)
+        lines=[l for l in result.stdout.splitlines() if l.startswith(('LOOPBACK_RESULT','LOOPBACK_FAILURE','LOOPBACK_RETUNE'))];print(label,lines,flush=True)
         raw=[l for l in result.stderr.splitlines() if l.startswith('RAW_VIDEO')]
         if raw:print(' ',raw[0],flush=True)
         row={'name':label,'result':lines,'passed':result.returncode==0}

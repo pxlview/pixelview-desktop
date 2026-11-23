@@ -156,6 +156,22 @@ int main(int argc,char **argv)
   }
   if(!negative&&frames>=30&&audio>=24000){passed=true;break;}
  }
+ /* The playback buffer synced from the backend retunes a running receive: the jitter
+  * buffer must follow without a reconnect while frames keep arriving. */
+ int retuned=-1;bool retune_ok=true;
+ if(passed&&!negative&&!refusal){
+  calldata_set_int(&cd,"latency",2001);g_assert_true(proc_handler_call(ph,"set_latency",&cd));retune_ok=!calldata_bool(&cd,"ok");
+  calldata_set_int(&cd,"latency",300);g_assert_true(proc_handler_call(ph,"set_latency",&cd));retune_ok=retune_ok&&calldata_bool(&cd,"ok");
+  const uint64_t before=frames;
+  for(unsigned i=0;i<100;i++){
+   g_usleep(100000);g_assert_true(proc_handler_call(ph,"get_status",&cd));
+   frames=calldata_int(&cd,"frames");retuned=(int)calldata_int(&cd,"jitter_latency");
+   if(retuned==300&&frames>=before+30)break;
+  }
+  retune_ok=retune_ok&&retuned==300&&frames>=before+30&&!strcmp(calldata_string(&cd,"state"),"playing");
+  printf("LOOPBACK_RETUNE jitter=%d frames_after=%llu ok=%d\n",retuned,(unsigned long long)(frames-before),retune_ok);
+  passed=passed&&retune_ok;
+ }
  g_assert_true(proc_handler_call(ph,"disconnect",&cd));obs_source_release(source);obs_wait_for_destroy_queue();
  g_mutex_lock(&audit_lock);printf("LOOPBACK_RESULT frames=%llu audio=%llu jitter=%d audited=%u codes=%u chroma_rows=%u chroma_columns=%u energy=%g negative=%d passed=%d\n",(unsigned long long)frames,(unsigned long long)audio,jitter,videos,codes,chroma_rows,chroma_columns,audio_energy,negative,passed);
  if(!negative&&!refusal)passed=passed&&jitter==50&&videos>=30&&audio_energy>1&&codes>(strcmp(argv[2],"8")?256u:0u);

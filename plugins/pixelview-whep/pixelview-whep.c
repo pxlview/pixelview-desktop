@@ -35,6 +35,7 @@ struct receiver {
  uint64_t frames, audio_frames, last_video;
  guint latency, active_latency;
  bool latency_override, active_latency_override;
+ bool latency_pending; /* lock; set_latency waiting for the worker to retune the running pipeline */
  enum pixelview_color color, active_color; /* lock; active_color is fixed for one pipeline */
  struct pixelview_receive_capabilities active_caps;
  struct receive_attempt *attempt;
@@ -182,10 +183,26 @@ static void connect_proc(void *opaque, calldata_t *cd)
  r->color = color;
  r->latency_override = valid && latency_override;
  r->latency = r->latency_override ? (guint)latency : 0;
+ r->latency_pending = false;
  r->state = valid ? "connecting" : "error";
  r->frames = r->audio_frames = 0; r->jitter_latency = -1;
  r->changed = true; r->accept_samples = false;
  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
+}
+/* Change the jitter buffer of the running receive without reconnecting. The
+ * worker applies it to webrtcbin, which passes it on to its jitterbuffers;
+ * with no pipeline it is kept for the attempt that is starting. */
+static void set_latency_proc(void *opaque, calldata_t *cd)
+{
+ struct receiver *r = opaque;
+ int64_t latency = -1;
+ const bool ok = calldata_get_int(cd, "latency", &latency) && latency >= 0 && latency <= 2000;
+ if (ok) {
+  g_mutex_lock(&r->lock);
+  r->latency = (guint)latency; r->latency_override = true; r->latency_pending = true;
+  g_cond_signal(&r->wake); g_mutex_unlock(&r->lock);
+ }
+ calldata_set_bool(cd, "ok", ok);
 }
 static void disconnect_proc(void *opaque, calldata_t *cd)
 {
@@ -321,8 +338,9 @@ struct receive_attempt {
  struct receiver *receiver;
  const uint64_t generation;
  const struct pixelview_receive_capabilities caps;
- const guint latency;
- const bool latency_override;
+ guint latency; /* gate; set_latency retunes it while the attempt runs */
+ bool latency_override; /* gate */
+ GstElement *rtc; /* gate; ref taken at webrtc-ready, dropped by stop_pipeline */
  bool failed;
 };
 static struct receive_attempt *attempt_new(struct receiver *r)
@@ -424,6 +442,7 @@ static void webrtc_ready(GObject *signaller, const char *peer, GstElement *rtc, 
   attempt_ref(a), attempt_unref, 0);
  g_mutex_lock(&a->gate);
  if (attempt_current(a)) {
+  if (!a->rtc) a->rtc = gst_object_ref(rtc);
   guint latency = a->latency;
   /* Omission leaves the native property untouched; explicit zero is valid. */
   if (a->latency_override) g_object_set(rtc, "latency", latency, NULL);
@@ -574,11 +593,38 @@ static void log_lateness(struct receiver *r)
    video == INT64_MIN ? -1LL : (long long)(video / 1000000), audio == INT64_MIN ? -1LL : (long long)(audio / 1000000),
    (unsigned long long)(dropped / 48));
 }
+/* Worker only: r->attempt is worker-owned. An attempt before webrtc-ready
+ * picks the value up there. */
+static void retune_latency(struct receiver *r, uint64_t generation, guint latency)
+{
+ struct receive_attempt *a = r->attempt;
+ if (!a) return;
+ g_mutex_lock(&a->gate);
+ a->latency = latency; a->latency_override = true;
+ const bool live = a->rtc != NULL;
+ if (live) {
+  g_object_set(a->rtc, "latency", latency, NULL);
+  g_object_get(a->rtc, "latency", &latency, NULL);
+ }
+ g_mutex_unlock(&a->gate);
+ if (!live) return;
+ /* The jitterbuffers change at once; the sinks only delay by the new amount
+  * once the pipeline latency is distributed again. */
+ if (r->pipe) gst_bin_recalculate_latency(GST_BIN(r->pipe));
+ g_mutex_lock(&r->lock);
+ if (!r->quit && r->generation == generation) r->jitter_latency = (int)latency;
+ g_mutex_unlock(&r->lock);
+ blog(LOG_INFO, "[pixelview-whep] jitter buffer retuned to %u ms", latency);
+}
 static void stop_pipeline(struct receiver *r)
 {
  g_mutex_lock(&r->lock); r->accept_samples=false; g_mutex_unlock(&r->lock);
  if (r->attempt) {
-  g_mutex_lock(&r->attempt->gate); r->attempt->receiver = NULL; g_mutex_unlock(&r->attempt->gate);
+  /* webrtcbin's signal closures hold the attempt: drop its webrtcbin ref here,
+   * not when the attempt is freed, or neither is ever released. */
+  g_mutex_lock(&r->attempt->gate); r->attempt->receiver = NULL;
+  GstElement *rtc = r->attempt->rtc; r->attempt->rtc = NULL; g_mutex_unlock(&r->attempt->gate);
+  if (rtc) gst_object_unref(rtc);
   attempt_unref(r->attempt, NULL); r->attempt = NULL;
  }
  r->logged_latency = 0; r->late_window = 0;
@@ -690,7 +736,14 @@ static gpointer worker(gpointer opaque)
     g_mutex_unlock(&r->lock);
     if (failed) stop_pipeline(r);
    }
-  } else { g_mutex_unlock(&r->lock); }
+  } else {
+   const bool retune = r->latency_pending && r->pipe;
+   const guint latency = r->latency;
+   const uint64_t generation = r->generation;
+   if (retune) { r->latency_pending = false; r->active_latency = latency; r->active_latency_override = true; }
+   g_mutex_unlock(&r->lock);
+   if (retune) retune_latency(r, generation, latency);
+  }
   if (r->pipe) {
    GstBus *bus = gst_element_get_bus(r->pipe);
    GstMessage *msg = gst_bus_timed_pop_filtered(bus, 100 * GST_MSECOND, GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
@@ -737,6 +790,7 @@ static void *create(obs_data_t *settings, obs_source_t *source)
  proc_handler_t *ph = obs_source_get_proc_handler(source);
  proc_handler_add(ph, "void connect(string endpoint, int latency, string color)", connect_proc, r);
  proc_handler_add(ph, "void disconnect()", disconnect_proc, r);
+ proc_handler_add(ph, "void set_latency(int latency, out bool ok)", set_latency_proc, r);
  proc_handler_add(ph, "void get_status(out bool ready, out string state, out int frames, out int audio_frames, out int latency, out int jitter_latency, out string failure)", status_proc, r);
  r->thread = g_thread_new("pixelview-whep", worker, r);
  return r;

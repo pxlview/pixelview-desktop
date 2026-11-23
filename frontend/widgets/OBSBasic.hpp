@@ -58,6 +58,7 @@ class OBSAbout;
 #include <utility/PixelviewLogShipper.hpp>
 #include <utility/PixelviewLinkReport.hpp>
 #include <utility/PixelviewSystemLoad.hpp>
+#include <utility/PixelviewWatermark.hpp>
 class QTabBar;
 class QLineEdit;
 class QToolButton;
@@ -202,6 +203,8 @@ static inline void ClearProcessPriority()
 	do {                   \
 	} while (false)
 #endif
+
+class QTemporaryDir;
 
 class OBSBasic : public OBSMainWindow {
 	Q_OBJECT
@@ -351,16 +354,21 @@ private:
 	QLineEdit *pixelviewReceiveId = nullptr, *pixelviewReceivePassword = nullptr, *pixelviewReceiveName = nullptr;
 	QPushButton *pixelviewReceiveButton = nullptr;
 	QToolButton *pixelviewReceiveBuffer = nullptr;
-	int pixelviewReceiveBufferMs = 100;
+	int pixelviewReceiveBufferMs = 100; // Local setting, used when the server does not share its buffer.
+	static constexpr int PixelviewReceiveDefaultBufferMs = 100; // Local default, and the floor under the server's playback buffer.
+	int PixelviewReceiveBufferMs() const;
+	void RefreshPixelviewReceiveBuffer();
 	QLabel *pixelviewReceiveStatus = nullptr;
 	QLabel *pixelviewReceiveStorageStatus = nullptr;
 	OBSSource pixelviewReceiveSource, pixelviewSendOutput;
 	OBSScene pixelviewReceiveScene;
 	QTimer *pixelviewReceiveTimer = nullptr;
 	// Automatic reconnect after a media stall or end: a fresh WHEP session
-	// with backoff, until the operator stops receiving.
+	// with backoff, at most PixelviewReceiveMaxRetries times without fresh
+	// video (about 5 minutes), then the receive stops until Start receiving.
 	QTimer *pixelviewReceiveRetryTimer = nullptr;
 	int pixelviewReceiveRetries = 0;
+	static constexpr int PixelviewReceiveMaxRetries = 10;
 	void RetryPixelviewReceive();
 	void ShowPixelviewLicense(); // Pixelview modification, 2026-09-05: offline license dialog.
 	void ShowPixelviewAbout(); // Pixelview modification, 2026-09-14: version in About.
@@ -392,6 +400,20 @@ private:
 	quint64 pixelviewStateSeq = 0;
 	// Connection report pushed as DESKTOP_STATS (OBSBasic_PixelviewStats.inc).
 	void InitPixelviewStats();
+	// Session watermark burned in by the sender (OBSBasic_PixelviewWatermark.inc).
+	pixelview::WatermarkOverlay pixelviewWatermark;
+	QString pixelviewWatermarkLoaded, pixelviewWatermarkFetching;
+	quint64 pixelviewWatermarkFetchSeq = 0;
+	bool pixelviewWatermarkDeclared = false;
+	std::unique_ptr<QTemporaryDir> pixelviewWatermarkDir;
+	QTimer *pixelviewWatermarkRetry = nullptr;
+	void InitPixelviewWatermark();
+	void ShutdownPixelviewWatermark();
+	bool DeclarePixelviewWatermark();
+	void PixelviewWatermarkStarted();
+	void PixelviewWatermarkStopped();
+	void RefreshPixelviewWatermark();
+	void FetchPixelviewWatermark();
 	void PushPixelviewStats();
 	QTimer *pixelviewStatsTimer = nullptr;
 	pixelview::LinkReport pixelviewLinkReport;

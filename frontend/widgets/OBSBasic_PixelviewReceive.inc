@@ -151,7 +151,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	pixelviewReceivePassword->setObjectName(QStringLiteral("pixelviewReceivePassword"));
 	pixelviewReceiveName->setObjectName(QStringLiteral("pixelviewReceiveName"));
 	auto *config = App()->GetUserConfig();
-	config_set_default_int(config, "PixelviewReceive", "BufferMs", 100);
+	config_set_default_int(config, "PixelviewReceive", "BufferMs", PixelviewReceiveDefaultBufferMs);
 	pixelviewReceiveBufferMs = qBound(0, (int)config_get_int(config, "PixelviewReceive", "BufferMs"), 2000);
 	// Last DeckLink output rate; unset follows the sender rate until an output mode is started.
 	const uint64_t savedFPSNum = config_get_uint(config, "PixelviewReceive", "FPSNum");
@@ -318,30 +318,45 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	pixelviewReceiveButton->ensurePolished(); pixelviewReceiveButton->setFixedHeight(36);
 	connectionRows->addWidget(pixelviewReceiveButton);
 	connect(pixelviewReceiveButton, &QPushButton::clicked, this, [this] {
-		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else StartPixelviewReceive();
+		// Only an operator Start renews the reconnect budget; the retry timer
+		// also calls StartPixelviewReceive and must not.
+		if (pixelviewReceiveIntent) StopPixelviewReceive(true); else { pixelviewReceiveRetries = 0; StartPixelviewReceive(); }
 	});
 	auto *statusRow = new QHBoxLayout;
 	statusRow->setContentsMargins(0, 0, 0, 0); statusRow->setSpacing(8);
 	statusRow->addWidget(pixelviewReceiveStatus, 1);
 	pixelviewReceiveBuffer = new QToolButton(connection);
 	pixelviewReceiveBuffer->setObjectName(QStringLiteral("pixelviewReceiveBuffer"));
-	pixelviewReceiveBuffer->setText(QStringLiteral("Buffer: %1 ms").arg(pixelviewReceiveBufferMs));
 	pixelviewReceiveBuffer->setAutoRaise(true);
-	pixelviewReceiveBuffer->setToolTip(QStringLiteral("Change the WebRTC jitter buffer for the next connection."));
 	pixelviewReceiveBuffer->setStyleSheet(QStringLiteral("QToolButton { border: none; background: transparent; color: white; font-size: 11px; padding: 0; text-decoration: underline; }"));
 	connect(pixelviewReceiveBuffer, &QToolButton::clicked, this, [this] {
+		// While signed in to a server that shares its playback buffer, this is
+		// that setting: the backend stores it and tells admin and the engine.
+		const bool shared = pixelviewReceiver && pixelviewReceiver->playoutDelay() >= 0;
 		bool accepted = false;
 		const int value = QInputDialog::getInt(this, QStringLiteral("Receive buffer"),
-			QStringLiteral("Keep this at 100 ms normally. If you see glitches, try increasing it.\n\nJitter buffer (milliseconds):"),
-			pixelviewReceiveBufferMs, 0, 2000, 10, &accepted);
+			shared ? QStringLiteral("This is the server's playback buffer, shared with Pixelview admin. "
+						"Changing it applies to every viewer of this server.\n\n"
+						"0 turns it off. Pixelview Desktop never buffers less than %1 ms, so below that it uses %1 ms.\n\nPlayback buffer (milliseconds):").arg(PixelviewReceiveDefaultBufferMs) :
+				 QStringLiteral("Keep this at 100 ms normally. If you see glitches, try increasing it.\n\nJitter buffer (milliseconds):"),
+			shared ? pixelviewReceiver->playoutDelay() : pixelviewReceiveBufferMs, 0, pixelview::PixelviewReceiver::MaxPlayoutDelay, 10, &accepted);
 		if (!accepted) return;
+		if (shared) {
+			// Applied when the backend confirms with the stored value (onPlayoutDelay).
+			if (pixelviewReceiver && pixelviewReceiver->setPlayoutDelay(value))
+				blog(LOG_INFO, "[pixelview-receive] asked the server to set its playback buffer to %d ms", value);
+			else
+				QMessageBox::warning(this, QStringLiteral("Receive buffer"), QStringLiteral("Not connected to the server. The playback buffer was not changed."));
+			return;
+		}
 		pixelviewReceiveBufferMs = value;
-		pixelviewReceiveBuffer->setText(QStringLiteral("Buffer: %1 ms").arg(value));
+		RefreshPixelviewReceiveBuffer();
 		auto *config = App()->GetUserConfig();
 		config_set_int(config, "PixelviewReceive", "BufferMs", value);
 		config_save_safe(config, "tmp", nullptr);
 	});
 	statusRow->addWidget(pixelviewReceiveBuffer, 0, Qt::AlignTop);
+	RefreshPixelviewReceiveBuffer();
 	connectionRows->addLayout(statusRow);
 	connectionRows->addWidget(hardwareDivider);
 	connectionRows->addLayout(hdrRow);
@@ -349,6 +364,18 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 	rows->addStretch(1);
 	pixelviewReceiver = std::make_unique<pixelview::PixelviewReceiver>();
 	pixelviewReceiver->onStopped = [this] { DisconnectPixelviewReceiveMedia(); };
+	pixelviewReceiver->onPlayoutDelay = [this](int ms) {
+		blog(LOG_INFO, "[pixelview-receive] server playback buffer %d ms", ms);
+		if (isClosing() || pixelviewShutdownPending) return;
+		RefreshPixelviewReceiveBuffer(); RefreshPixelviewModes();
+		// A running receive retunes its jitter buffer in place; otherwise it
+		// applies when the media connects.
+		if (!pixelviewReceiveSource) return;
+		calldata_t data; calldata_init(&data);
+		calldata_set_int(&data, "latency", PixelviewReceiveBufferMs());
+		proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "set_latency", &data);
+		calldata_free(&data);
+	};
 	pixelviewReceiver->onKicked = [this](const QString &session) {
 		// Remember the kick locally so Start receiving refuses this session again.
 		// A plain user-config entry, deliberately only a deterrent: the server
@@ -374,6 +401,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		blog(LOG_INFO, "[pixelview-receive] receiver %s: %s", states[(int)pixelviewReceiver->state()],
 		     pixelviewReceiver->status().toUtf8().constData());
 		if (isClosing() || pixelviewShutdownPending) return;
+		RefreshPixelviewReceiveBuffer();
 		// The stopped session's late Idle must not cancel a pending reconnect.
 		if (pixelviewReceiveRetryTimer && pixelviewReceiveRetryTimer->isActive()) return;
 		using State = pixelview::PixelviewReceiver::State;
@@ -400,7 +428,7 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 		calldata_t data; calldata_init(&data);
 		PixelviewBindDeckLinkReceive(pixelviewReceiveSource, true);
 		calldata_set_string(&data, "endpoint", endpoint.toUtf8().constData());
-		calldata_set_int(&data, "latency", pixelviewReceiveBufferMs);
+		calldata_set_int(&data, "latency", PixelviewReceiveBufferMs());
 		calldata_set_string(&data, "color", pixelviewReceiveHdr == 1 ? "pq" : pixelviewReceiveHdr == 2 ? "hlg" : "sdr");
 		const bool accepted = proc_handler_call(obs_source_get_proc_handler(pixelviewReceiveSource), "connect", &data);
 		calldata_free(&data);
@@ -492,6 +520,30 @@ void OBSBasic::InitPixelviewReceive(QWidget *sidebar)
 
 	RefreshPixelviewReceiveHint();
 	RefreshPixelviewModes();
+}
+
+// While signed in to a server that shares it, the receive buffer is the
+// server's playback buffer, but never below the Desktop's 100 ms: off (0) and
+// smaller values leave too little time for reordering and retransmission.
+// Otherwise the local setting.
+int OBSBasic::PixelviewReceiveBufferMs() const
+{
+	const int server = pixelviewReceiver ? pixelviewReceiver->playoutDelay() : -1;
+	return server >= 0 ? std::max(server, PixelviewReceiveDefaultBufferMs) : pixelviewReceiveBufferMs;
+}
+
+void OBSBasic::RefreshPixelviewReceiveBuffer()
+{
+	if (!pixelviewReceiveBuffer) return;
+	const int server = pixelviewReceiver ? pixelviewReceiver->playoutDelay() : -1;
+	// Say when the Desktop's floor applies instead of the server's value.
+	pixelviewReceiveBuffer->setText(server == 0 ? QStringLiteral("Buffer: Off · %1 ms").arg(PixelviewReceiveDefaultBufferMs) :
+		server > 0 && server < PixelviewReceiveDefaultBufferMs ?
+		QStringLiteral("Buffer: %1 ms · server %2 ms").arg(PixelviewReceiveDefaultBufferMs).arg(server) :
+		QStringLiteral("Buffer: %1 ms").arg(PixelviewReceiveBufferMs()));
+	pixelviewReceiveBuffer->setToolTip(server >= 0 ?
+		QStringLiteral("The server's playback buffer, shared with Pixelview admin. Changing it here changes it for the whole server.") :
+		QStringLiteral("WebRTC jitter buffer. While receiving, it follows the server's playback buffer from Pixelview admin."));
 }
 
 void OBSBasic::RefreshPixelviewReceiveHint()
@@ -751,16 +803,26 @@ void OBSBasic::StartPixelviewReceive()
 
 // Tear the stalled session down and start a fresh one after a backoff
 // (2, 4, 8, then every 10 s). The intent stays set while waiting, so the button
-// reads Stop receiving (which cancels) and the mode stays locked.
+// reads Stop receiving (which cancels) and the mode stays locked. Only fresh
+// video or an operator Start resets the count, so a sender that stopped
+// streaming ends the receive after PixelviewReceiveMaxRetries attempts.
 void OBSBasic::RetryPixelviewReceive()
 {
 	StopPixelviewReceive(true);
 	if (!pixelviewReceiving || isClosing() || pixelviewShutdownPending || !pixelviewReceiveRetryTimer) return;
+	if (pixelviewReceiveRetries >= PixelviewReceiveMaxRetries) {
+		blog(LOG_WARNING, "[pixelview-receive] media stopped; giving up after %d reconnect attempts", pixelviewReceiveRetries);
+		SetPixelviewReceiveStatus(QStringLiteral("The sender stopped streaming. Gave up after %1 reconnect attempts. Click Start receiving to try again.")
+			.arg(pixelviewReceiveRetries), ReceiveStatusTone::Error);
+		return; // StopPixelviewReceive already released the mode lock and tray.
+	}
 	const int seconds = pixelviewReceiveRetries < 3 ? 2 << pixelviewReceiveRetries : 10;
 	++pixelviewReceiveRetries;
-	blog(LOG_WARNING, "[pixelview-receive] media stopped; reconnecting in %d s (attempt %d)", seconds, pixelviewReceiveRetries);
+	blog(LOG_WARNING, "[pixelview-receive] media stopped; reconnecting in %d s (attempt %d of %d)", seconds,
+	     pixelviewReceiveRetries, PixelviewReceiveMaxRetries);
 	pixelviewReceiveIntent = true;
-	SetPixelviewReceiveStatus(QStringLiteral("Stream interrupted. Reconnecting in %1 s…").arg(seconds), ReceiveStatusTone::Connecting);
+	SetPixelviewReceiveStatus(QStringLiteral("Stream interrupted. Reconnecting in %1 s (attempt %2 of %3)…")
+		.arg(seconds).arg(pixelviewReceiveRetries).arg(PixelviewReceiveMaxRetries), ReceiveStatusTone::Connecting);
 	pixelviewReceiveRetryTimer->start(seconds * 1000);
 	RefreshPixelviewModes();
 	RefreshPixelviewReceiveTray();
@@ -836,7 +898,9 @@ void OBSBasic::RefreshPixelviewModes()
 	pixelviewReceiveId->setEnabled(!busy);
 	pixelviewReceivePassword->setEnabled(!busy);
 	pixelviewReceiveName->setEnabled(!busy);
-	pixelviewReceiveBuffer->setEnabled(!busy);
+	// The server's shared buffer stays editable while receiving.
+	pixelviewReceiveBuffer->setEnabled(!busy || (!isClosing() && !pixelviewShutdownPending && pixelviewReceiver &&
+		pixelviewReceiver->state() == pixelview::PixelviewReceiver::State::Ready && pixelviewReceiver->playoutDelay() >= 0));
 	pixelviewReceiveHdrBox->setEnabled(!busy);
 	pixelviewReceiveHdrTransfer->setEnabled(!busy && pixelviewReceiveHdrBox->isChecked());
 	pixelviewReceiveHdrNitsBox->setEnabled(!busy && pixelviewReceiveHdrBox->isChecked());

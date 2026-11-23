@@ -1249,7 +1249,9 @@ double obs_property_list_item_float(obs_property_t *p, size_t idx)
 bool obs_property_list_item_bool(obs_property_t *p, size_t idx)
 {
 	struct list_data *data = get_list_fmt_data(p, OBS_COMBO_FORMAT_BOOL);
-	return (data && idx < data->items.num) ? data->items.array[idx].d : false;
+	/* Pixelview modification, 2026-11-23: bool items are stored in .b (add_item);
+	 * reading .d returned the union's double bytes and fails MSVC 19.52 (C4244). */
+	return (data && idx < data->items.num) ? data->items.array[idx].b : false;
 }
 
 enum obs_editable_list_type obs_property_editable_list_type(obs_property_t *p)
