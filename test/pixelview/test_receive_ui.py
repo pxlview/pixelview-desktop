@@ -84,13 +84,22 @@ class ReceiveUI(unittest.TestCase):
         init = body(text, 'InitPixelviewReceive')
         self.assertIn('QLineEdit::Password', init)
         self.assertIn('QSysInfo::machineHostName()', init)
-        self.assertIn('config_set_default_int(config, "PixelviewReceive", "BufferMs", 100)', init)
+        self.assertIn('config_set_default_int(config, "PixelviewReceive", "BufferMs", PixelviewReceiveDefaultBufferMs)', init)
+        self.assertIn('static constexpr int PixelviewReceiveDefaultBufferMs = 100;', (ROOT/'frontend/widgets/OBSBasic.hpp').read_text())
         self.assertIn('QInputDialog::getInt', init)
         self.assertIn('Keep this at 100 ms normally. If you see glitches, try increasing it.', init)
-        self.assertIn('QStringLiteral("Buffer: %1 ms").arg(pixelviewReceiveBufferMs)', init)
+        self.assertIn('RefreshPixelviewReceiveBuffer();', init)
+        buffer = body(text, 'RefreshPixelviewReceiveBuffer')
+        self.assertIn('QStringLiteral("Buffer: %1 ms").arg(PixelviewReceiveBufferMs())', buffer)
+        self.assertIn('QStringLiteral("Buffer: Off · %1 ms").arg(PixelviewReceiveDefaultBufferMs)', buffer)
+        # While signed in to a sharing server the buffer is the server's playback buffer.
+        self.assertIn('int OBSBasic::PixelviewReceiveBufferMs() const', text)
+        self.assertIn('server > 0 ? server : server == 0 ? PixelviewReceiveDefaultBufferMs : pixelviewReceiveBufferMs', text)
+        self.assertIn('pixelviewReceiver->setPlayoutDelay(value)', init)
+        self.assertIn('"set_latency"', init)
         self.assertNotIn('Buffer: %1 ms…', init)
         self.assertIn('color: white', init)
-        self.assertIn('calldata_set_int(&data, "latency", pixelviewReceiveBufferMs)', init)
+        self.assertIn('calldata_set_int(&data, "latency", PixelviewReceiveBufferMs())', init)
         self.assertNotIn('->start(', init)
         start = body(text, 'StartPixelviewReceive')
         self.assertLess(start.index('PixelviewModeBusy()'), start.index('->start('))
@@ -166,7 +175,11 @@ int main() {
 #include <cassert>
 static bool receiveModule=true;
 static bool PixelviewReceiveAvailable() { return receiveModule; }
+namespace pixelview { struct PixelviewReceiver {
+enum class State { Idle, Ready }; State current=State::Idle; int delay=-1;
+State state() const { return current; } int playoutDelay() const { return delay; } }; }
 class OBSBasic { public:
+std::unique_ptr<pixelview::PixelviewReceiver> pixelviewReceiver=std::make_unique<pixelview::PixelviewReceiver>();
 bool receive=false, busy=false, closing=false;
 QTabBar tabs; QWidget sending, receiving; QLineEdit id, password, name; QPushButton start; QToolButton buffer;
 QTabBar *pixelviewModeTabs=&tabs;
@@ -191,6 +204,13 @@ w.busy=true; w.pixelviewReceiveIntent=true; w.RefreshPixelviewModes();
 assert(!w.tabs.isEnabled() && !w.id.isEnabled() && !w.password.isEnabled() && !w.name.isEnabled());
 assert(!w.hdr.isEnabled() && !w.transfer.isEnabled() && !w.nits.isEnabled()); // HDR is fixed per connection.
 assert(w.start.isEnabled() && w.start.text()=="Stop receiving");
+// The buffer is locked while receiving unless it is the server's shared playback buffer.
+assert(!w.buffer.isEnabled());
+w.pixelviewReceiver->delay=0; w.RefreshPixelviewModes(); assert(!w.buffer.isEnabled()); // Not registered yet.
+w.pixelviewReceiver->current=pixelview::PixelviewReceiver::State::Ready; w.RefreshPixelviewModes(); assert(w.buffer.isEnabled());
+w.pixelviewReceiver->delay=-1; w.RefreshPixelviewModes(); assert(!w.buffer.isEnabled());
+w.pixelviewReceiver->delay=300; w.closing=true; w.RefreshPixelviewModes(); assert(!w.buffer.isEnabled());
+w.closing=false; w.pixelviewReceiver->delay=-1; w.pixelviewReceiver->current=pixelview::PixelviewReceiver::State::Idle;
 w.closing=true; w.RefreshPixelviewModes(); assert(!w.start.isEnabled());
 w.closing=false; w.busy=false; w.pixelviewReceiveIntent=false; w.RefreshPixelviewModes();
 assert(w.start.text()=="Start receiving" && w.id.isEnabled());

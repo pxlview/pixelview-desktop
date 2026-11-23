@@ -351,7 +351,10 @@ private:
 	QLineEdit *pixelviewReceiveId = nullptr, *pixelviewReceivePassword = nullptr, *pixelviewReceiveName = nullptr;
 	QPushButton *pixelviewReceiveButton = nullptr;
 	QToolButton *pixelviewReceiveBuffer = nullptr;
-	int pixelviewReceiveBufferMs = 100;
+	int pixelviewReceiveBufferMs = 100; // Local setting, used when the server does not share its buffer.
+	static constexpr int PixelviewReceiveDefaultBufferMs = 100; // When the server's playback buffer is off.
+	int PixelviewReceiveBufferMs() const;
+	void RefreshPixelviewReceiveBuffer();
 	QLabel *pixelviewReceiveStatus = nullptr;
 	QLabel *pixelviewReceiveStorageStatus = nullptr;
 	OBSSource pixelviewReceiveSource, pixelviewSendOutput;

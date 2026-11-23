@@ -40,7 +40,7 @@ PixelviewReceiver::PixelviewReceiver(QObject *parent, std::unique_ptr<ReceiverTr
 }
 PixelviewReceiver::~PixelviewReceiver()
 {
- onEndpoint={}; onStopped={}; onChanged={}; stop();
+ onEndpoint={}; onStopped={}; onChanged={}; onPlayoutDelay={}; stop();
 }
 void PixelviewReceiver::change(State s,const QString &v)
 {
@@ -108,6 +108,8 @@ void PixelviewReceiver::loginFinished(int code,const QByteArray &body)
  auto encoded=url.toEncoded(); if(!url.hasQuery()) encoded+='?'; else if(!url.query().isEmpty()) encoded+='&';
  encoded += "viewer_id="+QUrl::toPercentEncoding(viewerId); endpoint=QString::fromUtf8(encoded);
  viewerToken=token;
+ // Absent on backends that do not share the playback buffer.
+ if(o.contains("playout_delay_ms")) playoutDelayChanged(o["playout_delay_ms"]);
  auto ws=origin; ws.setScheme(origin.scheme()=="https" ? "wss" : "ws"); ws.setPath("/wsocket");
  ws.setQuery("token="+QString::fromLatin1(QUrl::toPercentEncoding(token)));
  deadline.start(15000);
@@ -135,6 +137,10 @@ void PixelviewReceiver::message(const QByteArray &body)
  }
  if(kind=="SOCKET_SESSION_DELETED") {fail("This session has ended. It was deleted or expired on Pixelview.");return;}
  if(kind=="SOCKET_TOKEN_EXPIRED" || kind=="SOCKET_TOKEN_INVALID") {disconnected(1008);return;}
+ if(kind=="SOCKET_PLAYOUT_DELAY") {
+  if(serverPlayoutDelay>=0) playoutDelayChanged(o["data"].toObject()["playout_delay_ms"]);
+  return;
+ }
  if(kind=="SOCKET_SEND_PING") {if(current==State::Ready) deadline.start(65000);send("PONG_RESPONSE"); return;}
  if(kind=="SOCKET_ADD_VIEWER_WEB" && current==State::Registering) {
   if(o["data"].toObject()["status"]!="success") {fail("Receiver registration rejected."); return;}
@@ -168,6 +174,7 @@ void PixelviewReceiver::clearAttempt(bool preserveMedia)
 void PixelviewReceiver::stop()
 {
  intent=false; clearAttempt(); sessionId.clear(); password.clear(); name.clear(); viewerId.clear(); viewerToken.clear(); retryCount=0;
+ serverPlayoutDelay=-1;
  change(State::Idle,"Not receiving.");
 }
 void PixelviewReceiver::fail(const QString &reason)
@@ -196,5 +203,19 @@ void PixelviewReceiver::disconnected(int code)
  if(!intent) return;
  change(State::Reconnecting,"Receiver disconnected. Reconnecting…");
  if(intent) retry.start(std::min(30000,1000 << std::min(retryCount++,5)));
+}
+void PixelviewReceiver::playoutDelayChanged(const QJsonValue &value)
+{
+ // Whole milliseconds in range only; anything else leaves the current value.
+ const double ms=value.toDouble(-1);
+ if(!value.isDouble() || ms!=double(int(ms)) || ms<0 || ms>MaxPlayoutDelay || int(ms)==serverPlayoutDelay) return;
+ serverPlayoutDelay=int(ms);
+ if(onPlayoutDelay) onPlayoutDelay(serverPlayoutDelay);
+}
+bool PixelviewReceiver::setPlayoutDelay(int ms)
+{
+ if(current!=State::Ready || serverPlayoutDelay<0 || ms<0 || ms>MaxPlayoutDelay) return false;
+ send("SET_PLAYOUT_DELAY",{{"playout_delay_ms",ms}});
+ return true;
 }
 }

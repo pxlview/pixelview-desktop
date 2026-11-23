@@ -5,6 +5,7 @@
 #include <QtCore/QThread>
 #include <cassert>
 #include <iostream>
+#include <vector>
 using namespace pixelview;
 struct Fake : ReceiverTransport {
  QUrl loginUrl, socketUrl; QByteArray loginBody, sent; Events events; int cancels=0;
@@ -127,6 +128,45 @@ int main(int argc,char **argv){
   wire->events.login(200,login);
   QThread::msleep(7100); // Do not dispatch the overdue timer before the ACK.
   wire->events.message(registered);assert(live.state()==PixelviewReceiver::State::Error && halts==2);
+ }
+ // Playback buffer shared with the server: login value, pushes, and changes sent back.
+ {
+  auto own=std::make_unique<Fake>();auto *wire=own.get();PixelviewReceiver shared(nullptr,std::move(own));
+  std::vector<int> seen;shared.onPlayoutDelay=[&](int ms){seen.push_back(ms);};
+  const QByteArray registered=R"({"mutation":"SOCKET_ADD_VIEWER_WEB","data":{"status":"success"}})";
+  // Backends that do not share it: no value, no pushes, nothing sent.
+  shared.start("s","p","n");
+  wire->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a?token=x"})");
+  wire->events.message(registered);
+  assert(shared.playoutDelay()==-1);
+  wire->events.message(R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":300}})");
+  assert(shared.playoutDelay()==-1 && seen.empty());
+  wire->sent.clear();assert(!shared.setPlayoutDelay(300) && wire->sent.isEmpty());
+  shared.stop();
+  // Sharing backends: the login value is known before registration completes.
+  shared.start("s","p","n");
+  wire->events.login(200,R"({"player":"WHEP","client_token":"t","stream_url":"https://engine.example/a?token=x","playout_delay_ms":0})");
+  assert(shared.playoutDelay()==0 && seen==std::vector<int>{0});
+  assert(!shared.setPlayoutDelay(200)); // Not registered yet.
+  wire->events.message(registered);
+  wire->events.message(R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"node_id":"n","playout_delay_ms":450}})");
+  assert(shared.playoutDelay()==450 && seen.back()==450);
+  for(const char *bad:{R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":-1}})",
+                       R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":2001}})",
+                       R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":12.5}})",
+                       R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":"300"}})",
+                       R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{}})",
+                       R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":450}})"})
+   wire->events.message(bad);
+  assert(shared.playoutDelay()==450 && seen.size()==2 && shared.state()==PixelviewReceiver::State::Ready);
+  assert(!shared.setPlayoutDelay(-1) && !shared.setPlayoutDelay(2001));
+  assert(shared.setPlayoutDelay(800));
+  auto request=QJsonDocument::fromJson(wire->sent).object();
+  assert(request["message"]=="SET_PLAYOUT_DELAY" && request["data"].toObject()["playout_delay_ms"]==800);
+  assert(shared.playoutDelay()==450); // Applied only once the backend confirms.
+  wire->events.message(R"({"mutation":"SOCKET_PLAYOUT_DELAY","data":{"playout_delay_ms":800}})");
+  assert(shared.playoutDelay()==800 && seen.back()==800);
+  shared.stop();assert(shared.playoutDelay()==-1);
  }
  std::cout<<"receiver native basic, recovery and security passed\n";
 }

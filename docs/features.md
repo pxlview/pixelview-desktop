@@ -615,9 +615,27 @@ An earlier backend handoff proposing receiver registration over the control sock
 
 ### Jitter buffer
 
-`PixelviewReceive/BufferMs` defaults to 100 ms and is passed explicitly on every `connect`. The
-**Buffer: N ms** link in the Receiving panel edits it (0-2000 ms, persisted, applied to the next
-connection). It is a jitter-buffer target, not measured end-to-end latency.
+The receive jitter buffer is passed explicitly on every `connect`. It is a jitter-buffer target,
+not measured end-to-end latency.
+
+- **Shared with the server.** Backends that share the node's playback buffer (`playout_delay_ms`,
+  0-2000 ms, 0 = off; the admin Server settings slider) return it from `/login/player` and push
+  changes as `SOCKET_PLAYOUT_DELAY`. While signed in to such a server the receiver uses it, with
+  off meaning the Desktop default of 100 ms, and the link reads **Buffer: N ms** or
+  **Buffer: Off · 100 ms**. The link stays editable while receiving; a change is sent as
+  `SET_PLAYOUT_DELAY` on the viewer socket and only applied when the backend answers with the
+  stored value, so admin, the engine, this receiver and any other Desktop receiver on the server
+  agree. Backend protocol: `docs/playback-buffer.md` in the backend repository.
+- **Live retune.** A change during a receive goes to the source's `set_latency` proc. The WHEP
+  worker sets webrtcbin's `latency` (passed on to both jitterbuffers) and recalculates the
+  pipeline latency, without reconnecting.
+- **Local fallback.** Before signing in, and with backends that do not share it,
+  `PixelviewReceive/BufferMs` (default 100 ms, persisted) applies to the next connection and the
+  link edits that value. The server value is never written to it.
+- **Verified (2026-10-12):** receiver protocol unit tests (`receiver_native.cpp`), UI contract
+  (`test_receive_ui.py`), and the WHEP loopback matrix, where every playing case retunes 50 → 300 ms
+  live (sink latency 103 → 353 ms, frames keep flowing). **Not run:** the app against a backend
+  that shares the buffer, audio/video sync right after a live retune, and a real admin round trip.
 
 ### Canvas precision
 
