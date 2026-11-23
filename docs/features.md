@@ -164,6 +164,17 @@ behaviour is:
   whereas the engine overlays the PNG's code values directly onto the PQ/HLG signal (full white),
   and OBS blends in linear light where the engine blends Y'CbCr code values, so a partly
   transparent watermark looks somewhat brighter over dark picture than the engine's.
+- Verified 2026-11-23 in the signed app with the watermark on: a paired sender instance on the
+  built-in colour bars, driven through the control route, streaming to a local pv-engine (`main`
+  plus pxlview/pv-engine#70) and a receiving app instance, against the pentest backend with
+  pxlview/pixelview-backend-v4#278 and #310. HEVC Main, Main10, Main 4:2:2 10 and Main 4:4:4 10
+  in SDR; Main10, 4:2:2 10 and 4:4:4 10 in PQ and HLG; 4:2:2 10 and 4:4:4 10 in P3 Desktop; and
+  H.264 (VideoToolbox and x264) in SDR: 14/14 reached the receiver as passthrough (no VP9) with no
+  stall, the engine acknowledged the sender watermark on every ingest, and its thumbnail and the
+  receiving app show the watermark once. **Not run:** SDI capture into the sender (the 4K Mini
+  output was held by another application), any SDI output measurement, the engine without #70,
+  and production. The pentest backend cannot render the watermark PNG (its font download is
+  blocked), so that run used a local copy of the font.
 
 ### Admin remote control
 
